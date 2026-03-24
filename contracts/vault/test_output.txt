@@ -1,0 +1,50 @@
+cargo :     Finished 
+`test` profile 
+[unoptimized + 
+debuginfo] target(s) in 
+2.27s
+At line:1 char:1
++ cargo test --color 
+never 2>&1 | Out-File 
+test_output.txt 
+-Encoding as ...
++ ~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~
+    + CategoryInfo      
+        : NotSpecified  
+  : (    Finished `t.   
+ ..get(s) in 2.27s:S    
+tring) [], RemoteEx    
+ception
+    + FullyQualifiedErr 
+   orId : NativeComman  
+  dError
+ 
+     Running unittests 
+src\lib.rs (C:\Users\ADM
+IN\Desktop\mide-drips\Yi
+eldVault-RWA\target\debu
+g\deps\vault-70e72a31918
+9ba8a.exe)
+
+running 2 tests
+test test::test_deposit_invalid_amount ... ok
+test test::test_vault_flow ... FAILED
+
+failures:
+
+---- test::test_vault_flow stdout ----
+
+thread 'test::test_vault_flow' (7592) panicked at contracts\vault\src\test.rs:45:5:
+No events recorded!
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Writing test snapshot file for test "test::test_vault_flow" to "test_snapshots\\test\\test_vault_flow.1.json".
+
+
+failures:
+    test::test_vault_flow
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+error: test failed, to 
+rerun pass `--lib`

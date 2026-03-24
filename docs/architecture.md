@@ -22,11 +22,25 @@ graph TD
     E --> F[Stellar Network]
 ```
 
-### 3.2 Smart Contract Architecture (Phase 2)
+### 3.2 Smart Contract Architecture (Phase 2+)
 1. **Vault Contract:** 
    - State: Tracks total deposits, total shares, and current strategy allocation.
    - Core Functions: `deposit(user, amount)`, `withdraw(user, shares)`, `distribute_yield()`.
-2. **Strategy Interfaces (Future):** Bridges connecting the Vault to specific RWA issuers on Stellar (e.g., Franklin Templeton's BENJI, or localized bond tokens).
+2. **Governance Module (Basic DAO):**
+   - Proposal lifecycle for strategy updates.
+   - Weighted voting with quorum threshold.
+   - On-chain execution to set active strategy connector.
+3. **Strategy Connector (BENJI):**
+   - Configurable strategy address set through governance.
+   - `report_benji_yield(strategy, amount)` callback for harvesting strategy yield into vault assets.
+   - Provides a minimal integration boundary for expanding to other RWA issuers.
+
+### 3.3 Custom Soroban RPC Configuration
+- Frontend reads RPC settings from environment variables:
+  - `VITE_SOROBAN_RPC_URL`
+  - `VITE_STELLAR_NETWORK_PASSPHRASE`
+  - `VITE_VAULT_CONTRACT_ID`
+- Default testnet RPC is used when no custom endpoint is provided.
 
 ## 4. User Flow (Deposit)
 1. User navigates to the Vault Frontend.

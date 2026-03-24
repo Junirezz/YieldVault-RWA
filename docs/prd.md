@@ -24,9 +24,11 @@ YieldVault - Stellar RWA provides a user-friendly decentralized application (dAp
 ### Phase 2: Soroban Smart Contracts
 - **Vault Contract:** Accepts USDC deposits, mints/burns YieldVault shares (yvUSDC) representing the user's fractional ownership of the vault.
 - **Admin Controls:** Ability for multi-sig (or DAO) to reallocate vault funds into specific Stellar-based RWA platforms.
+- **Basic DAO Framework:** Proposal, voting, and execution flow for strategy updates.
+- **BENJI Connector:** Initial strategy integration path for Franklin Templeton BENJI yield reporting.
 
 ### Phase 3 & 4: Integration & Mainnet
-- Full integration with Soroban RPC.
+- Full integration with Soroban RPC, including custom node endpoint configuration.
 - Audit readiness and mainnet deployment.
 
 ## 6. Success Metrics (Phase 1)

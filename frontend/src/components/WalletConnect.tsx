@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { isAllowed, setAllowed, getAddress } from '@stellar/freighter-api';
 import { Wallet, LogOut, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { hasCustomRpcConfig, networkConfig } from '../config/network';
 
 interface WalletConnectProps {
     walletAddress: string | null;
@@ -42,7 +43,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
             } else {
                 setError("Could not retrieve public key.");
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error(e);
             setError("Failed to connect to Freighter. Ensure the extension is installed and unlocked.");
         } finally {
@@ -76,6 +77,20 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
                     <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--accent-cyan)', boxShadow: '0 0 8px var(--accent-cyan)' }} />
                     <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>{formatAddress(walletAddress)}</span>
                 </div>
+                <div
+                    className="glass-panel"
+                    style={{
+                        padding: '8px 12px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-glass)',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-secondary)',
+                        maxWidth: '260px'
+                    }}
+                    title={networkConfig.rpcUrl}
+                >
+                    RPC: {hasCustomRpcConfig ? 'Custom' : 'Default'}
+                </div>
                 <button className="btn btn-outline" style={{ padding: '8px', borderRadius: '50%' }} onClick={onDisconnect} aria-label="Disconnect Wallet">
                     <LogOut size={18} />
                 </button>
@@ -94,7 +109,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
                 {isConnecting ? 'Connecting...' : 'Connect Freighter'}
             </button>
             {error && (
-                <div style={{ position: 'absolute', top: '100%', right: '0', marginTop: '8px', background: 'rgba(255, 50, 50, 0.1)', color: '#ff6b6b', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', whiteSpace: 'nowrap', border: '1px solid rgba(255, 50, 50, 0.2)' }}>
+                <div style={{ position: 'absolute', top: '100%', right: '0', marginTop: '8px', background: 'var(--bg-error)', color: 'var(--text-error)', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', whiteSpace: 'nowrap', border: '1px solid var(--border-error)' }}>
                     {error}
                 </div>
             )}

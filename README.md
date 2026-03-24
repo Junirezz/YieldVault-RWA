@@ -36,6 +36,36 @@ npm run dev
 
 Navigate to `http://localhost:5173` to interact with the local UI.
 
+### 3. Custom Soroban RPC Configuration
+
+Create a frontend environment file from the example:
+
+```bash
+cd frontend
+cp .env.example .env
+```
+
+Set:
+
+- `VITE_SOROBAN_RPC_URL` (custom RPC endpoint, optional)
+- `VITE_STELLAR_NETWORK_PASSPHRASE` (network passphrase)
+- `VITE_VAULT_CONTRACT_ID` (deployed vault contract ID)
+
+If `VITE_SOROBAN_RPC_URL` is not set, the app defaults to Stellar testnet RPC.
+
+## API Documentation
+
+Generate contract and frontend API docs:
+
+```bash
+cargo doc -p vault --no-deps
+cd frontend
+npm install
+npm run docs:api
+```
+
+See `docs/api/README.md` for output locations.
+
 ## Roadmap (Phases)
 - **Phase 1**: Planning, Documentation, and Frontend UI Baseline (Completed)
 - **Phase 2**: Soroban Smart Contract Implementation in Rust (Completed)

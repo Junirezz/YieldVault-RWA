@@ -1,7 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap');
 
 :root {
-  --bg-dark: #0a0b10;
+  /* Default Dark Mode */
+  --bg-main: #0a0b10;
   --bg-surface: rgba(18, 20, 29, 0.6);
   --bg-surface-hover: rgba(28, 30, 40, 0.8);
   --border-glass: rgba(255, 255, 255, 0.08);
@@ -25,6 +26,45 @@
   --radius-md: 12px;
   --radius-lg: 20px;
   --radius-xl: 32px;
+
+  --bg-gradient-1: rgba(112, 0, 255, 0.08);
+  --bg-gradient-2: rgba(0, 240, 255, 0.05);
+
+  --bg-overlay: rgba(10, 11, 16, 0.8);
+  --bg-muted: rgba(0, 0, 0, 0.2);
+
+  --bg-error: rgba(255, 50, 50, 0.1);
+  --text-error: #ff6b6b;
+  --border-error: rgba(255, 50, 50, 0.2);
+}
+
+[data-theme='light'] {
+  --bg-main: #f8fafc;
+  --bg-surface: rgba(255, 255, 255, 0.75);
+  --bg-surface-hover: rgba(255, 255, 255, 0.95);
+  --border-glass: rgba(0, 0, 0, 0.08);
+  --border-glass-glow: rgba(0, 136, 204, 0.2);
+  
+  --accent-cyan: #0284c7;
+  --accent-cyan-dim: rgba(2, 132, 199, 0.1);
+  --accent-purple: #7e22ce;
+  
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+
+  --shadow-glow: 0 0 20px rgba(2, 132, 199, 0.1);
+  --shadow-glass: 0 8px 32px 0 rgba(15, 23, 42, 0.1);
+
+  --bg-gradient-1: rgba(126, 34, 206, 0.04);
+  --bg-gradient-2: rgba(2, 132, 199, 0.03);
+
+  --bg-overlay: rgba(255, 255, 255, 0.8);
+  --bg-muted: rgba(0, 0, 0, 0.05);
+
+  --bg-error: rgba(239, 68, 68, 0.1);
+  --text-error: #dc2626;
+  --border-error: rgba(239, 68, 68, 0.2);
 }
 
 * {
@@ -35,15 +75,16 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--bg-dark);
+  background-color: var(--bg-main);
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
   line-height: 1.5;
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(112, 0, 255, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 85% 30%, rgba(0, 240, 255, 0.05) 0%, transparent 50%);
+    radial-gradient(circle at 15% 50%, var(--bg-gradient-1) 0%, transparent 50%),
+    radial-gradient(circle at 85% 30%, var(--bg-gradient-2) 0%, transparent 50%);
   background-attachment: fixed;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 h1, h2, h3, h4, h5, h6 {
