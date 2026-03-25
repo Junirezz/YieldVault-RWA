@@ -1,65 +1,134 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+import type { ApiError } from "../lib/api";
+import { normalizeApiError, subscribeToApiTelemetry } from "../lib/api";
+import { getVaultSummary, type VaultSummary } from "../lib/vaultApi";
+import { networkConfig } from "../config/network";
 
 interface VaultContextType {
-    tvl: number;
-    apy: number;
-    formattedTvl: string;
-    formattedApy: string;
-    lastUpdate: Date;
+  summary: VaultSummary;
+  tvl: number;
+  apy: number;
+  formattedTvl: string;
+  formattedApy: string;
+  lastUpdate: Date;
+  isLoading: boolean;
+  error: ApiError | null;
+  refresh: () => Promise<void>;
 }
+
+const DEFAULT_SUMMARY: VaultSummary = {
+  tvl: 12450800,
+  apy: 8.45,
+  participantCount: 1248,
+  monthlyGrowthPct: 12.5,
+  strategyStabilityPct: 99.9,
+  assetLabel: "Sovereign Debt",
+  exchangeRate: 1.084,
+  networkFeeEstimate: "~0.00001 XLM",
+  updatedAt: "2026-03-25T10:00:00.000Z",
+  strategy: {
+    id: "stellar-benji",
+    name: "Franklin BENJI Connector",
+    issuer: "Franklin Templeton",
+    network: "Stellar",
+    rpcUrl: networkConfig.rpcUrl,
+    status: "active",
+    description:
+      "Connector strategy that routes vault yield updates from BENJI-issued tokenized money market exposure on Stellar.",
+  },
+};
 
 const VaultContext = createContext<VaultContextType | undefined>(undefined);
 
-const BASE_TVL = 12450800;
-const BASE_APY = 8.45;
+export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [summary, setSummary] = useState(DEFAULT_SUMMARY);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [lastUpdate, setLastUpdate] = useState(
+    new Date(DEFAULT_SUMMARY.updatedAt),
+  );
 
-export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [tvl, setTvl] = useState(BASE_TVL);
-    const [apy, setApy] = useState(BASE_APY);
-    const [lastUpdate, setLastUpdate] = useState(new Date());
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
 
-    useEffect(() => {
-        const interval = setInterval(() => {
-            // Simulate TVL fluctuation (between -500 and +1000)
-            const fluctuation = (Math.random() * 1500) - 500;
-            setTvl(prev => {
-                const next = prev + fluctuation;
-                // Keep it within a reasonable range of BASE_TVL
-                if (next < BASE_TVL * 0.95 || next > BASE_TVL * 1.05) return prev;
-                return next;
-            });
+    try {
+      const nextSummary = await getVaultSummary();
+      setSummary({
+        ...nextSummary,
+        strategy: {
+          ...nextSummary.strategy,
+          rpcUrl: networkConfig.rpcUrl,
+        },
+      });
+      setLastUpdate(new Date(nextSummary.updatedAt));
+      setError(null);
+    } catch (unknownError) {
+      setError(normalizeApiError(unknownError));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-            // Simulate minor APY fluctuation (+/- 0.01)
-            setApy(prev => {
-                const next = prev + (Math.random() * 0.02 - 0.01);
-                return Math.max(5, Math.min(15, next));
-            });
+  useEffect(() => {
+    void refresh();
 
-            setLastUpdate(new Date());
-        }, 5000); // Update every 5 seconds
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 30000);
 
-        return () => clearInterval(interval);
-    }, []);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
 
-    const formattedTvl = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        maximumFractionDigits: 0
-    }).format(tvl);
+  useEffect(() => {
+    const unsubscribe = subscribeToApiTelemetry((event) => {
+      if (event.type === "error") {
+        console.error("[api]", event.error);
+      }
+    });
 
-    const formattedApy = `${apy.toFixed(2)}%`;
+    return unsubscribe;
+  }, []);
 
-    return (
-        <VaultContext.Provider value={{ tvl, apy, formattedTvl, formattedApy, lastUpdate }}>
-            {children}
-        </VaultContext.Provider>
-    );
+  const formattedTvl = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(summary.tvl);
+
+  const formattedApy = `${summary.apy.toFixed(2)}%`;
+
+  return (
+    <VaultContext.Provider
+      value={{
+        summary,
+        tvl: summary.tvl,
+        apy: summary.apy,
+        formattedTvl,
+        formattedApy,
+        lastUpdate,
+        isLoading,
+        error,
+        refresh,
+      }}
+    >
+      {children}
+    </VaultContext.Provider>
+  );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useVault = () => {
-    const context = useContext(VaultContext);
-    if (!context) {
-        throw new Error('useVault must be used within a VaultProvider');
-    }
-    return context;
+  const context = useContext(VaultContext);
+  if (!context) {
+    throw new Error("useVault must be used within a VaultProvider");
+  }
+  return context;
 };

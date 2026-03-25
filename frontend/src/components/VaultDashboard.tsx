@@ -1,34 +1,50 @@
-import { useState } from 'react';
-import { TrendingUp, ShieldCheck, Wallet as WalletIcon, Activity } from 'lucide-react';
-import { benjiStrategy } from '../lib/strategy';
-import { hasCustomRpcConfig, networkConfig } from '../config/network';
-import { useVault } from '../context/VaultContext';
+import { useState } from "react";
+import { Activity, ShieldCheck, TrendingUp, Wallet as WalletIcon } from "./icons";
+import { hasCustomRpcConfig, networkConfig } from "../config/network";
+import { useVault } from "../context/VaultContext";
+import ApiStatusBanner from "./ApiStatusBanner";
+import { useToast } from "../context/ToastContext";
 
 interface VaultDashboardProps {
-    walletAddress: string | null;
+  walletAddress: string | null;
 }
 
 const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
-    const { formattedTvl, formattedApy } = useVault();
-    const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
-    const [amount, setAmount] = useState('');
+    const { formattedTvl, formattedApy, summary, error, isLoading } = useVault();
+    const toast = useToast();
+    const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
+    const [amount, setAmount] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
-    const [fakeBalance, setFakeBalance] = useState(1250.50);
+    const [fakeBalance, setFakeBalance] = useState(1250.5);
 
     const yieldRate = formattedApy;
     const tvl = formattedTvl;
+    const strategy = summary.strategy;
 
     const handleTransaction = () => {
-        if (!walletAddress || !amount || isNaN(Number(amount))) return;
+        if (!walletAddress || !amount || isNaN(Number(amount))) {
+            toast.warning({
+                title: "Enter a valid amount",
+                description: "Choose a wallet and amount before submitting the transaction.",
+            });
+            return;
+        }
         setIsProcessing(true);
 
         // Simulate transaction delay
         setTimeout(() => {
             const value = Number(amount);
-            if (activeTab === 'deposit') setFakeBalance(prev => prev + value);
-            if (activeTab === 'withdraw') setFakeBalance(prev => Math.max(0, prev - value));
-            setAmount('');
+            if (activeTab === "deposit") setFakeBalance(prev => prev + value);
+            if (activeTab === "withdraw") setFakeBalance(prev => Math.max(0, prev - value));
+            setAmount("");
             setIsProcessing(false);
+            toast.success({
+                title: activeTab === "deposit" ? "Deposit queued" : "Withdrawal queued",
+                description:
+                    activeTab === "deposit"
+                        ? `${value.toFixed(2)} USDC has been added to your pending vault activity.`
+                        : `${value.toFixed(2)} USDC has been added to your pending withdrawal activity.`,
+            });
         }, 2000);
     };
 
@@ -38,6 +54,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
             <div style={{ flex: '1 1 500px' }} className="flex flex-col gap-lg">
 
                 <div className="glass-panel" style={{ padding: '32px' }}>
+                    {error && <ApiStatusBanner error={error} />}
+
                     <div className="flex justify-between items-center" style={{ marginBottom: '24px' }}>
                         <div>
                             <h2 style={{ fontSize: '1.5rem', marginBottom: '4px' }}>Global RWA Yield Fund</h2>
@@ -60,8 +78,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                             <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 Total Value Locked
                                 <span className="flex items-center gap-xs" style={{ color: 'var(--accent-cyan)', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    <Activity size={10} className="animate-pulse" />
-                                    Live
+                                    <Activity size={10} className={isLoading ? "animate-pulse" : undefined} />
+                                    {isLoading ? "Syncing" : "Live"}
                                 </span>
                             </div>
                             <div style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)', fontWeight: 600 }}>{tvl}</div>
@@ -70,7 +88,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                             <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '4px' }}>Underlying Asset</div>
                             <div className="flex items-center gap-sm">
                                 <ShieldCheck size={16} color="var(--accent-cyan)" />
-                                <span style={{ fontSize: '1.1rem', fontWeight: 500 }}>Sovereign Debt</span>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 500 }}>{summary.assetLabel}</span>
                             </div>
                         </div>
                     </div>
@@ -85,7 +103,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                             Yields are algorithmically harvested and auto-compounded daily into the vault token price.
                         </p>
                         <div style={{ marginTop: '12px', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
-                            Strategy: <span style={{ color: 'var(--text-primary)' }}>{benjiStrategy.name}</span> ({benjiStrategy.issuer})
+                            Strategy: <span style={{ color: 'var(--text-primary)' }}>{strategy.name}</span> ({strategy.issuer})
                         </div>
                         <div style={{ marginTop: '8px', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
                             RPC: {hasCustomRpcConfig ? 'Custom' : 'Default'} - {networkConfig.rpcUrl}
@@ -204,19 +222,21 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                     </div>
 
                     <div className="glass-panel" style={{ padding: '16px', background: 'var(--bg-muted)', marginBottom: '24px' }}>
-                        <div className="flex justify-between items-center" style={{ marginBottom: '8px' }}>
-                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Exchange Rate</span>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>1 yvUSDC = 1.084 USDC</span>
-                        </div>
                         <div className="flex justify-between items-center">
-                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Network Fee</span>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>~0.00001 XLM</span>
-                        </div>
-                        <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
                             <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>BENJI Strategy</span>
                             <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
-                                {benjiStrategy.status === 'active' ? 'Active' : 'Inactive'}
+                                {strategy.status === 'active' ? 'Active' : 'Inactive'}
                             </span>
+                        </div>
+                        <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Exchange Rate</span>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                                1 yvUSDC = {summary.exchangeRate.toFixed(3)} USDC
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Network Fee</span>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{summary.networkFeeEstimate}</span>
                         </div>
                     </div>
 

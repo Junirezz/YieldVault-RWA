@@ -1,0 +1,20 @@
+{
+  "tvl": 12450800,
+  "apy": 8.45,
+  "participantCount": 1248,
+  "monthlyGrowthPct": 12.5,
+  "strategyStabilityPct": 99.9,
+  "assetLabel": "Sovereign Debt",
+  "exchangeRate": 1.084,
+  "networkFeeEstimate": "~0.00001 XLM",
+  "updatedAt": "2026-03-25T10:00:00.000Z",
+  "strategy": {
+    "id": "stellar-benji",
+    "name": "Franklin BENJI Connector",
+    "issuer": "Franklin Templeton",
+    "network": "Stellar",
+    "rpcUrl": "https://soroban-testnet.stellar.org",
+    "status": "active",
+    "description": "Connector strategy that routes vault yield updates from BENJI-issued tokenized money market exposure on Stellar."
+  }
+}

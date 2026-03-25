@@ -1,0 +1,9 @@
+{
+  "network": "testnet",
+  "deployed_at": "",
+  "identity": "",
+  "contracts": {
+    "vault": "",
+    "mock_korean_strategy": ""
+  }
+}

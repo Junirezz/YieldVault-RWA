@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { isAllowed, setAllowed, getAddress } from '@stellar/freighter-api';
-import { Wallet, LogOut, Loader2 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Loader2, LogOut, Wallet } from './icons';
 import { hasCustomRpcConfig, networkConfig } from '../config/network';
+import { useToast } from '../context/ToastContext';
 
 interface WalletConnectProps {
     walletAddress: string | null;
@@ -12,12 +12,13 @@ interface WalletConnectProps {
 
 const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect, onDisconnect }) => {
     const [isConnecting, setIsConnecting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const toast = useToast();
 
     useEffect(() => {
         const checkConnection = async () => {
             try {
-                if (await isAllowed()) {
+                const allowed = await isAllowed();
+                if (allowed.isAllowed) {
                     const userInfo = await getAddress();
                     if (userInfo.address) {
                         onConnect(userInfo.address);
@@ -32,20 +33,30 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
 
     const handleConnect = async () => {
         setIsConnecting(true);
-        setError(null);
         try {
             await setAllowed();
-            if (await isAllowed()) {
+            const allowed = await isAllowed();
+            if (allowed.isAllowed) {
                 const userInfo = await getAddress();
                 if (userInfo.address) {
                     onConnect(userInfo.address);
+                    toast.success({
+                        title: "Wallet connected",
+                        description: "Freighter is now connected to your YieldVault session.",
+                    });
                 }
             } else {
-                setError("Could not retrieve public key.");
+                toast.warning({
+                    title: "Wallet permission required",
+                    description: "Freighter did not return a public key for this session.",
+                });
             }
         } catch (e: unknown) {
             console.error(e);
-            setError("Failed to connect to Freighter. Ensure the extension is installed and unlocked.");
+            toast.error({
+                title: "Wallet connection failed",
+                description: "Ensure Freighter is installed, unlocked, and approved for this site.",
+            });
         } finally {
             setIsConnecting(false);
         }
@@ -57,11 +68,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
 
     if (walletAddress) {
         return (
-            <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-md"
-            >
+            <div className="wallet-status flex items-center gap-md">
                 <div
                     className="glass-panel"
                     style={{
@@ -91,10 +98,21 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
                 >
                     RPC: {hasCustomRpcConfig ? 'Custom' : 'Default'}
                 </div>
-                <button className="btn btn-outline" style={{ padding: '8px', borderRadius: '50%' }} onClick={onDisconnect} aria-label="Disconnect Wallet">
+                <button
+                    className="btn btn-outline"
+                    style={{ padding: '8px', borderRadius: '50%' }}
+                    onClick={() => {
+                        onDisconnect();
+                        toast.info({
+                            title: "Wallet disconnected",
+                            description: "You can reconnect any time to continue managing vault positions.",
+                        });
+                    }}
+                    aria-label="Disconnect Wallet"
+                >
                     <LogOut size={18} />
                 </button>
-            </motion.div>
+            </div>
         );
     }
 
@@ -108,11 +126,6 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
                 {isConnecting ? <Loader2 size={18} className="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Wallet size={18} />}
                 {isConnecting ? 'Connecting...' : 'Connect Freighter'}
             </button>
-            {error && (
-                <div style={{ position: 'absolute', top: '100%', right: '0', marginTop: '8px', background: 'var(--bg-error)', color: 'var(--text-error)', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', whiteSpace: 'nowrap', border: '1px solid var(--border-error)' }}>
-                    {error}
-                </div>
-            )}
             <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}</style>
