@@ -1,10 +1,16 @@
-import { useState, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from './context/ThemeContext';
-import { ToastProvider } from './context/ToastContext';
-import { VaultProvider } from './context/VaultContext';
-import Navbar from './components/Navbar';
-import './index.css';
+import { useEffect, useState, lazy, Suspense } from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { ThemeProvider } from "./context/ThemeContext";
+import { ToastProvider } from "./context/ToastContext";
+import { VaultProvider } from "./context/VaultContext";
+import Navbar from "./components/Navbar";
+import "./index.css";
+import { fetchUsdcBalance } from "./lib/stellarAccount";
 
 // Lazy load route components for code splitting
 const Home = lazy(() => import('./pages/Home'));
@@ -31,6 +37,7 @@ const LoadingPage = () => (
 
 function App() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [usdcBalance, setUsdcBalance] = useState(0);
 
   const handleConnect = async (address: string) => {
     setWalletAddress(address);
@@ -38,7 +45,26 @@ function App() {
 
   const handleDisconnect = () => {
     setWalletAddress(null);
+    setUsdcBalance(0);
   };
+
+  useEffect(() => {
+    const loadBalance = async () => {
+      if (!walletAddress) {
+        setUsdcBalance(0);
+        return;
+      }
+
+      try {
+        const discoveredBalance = await fetchUsdcBalance(walletAddress);
+        setUsdcBalance(discoveredBalance);
+      } catch {
+        setUsdcBalance(0);
+      }
+    };
+
+    loadBalance();
+  }, [walletAddress]);
 
   return (
     <ThemeProvider>
@@ -51,10 +77,13 @@ function App() {
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
               />
-              <main className="container" style={{ marginTop: '100px', paddingBottom: '60px' }}>
+              <main className="container app-main">
                 <Suspense fallback={<LoadingPage />}>
                   <Routes>
-                    <Route path="/" element={<Home walletAddress={walletAddress} />} />
+                    <Route
+                      path="/"
+                      element={<Home walletAddress={walletAddress} usdcBalance={usdcBalance} />}
+                    />
                     <Route path="/portfolio" element={<Portfolio walletAddress={walletAddress} />} />
                     <Route path="/analytics" element={<Analytics />} />
                     <Route path="*" element={<Navigate to="/" replace />} />

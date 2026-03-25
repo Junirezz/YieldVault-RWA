@@ -7,11 +7,11 @@ const Analytics: React.FC = () => {
     const { formattedTvl, summary, error, isLoading } = useVault();
 
     return (
-        <div className="glass-panel" style={{ padding: '32px' }}>
+        <div className="glass-panel panel-padding-mobile" style={{ padding: '32px' }}>
             {error && <ApiStatusBanner error={error} />}
 
             <header style={{ textAlign: 'center', marginBottom: '48px' }}>
-                <h1 style={{ fontSize: '2.5rem', marginBottom: '16px' }}>
+                <h1 className="section-title" style={{ marginBottom: '16px' }}>
                     <span className="text-gradient">Project Analytics</span>
                 </h1>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem' }}>

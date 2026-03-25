@@ -424,6 +424,76 @@ button {
   animation: wallet-slide-in 180ms ease-out;
 }
 
+.navbar-shell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.navbar-links {
+  display: flex;
+  gap: 24px;
+}
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.mobile-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.mobile-nav-panel {
+  display: none;
+}
+
+.mobile-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-nav-links a {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.mobile-nav-links .active {
+  color: var(--accent-cyan);
+}
+
+.mobile-nav-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-main {
+  margin-top: 100px;
+  padding-bottom: 60px;
+}
+
+.home-hero-title {
+  font-size: clamp(2rem, 7vw, 3.5rem);
+  line-height: 1.1;
+}
+
+.section-title {
+  font-size: clamp(1.8rem, 5vw, 2.5rem);
+}
+
 .toast-viewport {
   position: fixed;
   top: 20px;
@@ -502,6 +572,59 @@ button {
 }
 
 @media (max-width: 768px) {
+  .container {
+    padding: 0 16px;
+  }
+
+  .glass-panel {
+    border-radius: 16px;
+  }
+
+  .app-main {
+    margin-top: 84px;
+    padding-bottom: 36px;
+  }
+
+  .navbar-links,
+  .navbar-actions {
+    display: none;
+  }
+
+  .mobile-nav-toggle {
+    display: inline-flex;
+  }
+
+  .mobile-nav-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 0 16px 16px;
+  }
+
+  .wallet-status {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .wallet-status .glass-panel {
+    max-width: 100%;
+    width: auto;
+  }
+
+  .wallet-status .btn {
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  .home-hero-subtitle {
+    font-size: 1rem !important;
+  }
+
+  .panel-padding-mobile {
+    padding: 20px !important;
+  }
+
   .data-table-scroll {
     overflow-x: visible;
   }

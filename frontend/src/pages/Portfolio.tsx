@@ -185,7 +185,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   return (
     <div className="glass-panel" style={{ padding: "32px" }}>
       <header style={{ textAlign: "center", marginBottom: "48px" }}>
-        <h1 style={{ fontSize: "2.5rem", marginBottom: "16px" }}>
+        <h1 className="section-title" style={{ marginBottom: "16px" }}>
           Your <span className="text-gradient">Portfolio</span>
         </h1>
         <p style={{ color: "var(--text-secondary)", fontSize: "1.1rem" }}>

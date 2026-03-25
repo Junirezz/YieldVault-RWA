@@ -26,11 +26,11 @@ const mockSummary = {
   },
 };
 
-function renderDashboard(walletAddress: string | null) {
+function renderDashboard(walletAddress: string | null, usdcBalance = 1250.5) {
   return render(
     <ToastProvider>
       <VaultProvider>
-        <VaultDashboard walletAddress={walletAddress} />
+        <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} />
       </VaultProvider>
     </ToastProvider>,
   );
@@ -119,6 +119,33 @@ describe("VaultDashboard", () => {
       screen.queryByText(/Processing Transaction.../i),
     ).not.toBeInTheDocument();
     expect(screen.getByText("1350.50")).toBeInTheDocument();
+  });
+
+  it("fills the input with max allowable amount via MAX button", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const maxButton = screen.getByRole("button", { name: "MAX" });
+    fireEvent.click(maxButton);
+    const input = screen.getByPlaceholderText("0.00");
+    expect(input).toHaveValue(1250.5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(maxButton);
+    expect(input).toHaveValue(1250.5);
+  });
+
+  it("prevents transactions above the max allowable amount", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Deposit" }));
+
+    expect(screen.getByText(/Amount exceeds maximum/i)).toBeInTheDocument();
   });
 
   it("shows a normalized API error message when data loading fails", async () => {
