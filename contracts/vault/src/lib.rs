@@ -383,6 +383,34 @@ impl YieldVault {
         }
     }
 
+    /// Returns the current share price scaled by 10^18 (1_000_000_000_000_000_000).
+    ///
+    /// Formula: share_price = (total_assets * 10^18) / total_shares
+    ///
+    /// To convert to a human-readable price, divide the result by 10^18.
+    /// Examples:
+    ///   1_000_000_000_000_000_000 → 1.0  (1 share = 1 token)
+    ///   1_200_000_000_000_000_000 → 1.2  (1 share = 1.2 tokens, after yield accrual)
+    ///   500_000_000_000_000_000  → 0.5  (1 share = 0.5 tokens)
+    ///
+    /// Returns 1:1 (10^18) when no shares have been minted yet (fresh vault).
+    pub fn get_share_price(env: Env) -> i128 {
+        let ts = Self::total_shares(env.clone());
+        let ta = Self::total_assets(env.clone());
+
+        if ts == 0 {
+            // No shares minted yet — initial price is 1:1
+            return 1_000_000_000_000_000_000i128;
+        }
+
+        // Scale TVL up before dividing to preserve decimal precision.
+        // Using checked arithmetic to guard against overflow.
+        ta.checked_mul(1_000_000_000_000_000_000i128)
+            .expect("overflow in share price calculation")
+            .checked_div(ts)
+            .expect("division error in share price calculation")
+    }
+
     pub fn deposit(env: Env, user: Address, amount: i128) -> Result<i128, VaultError> {
         user.require_auth();
         if amount <= 0 {
