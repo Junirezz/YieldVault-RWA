@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import WalletConnect from './WalletConnect';
 import ThemeToggle from './ThemeToggle';
-import { Layers } from 'lucide-react';
+import { Layers } from './icons';
 
 interface NavbarProps {
     walletAddress: string | null;

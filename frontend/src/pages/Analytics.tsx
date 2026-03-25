@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity } from "lucide-react";
+import { Activity } from "../components/icons";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import { useVault } from "../context/VaultContext";
 

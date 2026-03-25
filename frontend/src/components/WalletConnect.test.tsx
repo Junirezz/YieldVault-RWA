@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WalletConnect from './WalletConnect';
 import * as freighter from '@stellar/freighter-api';
+import { ToastProvider } from '../context/ToastContext';
 
 
 // Mock freighter-api
@@ -12,14 +13,13 @@ vi.mock('@stellar/freighter-api', () => ({
     getAddress: vi.fn(),
 }));
 
-// Mock framer-motion to avoid animation issues in tests
-vi.mock('framer-motion', () => ({
-    motion: {
-        div: ({ children, ...props }: ComponentProps<'div'>) => <div {...props}>{children}</div>,
-    },
-}));
-
 const mockedFreighter = vi.mocked(freighter);
+
+const WalletConnectWrapper: React.FC<ComponentProps<typeof WalletConnect>> = (props) => (
+    <ToastProvider>
+        <WalletConnect {...props} />
+    </ToastProvider>
+);
 
 describe('WalletConnect', () => {
     const mockOnConnect = vi.fn();
@@ -32,7 +32,7 @@ describe('WalletConnect', () => {
     it('renders the connect button when no wallet is connected', async () => {
         mockedFreighter.isAllowed.mockResolvedValue({ isAllowed: false });
         render(
-            <WalletConnect 
+            <WalletConnectWrapper 
                 walletAddress={null} 
                 onConnect={mockOnConnect} 
                 onDisconnect={mockOnDisconnect} 
@@ -50,7 +50,7 @@ describe('WalletConnect', () => {
         mockedFreighter.getAddress.mockResolvedValue({ address: 'GABC123' });
 
         render(
-            <WalletConnect 
+            <WalletConnectWrapper 
                 walletAddress={null} 
                 onConnect={mockOnConnect} 
                 onDisconnect={mockOnDisconnect} 
@@ -69,7 +69,7 @@ describe('WalletConnect', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
         const expectedAddress = 'GABC1...9012';
         render(
-            <WalletConnect 
+            <WalletConnectWrapper 
                 walletAddress={fullAddress} 
                 onConnect={mockOnConnect} 
                 onDisconnect={mockOnDisconnect} 
@@ -81,7 +81,7 @@ describe('WalletConnect', () => {
 
     it('calls onDisconnect when the disconnect button is clicked', () => {
         render(
-            <WalletConnect 
+            <WalletConnectWrapper 
                 walletAddress="GABC123...9012" 
                 onConnect={mockOnConnect} 
                 onDisconnect={mockOnDisconnect} 

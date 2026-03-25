@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { TrendingUp, ShieldCheck, Wallet as WalletIcon, Activity } from "lucide-react";
+import { Activity, ShieldCheck, TrendingUp, Wallet as WalletIcon } from "./icons";
 import { hasCustomRpcConfig, networkConfig } from "../config/network";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
+import { useToast } from "../context/ToastContext";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -10,6 +11,7 @@ interface VaultDashboardProps {
 
 const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
     const { formattedTvl, formattedApy, summary, error, isLoading } = useVault();
+    const toast = useToast();
     const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
     const [amount, setAmount] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
@@ -20,7 +22,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
     const strategy = summary.strategy;
 
     const handleTransaction = () => {
-        if (!walletAddress || !amount || isNaN(Number(amount))) return;
+        if (!walletAddress || !amount || isNaN(Number(amount))) {
+            toast.warning({
+                title: "Enter a valid amount",
+                description: "Choose a wallet and amount before submitting the transaction.",
+            });
+            return;
+        }
         setIsProcessing(true);
 
         // Simulate transaction delay
@@ -30,6 +38,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
             if (activeTab === "withdraw") setFakeBalance(prev => Math.max(0, prev - value));
             setAmount("");
             setIsProcessing(false);
+            toast.success({
+                title: activeTab === "deposit" ? "Deposit queued" : "Withdrawal queued",
+                description:
+                    activeTab === "deposit"
+                        ? `${value.toFixed(2)} USDC has been added to your pending vault activity.`
+                        : `${value.toFixed(2)} USDC has been added to your pending withdrawal activity.`,
+            });
         }, 2000);
     };
 

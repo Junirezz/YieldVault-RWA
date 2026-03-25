@@ -12,6 +12,7 @@ import {
 import { useClientDataTable } from "../hooks/useClientDataTable";
 import { useDataTableState } from "../hooks/useDataTableState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
+import { useToast } from "../context/ToastContext";
 
 interface PortfolioProps {
   walletAddress: string | null;
@@ -98,6 +99,7 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
 ];
 
 const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
+  const toast = useToast();
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -131,7 +133,12 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
         if (!isMounted) {
           return;
         }
-        setError(normalizeApiError(unknownError));
+        const nextError = normalizeApiError(unknownError);
+        setError(nextError);
+        toast.error({
+          title: "Portfolio sync failed",
+          description: nextError.userMessage,
+        });
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -144,7 +151,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     return () => {
       isMounted = false;
     };
-  }, [walletAddress]);
+  }, [toast, walletAddress]);
 
   const { rows, page, totalItems, totalPages } = useClientDataTable({
     rows: holdings,

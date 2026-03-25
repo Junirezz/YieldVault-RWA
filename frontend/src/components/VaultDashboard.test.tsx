@@ -2,6 +2,7 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import VaultDashboard from "./VaultDashboard";
 import { VaultProvider } from "../context/VaultContext";
+import { ToastProvider } from "../context/ToastContext";
 
 const mockSummary = {
   tvl: 12450800,
@@ -27,9 +28,11 @@ const mockSummary = {
 
 function renderDashboard(walletAddress: string | null) {
   return render(
-    <VaultProvider>
-      <VaultDashboard walletAddress={walletAddress} />
-    </VaultProvider>,
+    <ToastProvider>
+      <VaultProvider>
+        <VaultDashboard walletAddress={walletAddress} />
+      </VaultProvider>
+    </ToastProvider>,
   );
 }
 

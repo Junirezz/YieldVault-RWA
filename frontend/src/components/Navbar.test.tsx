@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import Navbar from './Navbar';
 import { ThemeProvider } from '../context/ThemeContext';
+import { ToastProvider } from '../context/ToastContext';
 import { MemoryRouter } from 'react-router-dom';
 
 describe('Navbar', () => {
@@ -11,13 +12,15 @@ describe('Navbar', () => {
     it('renders the navbar with navigation links', () => {
         render(
             <MemoryRouter>
-                <ThemeProvider>
+                <ToastProvider>
+                    <ThemeProvider>
                     <Navbar 
                         walletAddress={null} 
                         onConnect={mockOnConnect} 
                         onDisconnect={mockOnDisconnect} 
                     />
-                </ThemeProvider>
+                    </ThemeProvider>
+                </ToastProvider>
             </MemoryRouter>
         );
 
@@ -31,13 +34,15 @@ describe('Navbar', () => {
     it('renders the wallet connect button', () => {
         render(
             <MemoryRouter>
-                <ThemeProvider>
+                <ToastProvider>
+                    <ThemeProvider>
                     <Navbar 
                         walletAddress={null} 
                         onConnect={mockOnConnect} 
                         onDisconnect={mockOnDisconnect} 
                     />
-                </ThemeProvider>
+                    </ThemeProvider>
+                </ToastProvider>
             </MemoryRouter>
         );
 
@@ -49,17 +54,18 @@ describe('Navbar', () => {
         const expectedAddress = 'GABC1...9012';
         render(
             <MemoryRouter>
-                <ThemeProvider>
+                <ToastProvider>
+                    <ThemeProvider>
                     <Navbar 
                         walletAddress={fullAddress} 
                         onConnect={mockOnConnect} 
                         onDisconnect={mockOnDisconnect} 
                     />
-                </ThemeProvider>
+                    </ThemeProvider>
+                </ToastProvider>
             </MemoryRouter>
         );
 
         expect(screen.getByText(expectedAddress)).toBeInTheDocument();
     });
 });
-

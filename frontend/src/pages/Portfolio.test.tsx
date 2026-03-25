@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import Portfolio from "./Portfolio";
+import { ToastProvider } from "../context/ToastContext";
 
 const mockHoldings = [
   {
@@ -89,17 +90,19 @@ function renderPortfolio(
 ) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route
-          path="/portfolio"
-          element={
-            <>
-              <Portfolio walletAddress={walletAddress} />
-              <LocationDisplay />
-            </>
-          }
-        />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route
+            path="/portfolio"
+            element={
+              <>
+                <Portfolio walletAddress={walletAddress} />
+                <LocationDisplay />
+              </>
+            }
+          />
+        </Routes>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
