@@ -1,6 +1,8 @@
 #![no_std]
 
 mod test;
+#[cfg(test)]
+mod fuzz_math;
 pub mod strategy;
 pub mod benji_strategy;
 
@@ -104,6 +106,7 @@ impl YieldVault {
         env.storage().instance().set(&DataKey::TotalAssets, &0i128);
         env.storage().instance().set(&DataKey::DaoThreshold, &1i128);
         env.storage().instance().set(&DataKey::ProposalNonce, &0u32);
+        Ok(())
     }
 
     /// Set or update the active strategy connector.
@@ -116,19 +119,6 @@ impl YieldVault {
     /// Read the active strategy address.
     pub fn strategy(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Strategy)
-
-        // Initialize the unified state
-        let state = VaultState {
-            total_shares: 0,
-            total_assets: 0,
-            is_paused: false,
-        };
-        env.storage().instance().set(&DataKey::State, &state);
-
-        env.storage().instance().set(&DataKey::DaoThreshold, &1i128);
-        env.storage().instance().set(&DataKey::ProposalNonce, &0u32);
-
-        Ok(())
     }
 
     pub fn set_pause(env: Env, paused: bool) {
@@ -175,8 +165,6 @@ impl YieldVault {
         };
 
         idle_assets + strategy_assets
-    pub fn total_assets(env: Env) -> i128 {
-        Self::get_state(&env).total_assets
     }
 
     pub fn balance(env: Env, user: Address) -> i128 {
@@ -589,7 +577,6 @@ impl YieldVault {
 
         let vault_balance = Self::balance(env.clone(), user.clone());
         env.storage().instance().set(&DataKey::ShareBalance(user.clone()), &(vault_balance - shares));
-        token_client.transfer(&env.current_contract_address(), &user, &assets_to_return);
 
         state.total_assets -= assets_to_return;
         state.total_shares -= shares;
@@ -653,7 +640,6 @@ impl YieldVault {
 
         let ta = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
         env.storage().instance().set(&DataKey::TotalAssets, &(ta + amount));
-        token_client.transfer(&admin, &env.current_contract_address(), &amount);
 
         let mut state = Self::get_state(&env);
         state.total_assets += amount;
@@ -678,6 +664,9 @@ impl YieldVault {
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&strategy, &env.current_contract_address(), &amount);
+
+        let ta = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalAssets, &(ta + amount));
 
         let mut state = Self::get_state(&env);
         state.total_assets += amount;

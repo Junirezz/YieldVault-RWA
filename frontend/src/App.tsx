@@ -8,6 +8,7 @@ import {
 import { ThemeProvider } from "./context/ThemeContext";
 import { ToastProvider } from "./context/ToastContext";
 import { VaultProvider } from "./context/VaultContext";
+import { ToastProvider } from "./context/ToastContext";
 import Navbar from "./components/Navbar";
 import "./index.css";
 
@@ -64,6 +65,8 @@ function App() {
       <ThemeProvider>
         <ToastProvider>
           <VaultProvider>
+        <VaultProvider>
+          <ToastProvider>
             <Router>
               <div className="app-container">
                 <Navbar
@@ -95,6 +98,8 @@ function App() {
             </Router>
           </VaultProvider>
         </ToastProvider>
+          </ToastProvider>
+        </VaultProvider>
       </ThemeProvider>
     </Sentry.ErrorBoundary>
   );

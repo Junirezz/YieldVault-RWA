@@ -1,4 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
+import { Pagination } from "./Pagination";
 
 export type TableSortDirection = "asc" | "desc";
 
@@ -30,6 +31,7 @@ interface DataTableProps<T> {
   onSortChange?: (columnId: string) => void;
   pagination?: PaginationState;
   onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
   renderRowDetails?: (row: T) => ReactNode;
 }
 
@@ -56,6 +58,7 @@ export function DataTable<T>({
   onSortChange,
   pagination,
   onPageChange,
+  onPageSizeChange,
   renderRowDetails,
 }: DataTableProps<T>) {
   const handleHeaderKeyDown = (
@@ -157,29 +160,15 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {pagination && pagination.totalPages > 1 && (
-        <div className="data-table-pagination">
-          <div className="data-table-pagination-summary">
-            Page {pagination.page} of {pagination.totalPages}
-          </div>
-          <div className="data-table-pagination-actions">
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => onPageChange?.(pagination.page - 1)}
-              disabled={pagination.page <= 1}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => onPageChange?.(pagination.page + 1)}
-              disabled={pagination.page >= pagination.totalPages}
-            >
-              Next
-            </button>
-          </div>
+      {pagination && (
+        <div className="data-table-pagination" style={{ padding: 0 }}>
+          <Pagination
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
         </div>
       )}
     </div>
