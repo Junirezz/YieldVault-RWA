@@ -229,6 +229,18 @@ button {
   gap: 8px;
 }
 
+.form-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
 .input-group label {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -251,6 +263,12 @@ button {
   box-shadow: 0 0 0 1px var(--accent-cyan-dim);
 }
 
+.input-wrapper.input-wrapper-error,
+.input-wrapper.input-wrapper-error:focus-within {
+  border-color: var(--border-error);
+  box-shadow: 0 0 0 1px var(--border-error);
+}
+
 .input-field {
   width: 100%;
   background: transparent;
@@ -265,6 +283,29 @@ button {
 
 .input-field::placeholder {
   color: var(--text-tertiary);
+}
+
+.form-textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 12px 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-family: var(--font-sans);
+  outline: none;
+  resize: vertical;
+  min-height: 96px;
+}
+
+.form-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.form-error {
+  color: var(--text-error);
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .asset-badge {
