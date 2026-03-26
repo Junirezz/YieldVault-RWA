@@ -10,7 +10,7 @@ import {
   type PortfolioHolding,
 } from "../lib/portfolioApi";
 import { useClientDataTable } from "../hooks/useClientDataTable";
-import { useDataTableState } from "../hooks/useDataTableState";
+import { useUrlState } from "../hooks/useUrlState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
 import { useToast } from "../context/ToastContext";
 
@@ -104,11 +104,17 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   const [error, setError] = useState<ApiError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const { state, setSearch, setSort, setPage, setPageSize } = useDataTableState({
+  const { state: urlState, setSearch, setSort, setPage, setPageSize, setFilters, reset } = useUrlState<{ status: string, search: string }>({
     defaultSortBy: "valueUsd",
     defaultSortDirection: "desc",
     defaultPageSize: 4,
+    defaultFilters: { status: "all", search: "" },
   });
+
+  const state = {
+    ...urlState,
+    search: urlState.filters.search || "",
+  };
 
   useServerDataTable({ state });
 
@@ -153,8 +159,15 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     };
   }, [toast, walletAddress]);
 
+  const filteredHoldings = React.useMemo(() => {
+    if (!urlState.filters.status || urlState.filters.status === "all") {
+      return holdings;
+    }
+    return holdings.filter((h) => h.status === urlState.filters.status);
+  }, [holdings, urlState.filters.status]);
+
   const { rows, page, totalItems, totalPages } = useClientDataTable({
-    rows: holdings,
+    rows: filteredHoldings,
     state,
     getSearchValue: (row) =>
       `${row.asset} ${row.vaultName} ${row.symbol} ${row.issuer} ${row.status}`,
@@ -251,35 +264,46 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               </div>
 
               <div className="portfolio-toolbar-controls">
+                <label className="input-group" style={{ minWidth: "180px" }}>
+                  <span>Status Filter</span>
+                  <div className="input-wrapper">
+                    <select
+                      className="portfolio-select"
+                      value={urlState.filters.status || "all"}
+                      onChange={(e) => setFilters({ status: e.target.value })}
+                      aria-label="Filter by status"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </label>
+
                 <label className="input-group" style={{ minWidth: "220px" }}>
-                  <span>Filter holdings</span>
+                  <span>Search holdings</span>
                   <div className="input-wrapper">
                     <input
                       className="input-field"
                       type="search"
                       placeholder="Search asset, vault, issuer..."
-                      value={state.search}
+                      value={urlState.filters.search || ""}
                       onChange={(event) => setSearch(event.target.value)}
                       style={{ fontSize: "1rem", fontFamily: "var(--font-sans)" }}
                     />
                   </div>
                 </label>
 
-                <label className="input-group" style={{ minWidth: "120px" }}>
-                  <span>Rows</span>
-                  <div className="input-wrapper">
-                    <select
-                      aria-label="Rows per page"
-                      value={state.pageSize}
-                      onChange={(event) => setPageSize(Number(event.target.value))}
-                      className="portfolio-select"
-                    >
-                      <option value={4}>4</option>
-                      <option value={6}>6</option>
-                      <option value={8}>8</option>
-                    </select>
-                  </div>
-                </label>
+                {(urlState.filters.search || (urlState.filters.status && urlState.filters.status !== "all")) && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={reset}
+                    style={{ alignSelf: "flex-end", height: "42px" }}
+                  >
+                    Reset Filters
+                  </button>
+                )}
               </div>
             </div>
 
@@ -313,6 +337,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                 totalPages,
               }}
               onPageChange={setPage}
+              onPageSizeChange={setPageSize}
               renderRowDetails={(row) => (
                 <div className="portfolio-row-meta">
                   <span className={`tag ${row.status === "active" ? "cyan" : ""}`}>

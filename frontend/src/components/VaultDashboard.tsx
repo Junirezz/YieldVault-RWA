@@ -4,6 +4,7 @@ import { hasCustomRpcConfig, networkConfig } from "../config/network";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
 import { useToast } from "../context/ToastContext";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 import { FormField, SubmitButton, useForm, type ValidationSchema } from "../forms";
 
 interface VaultDashboardProps {
@@ -13,6 +14,8 @@ interface VaultDashboardProps {
 const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
     const { formattedTvl, formattedApy, summary, error, isLoading } = useVault();
     const toast = useToast();
+    const [amount, setAmount] = useState("");
+    const [isProcessing, setIsProcessing] = useState<"deposit" | "withdraw" | null>(null);
     const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
     const [isProcessing, setIsProcessing] = useState(false);
     const [fakeBalance, setFakeBalance] = useState(1250.5);
@@ -21,6 +24,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
     const tvl = formattedTvl;
     const strategy = summary.strategy;
 
+    const handleTransaction = (actionType: "deposit" | "withdraw") => {
+        if (!walletAddress || !amount || isNaN(Number(amount))) {
     const schema: ValidationSchema<{ amount: string }> = {
         amount: {
             required: "Enter an amount to continue.",
@@ -50,6 +55,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
             });
             return;
         }
+        setIsProcessing(actionType);
+
+        // Simulate transaction delay
+        setTimeout(() => {
+            const value = Number(amount);
+            if (actionType === "deposit") setFakeBalance(prev => prev + value);
+            if (actionType === "withdraw") setFakeBalance(prev => Math.max(0, prev - value));
+            setAmount("");
+            setIsProcessing(null);
 
         setIsProcessing(true);
 
@@ -62,9 +76,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
             handleChange({ target: { name: "amount", value: "" } } as Parameters<typeof handleChange>[0]);
             setIsProcessing(false);
             toast.success({
-                title: activeTab === "deposit" ? "Deposit queued" : "Withdrawal queued",
+                title: actionType === "deposit" ? "Deposit queued" : "Withdrawal queued",
                 description:
-                    activeTab === "deposit"
+                    actionType === "deposit"
                         ? `${value.toFixed(2)} USDC has been added to your pending vault activity.`
                         : `${value.toFixed(2)} USDC has been added to your pending withdrawal activity.`,
             });
@@ -178,39 +192,48 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                         </div>
                     )}
 
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: 'var(--bg-muted)', padding: '6px', borderRadius: '12px' }}>
-                        <button
-                            onClick={() => setActiveTab('deposit')}
-                            style={{
-                                flex: 1,
-                                padding: '10px',
-                                borderRadius: '8px',
-                                background: activeTab === 'deposit' ? 'var(--border-glass)' : 'transparent',
-                                color: activeTab === 'deposit' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                fontWeight: activeTab === 'deposit' ? 600 : 500,
-                                transition: 'all 0.2s',
-                                border: activeTab === 'deposit' ? '1px solid var(--border-glass)' : '1px solid transparent'
-                            }}
-                        >
-                            Deposit
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('withdraw')}
-                            style={{
-                                flex: 1,
-                                padding: '10px',
-                                borderRadius: '8px',
-                                background: activeTab === 'withdraw' ? 'var(--border-glass)' : 'transparent',
-                                color: activeTab === 'withdraw' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                fontWeight: activeTab === 'withdraw' ? 600 : 500,
-                                transition: 'all 0.2s',
-                                border: activeTab === 'withdraw' ? '1px solid var(--border-glass)' : '1px solid transparent'
-                            }}
-                        >
-                            Withdraw
-                        </button>
-                    </div>
+                    <Tabs defaultValue="deposit" syncWithUrl={true} onValueChange={() => setAmount("")}>
+                        <TabsList style={{ marginBottom: '24px' }}>
+                            <TabsTrigger value="deposit">Deposit</TabsTrigger>
+                            <TabsTrigger value="withdraw">Withdraw</TabsTrigger>
+                        </TabsList>
 
+                        <TabsContent value="deposit">
+                            <div className="flex justify-between items-center" style={{ marginBottom: '16px' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Amount to deposit</div>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                    Balance: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{walletAddress ? fakeBalance.toFixed(2) : '0.00'}</span>
+                                </div>
+                            </div>
+                            
+                            <div className="input-group" style={{ marginBottom: '24px' }}>
+                                <div className="input-wrapper">
+                                    <span style={{ color: 'var(--text-secondary)', paddingRight: '12px', borderRight: '1px solid var(--border-glass)', marginRight: '16px' }}>USDC</span>
+                                    <input className="input-field" type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                                    <button style={{ color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 600, background: 'var(--accent-cyan-dim)', padding: '4px 10px', borderRadius: '6px' }} onClick={() => setAmount(fakeBalance.toString())}>MAX</button>
+                                </div>
+                            </div>
+
+                            <div className="glass-panel" style={{ padding: '16px', background: 'var(--bg-muted)', marginBottom: '24px' }}>
+                                <div className="flex justify-between items-center">
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>BENJI Strategy</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{strategy.status === 'active' ? 'Active' : 'Inactive'}</span>
+                                </div>
+                                <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Exchange Rate</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>1 yvUSDC = {summary.exchangeRate.toFixed(3)} USDC</span>
+                                </div>
+                                <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Network Fee</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{summary.networkFeeEstimate}</span>
+                                </div>
+                            </div>
+
+                            <button
+                                className="btn btn-primary"
+                                style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
+                                onClick={() => handleTransaction('deposit')}
+                                disabled={isProcessing !== null || !amount || Number(amount) <= 0}
                     <div className="flex justify-between items-center" style={{ marginBottom: '16px' }}>
                         <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                             Transaction
@@ -249,8 +272,51 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({ walletAddress }) => {
                                 }}
                                 onClick={() => handleChange({ target: { name: 'amount', value: fakeBalance.toString() } } as Parameters<typeof handleChange>[0])}
                             >
-                                MAX
+                                {isProcessing === 'deposit' ? 'Processing Transaction...' : 'Approve & Deposit'}
                             </button>
+                        </TabsContent>
+
+                        <TabsContent value="withdraw">
+                            <div className="flex justify-between items-center" style={{ marginBottom: '16px' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Amount to withdraw</div>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                    Balance: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{walletAddress ? fakeBalance.toFixed(2) : '0.00'}</span>
+                                </div>
+                            </div>
+                            
+                            <div className="input-group" style={{ marginBottom: '24px' }}>
+                                <div className="input-wrapper">
+                                    <span style={{ color: 'var(--text-secondary)', paddingRight: '12px', borderRight: '1px solid var(--border-glass)', marginRight: '16px' }}>USDC</span>
+                                    <input className="input-field" type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                                    <button style={{ color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 600, background: 'var(--accent-cyan-dim)', padding: '4px 10px', borderRadius: '6px' }} onClick={() => setAmount(fakeBalance.toString())}>MAX</button>
+                                </div>
+                            </div>
+
+                            <div className="glass-panel" style={{ padding: '16px', background: 'var(--bg-muted)', marginBottom: '24px' }}>
+                                <div className="flex justify-between items-center">
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>BENJI Strategy</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{strategy.status === 'active' ? 'Active' : 'Inactive'}</span>
+                                </div>
+                                <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Exchange Rate</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>1 yvUSDC = {summary.exchangeRate.toFixed(3)} USDC</span>
+                                </div>
+                                <div className="flex justify-between items-center" style={{ marginTop: '8px' }}>
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Network Fee</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{summary.networkFeeEstimate}</span>
+                                </div>
+                            </div>
+
+                            <button
+                                className="btn btn-primary"
+                                style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
+                                onClick={() => handleTransaction('withdraw')}
+                                disabled={isProcessing !== null || !amount || Number(amount) <= 0}
+                            >
+                                {isProcessing === 'withdraw' ? 'Processing Transaction...' : 'Withdraw Funds'}
+                            </button>
+                        </TabsContent>
+                    </Tabs>
                         </div>
 
                         <div className="glass-panel" style={{ padding: '16px', background: 'var(--bg-muted)', marginBottom: '24px' }}>
