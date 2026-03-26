@@ -1,0 +1,67 @@
+.tabs-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.tabs-list {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--bg-muted);
+  padding: 6px;
+  border-radius: 12px;
+  gap: 8px;
+}
+
+.tabs-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs-trigger {
+  flex: 1;
+  min-width: max-content;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tabs-trigger:hover {
+  color: var(--text-primary);
+}
+
+.tabs-trigger.active {
+  background: var(--border-glass);
+  color: var(--text-primary);
+  font-weight: 600;
+  border: 1px solid var(--border-glass);
+}
+
+.tabs-trigger:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.tabs-content {
+  animation: fadeInTabs 0.2s ease-in-out;
+  outline: none;
+}
+
+.tabs-content:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@keyframes fadeInTabs {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

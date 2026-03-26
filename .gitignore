@@ -9,3 +9,6 @@
 .idea
 .vscode
 *.swp
+
+# Agents
+GEMINI.md
