@@ -6,6 +6,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import { ThemeProvider } from "./context/ThemeContext";
+import { PreferencesProvider } from "./context/PreferencesContext";
 import { ToastProvider } from "./context/ToastContext";
 import { VaultProvider } from "./context/VaultContext";
 import { CorrelationIdProvider } from "./context/CorrelationIdContext";
@@ -24,6 +25,7 @@ const Home = lazy(() => import("./pages/Home"));
 const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Analytics = lazy(() => import("./pages/Analytics"));
 const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
+const Settings = lazy(() => import("./pages/Settings"));
 
 // Loading component for Suspense fallback
 const LoadingPage = () => (
@@ -88,6 +90,7 @@ function App() {
       )}
       showDialog
     >
+      <PreferencesProvider>
       <ThemeProvider>
         <CorrelationIdProvider>
           <CorrelationIdSync />
@@ -126,6 +129,7 @@ function App() {
                             <TransactionHistory walletAddress={walletAddress} />
                           }
                         />
+                        <Route path="/settings" element={<Settings />} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </SentryRoutes>
                     </Suspense>
@@ -136,6 +140,7 @@ function App() {
           </ToastProvider>
         </CorrelationIdProvider>
       </ThemeProvider>
+      </PreferencesProvider>
     </Sentry.ErrorBoundary>
   );
 }

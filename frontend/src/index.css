@@ -782,4 +782,31 @@ button {
     right: 16px;
     width: auto;
   }
+
+  /* Settings page mobile overrides */
+  .settings-locale-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
+
+/* ── Compact Mode ───────────────────────────────────────────────── */
+.compact-mode .glass-panel {
+  padding: 16px 20px;
+}
+
+.compact-mode .data-table th,
+.compact-mode .data-table td {
+  padding: 10px 14px;
+}
+
+.compact-mode .data-table-pagination {
+  padding: 12px 14px;
+}
+
+/* ── Settings page ──────────────────────────────────────────────── */
+.settings-section-divider {
+  height: 1px;
+  background: var(--border-glass);
+  margin: 16px 0;
+}
+
