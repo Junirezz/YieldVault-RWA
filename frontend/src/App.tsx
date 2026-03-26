@@ -13,6 +13,7 @@ import Navbar from "./components/Navbar";
 import "./index.css";
 
 import * as Sentry from "@sentry/react";
+import ErrorFallback from "./components/ErrorFallback";
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
@@ -59,7 +60,9 @@ function App() {
 
   return (
     <Sentry.ErrorBoundary
-      fallback={<p>An error occurred. Our team has been notified.</p>}
+      fallback={({ error, resetError }) => (
+        <ErrorFallback error={error} resetError={resetError} />
+      )}
       showDialog
     >
       <ThemeProvider>
