@@ -8,17 +8,20 @@ import { MemoryRouter } from 'react-router-dom';
 describe('Navbar', () => {
     const mockOnConnect = vi.fn();
     const mockOnDisconnect = vi.fn();
+    const mockOnNavigate = vi.fn();
 
     it('renders the navbar with navigation links', () => {
         render(
             <MemoryRouter>
                 <ToastProvider>
                     <ThemeProvider>
-                    <Navbar 
-                        walletAddress={null} 
-                        onConnect={mockOnConnect} 
-                        onDisconnect={mockOnDisconnect} 
-                    />
+                        <Navbar
+                            currentPath="/"
+                            onNavigate={mockOnNavigate}
+                            walletAddress={null}
+                            onConnect={mockOnConnect}
+                            onDisconnect={mockOnDisconnect}
+                        />
                     </ThemeProvider>
                 </ToastProvider>
             </MemoryRouter>
@@ -27,8 +30,8 @@ describe('Navbar', () => {
         expect(screen.getByText(/YieldVault/)).toBeInTheDocument();
         expect(screen.getByText(/RWA/)).toBeInTheDocument();
         expect(screen.getByText('Vaults')).toBeInTheDocument();
-        expect(screen.getByText('Portfolio')).toBeInTheDocument();
         expect(screen.getByText('Analytics')).toBeInTheDocument();
+        expect(screen.getByText('Portfolio')).toBeInTheDocument();
     });
 
     it('renders the wallet connect button', () => {
@@ -36,11 +39,13 @@ describe('Navbar', () => {
             <MemoryRouter>
                 <ToastProvider>
                     <ThemeProvider>
-                    <Navbar 
-                        walletAddress={null} 
-                        onConnect={mockOnConnect} 
-                        onDisconnect={mockOnDisconnect} 
-                    />
+                        <Navbar
+                            currentPath="/"
+                            onNavigate={mockOnNavigate}
+                            walletAddress={null}
+                            onConnect={mockOnConnect}
+                            onDisconnect={mockOnDisconnect}
+                        />
                     </ThemeProvider>
                 </ToastProvider>
             </MemoryRouter>
@@ -56,11 +61,13 @@ describe('Navbar', () => {
             <MemoryRouter>
                 <ToastProvider>
                     <ThemeProvider>
-                    <Navbar 
-                        walletAddress={fullAddress} 
-                        onConnect={mockOnConnect} 
-                        onDisconnect={mockOnDisconnect} 
-                    />
+                        <Navbar
+                            currentPath="/portfolio"
+                            onNavigate={mockOnNavigate}
+                            walletAddress={fullAddress}
+                            onConnect={mockOnConnect}
+                            onDisconnect={mockOnDisconnect}
+                        />
                     </ThemeProvider>
                 </ToastProvider>
             </MemoryRouter>

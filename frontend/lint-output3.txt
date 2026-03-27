@@ -1,0 +1,12 @@
+﻿
+> frontend@0.0.0 lint
+> eslint .
+
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\e2e\fixtures.ts
+  197:3   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/rules-of-hooks')
+  200:11  error    React Hook "use" is called in function "appPage" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"  react-hooks/rules-of-hooks
+
+Γ£û 2 problems (1 error, 1 warning)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

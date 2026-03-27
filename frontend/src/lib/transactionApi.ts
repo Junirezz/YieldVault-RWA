@@ -1,3 +1,5 @@
+import { validate, TransactionQuerySchema } from "./api";
+
 export interface Transaction {
   id: string;
   type: "deposit" | "withdrawal";
@@ -44,9 +46,10 @@ export function normalizeOperation(
 const HORIZON_BASE_URL = "https://horizon-testnet.stellar.org";
 
 export async function getTransactions(
-  walletAddress: string,
+  params: unknown,
 ): Promise<Transaction[]> {
-  const url = `${HORIZON_BASE_URL}/accounts/${walletAddress}/operations?limit=200&order=desc`;
+  const query = validate(TransactionQuerySchema, params, "TransactionQuery");
+  const url = `${HORIZON_BASE_URL}/accounts/${query.walletAddress}/operations?limit=${query.limit}&order=${query.order}`;
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -60,7 +63,8 @@ export async function getTransactions(
 
   return records
     .filter((op) => op.type === "payment" || op.type === "create_account")
-    .map((op) => normalizeOperation(op, walletAddress));
+    .map((op) => normalizeOperation(op, query.walletAddress))
+    .filter((tx) => query.type === "all" || tx.type === query.type);
 }
 
 // --- Display formatters ---

@@ -94,4 +94,57 @@ describe("ApiClient", () => {
         "We could not complete that request. Please review your input and try again.",
     });
   });
+
+  it("sets X-Correlation-ID header on outgoing requests via the request interceptor", async () => {
+    const correlationId = "test-correlation-id-abc123";
+    let capturedHeaders: Headers | undefined;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, init: RequestInit) => {
+        capturedHeaders = init.headers as Headers;
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }),
+    );
+
+    const client = createApiClient({
+      baseUrl: "http://localhost",
+      getCorrelationId: () => correlationId,
+    });
+
+    await client.get("/health");
+
+    expect(capturedHeaders).toBeDefined();
+    expect(capturedHeaders!.get("X-Correlation-ID")).toBe(correlationId);
+  });
+
+  it("attaches correlationId to ApiError on HTTP failure", async () => {
+    const correlationId = "error-correlation-id-xyz789";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = createApiClient({
+      baseUrl: "http://localhost",
+      getCorrelationId: () => correlationId,
+    });
+
+    const error = await client.get("/missing").catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.correlationId).toBe(correlationId);
+  });
 });

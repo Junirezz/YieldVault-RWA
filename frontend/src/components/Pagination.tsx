@@ -49,8 +49,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   return (
     <div className="pagination-container" aria-label="Pagination">
       <div className="pagination-summary" aria-live="polite">
-        Showing <strong>{startItem}–{endItem}</strong> of{" "}
-        <strong>{totalItems}</strong> results
+        {`Page ${page} of ${totalPages}`} &mdash; Showing {startItem}–{endItem} of {totalItems} results
       </div>
 
       <div className="pagination-controls-wrapper">

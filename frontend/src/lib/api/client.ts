@@ -1,5 +1,10 @@
 import { ApiError, normalizeApiError, type NormalizeApiErrorOptions } from "./error";
 import { emitApiTelemetry } from "./telemetry";
+import {
+  createCorrelationRequestInterceptor,
+  createCorrelationResponseInterceptor,
+  generateCorrelationId,
+} from "./correlationInterceptors";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -33,6 +38,7 @@ export interface ApiResponseContext<T> {
 interface ApiClientConfig {
   baseUrl?: string;
   headers?: HeadersInit;
+  getCorrelationId?: () => string;
 }
 
 type RequestInterceptor = (
@@ -164,6 +170,7 @@ async function buildApiError(
     ...options,
     method: request.method,
     url: request.url,
+    correlationId: (request.headers as Headers).get("X-Correlation-ID") ?? undefined,
   });
 }
 
@@ -175,6 +182,9 @@ export class ApiClient {
 
   constructor(config: ApiClientConfig = {}) {
     this.baseConfig = config;
+    const getCorrelationId = config.getCorrelationId ?? generateCorrelationId;
+    this.useRequest(createCorrelationRequestInterceptor(getCorrelationId));
+    this.useResponse(createCorrelationResponseInterceptor());
   }
 
   useRequest(interceptor: RequestInterceptor) {
@@ -219,6 +229,7 @@ export class ApiClient {
         method: request.method,
         url: request.url,
         attempt,
+        correlationId: (request.headers as Headers).get("X-Correlation-ID") ?? undefined,
       });
 
       try {
@@ -252,6 +263,7 @@ export class ApiClient {
           attempt,
           durationMs,
           status: response.status,
+          correlationId: (request.headers as Headers).get("X-Correlation-ID") ?? undefined,
         });
 
         return context.data;
@@ -273,6 +285,7 @@ export class ApiClient {
             attempt,
             delayMs,
             reason: apiError.code,
+            correlationId: (request.headers as Headers).get("X-Correlation-ID") ?? undefined,
           });
           await sleep(delayMs);
           continue;
@@ -285,6 +298,7 @@ export class ApiClient {
           attempt,
           durationMs,
           error: apiError,
+          correlationId: (request.headers as Headers).get("X-Correlation-ID") ?? undefined,
         });
 
         throw apiError;

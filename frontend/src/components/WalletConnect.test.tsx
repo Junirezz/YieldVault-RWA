@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import WalletConnect from './WalletConnect';
@@ -82,6 +82,7 @@ describe('WalletConnect', () => {
         );
 
         expect(screen.getByText(expectedAddress)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Copy wallet address/i })).toBeInTheDocument();
     });
 
     it('calls onDisconnect when the disconnect button is clicked', () => {
@@ -100,21 +101,14 @@ describe('WalletConnect', () => {
     });
 
     it('handles wallet disconnects gracefully during polling', async () => {
+        // Helper to flush all pending promises
+        const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        vi.useFakeTimers({ shouldAdvanceTime: false });
         mockedFreighter.isAllowed
             .mockResolvedValueOnce({ isAllowed: true })
             .mockResolvedValueOnce({ isAllowed: false });
         mockedFreighter.getAddress.mockResolvedValue({ address: 'GABC123' });
-        vi
-            .spyOn(window, 'setInterval')
-            .mockImplementation((handler) => {
-                Promise.resolve().then(() => {
-                    if (typeof handler === 'function') {
-                        handler();
-                    }
-                });
-                return 1 as unknown as ReturnType<typeof window.setInterval>;
-            });
-        vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
 
         render(
             <WalletConnectWrapper
@@ -124,8 +118,16 @@ describe('WalletConnect', () => {
             />
         );
 
-        await waitFor(() => {
-            expect(mockOnDisconnect).toHaveBeenCalled();
-        });
-    });
+        // Advance timers by 0 to flush the initial synchronous setup,
+        // then flush microtasks from the async calls
+        vi.advanceTimersByTime(0);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mockOnConnect).toHaveBeenCalledWith('GABC123');
+
+        // Advance past the 10s polling interval
+        await vi.advanceTimersByTimeAsync(10001);
+
+        expect(mockOnDisconnect).toHaveBeenCalled();
+    }, 20000);
 });

@@ -1,4 +1,5 @@
-import { createApiClient } from "./api";
+import { apiClient } from "./apiClient";
+import { validate, VaultHistoryQuerySchema, DepositRequestSchema, WithdrawalRequestSchema } from "./api";
 
 export interface StrategyMetadata {
   id: string;
@@ -74,18 +75,13 @@ const MOCK_VAULT_HISTORY: VaultHistoryPoint[] = [
   { date: "2026-03-25", value: 103.75 },
 ];
 
-const apiClient = createApiClient({
-  baseUrl: import.meta.env.VITE_API_BASE_URL,
-  headers: {
-    Accept: "application/json",
-  },
-});
 
 export async function getVaultSummary() {
   return apiClient.get<VaultSummary>("/mock-api/vault-summary.json");
 }
 
-export async function getVaultHistory(): Promise<VaultHistoryPoint[]> {
+export async function getVaultHistory(params?: unknown): Promise<VaultHistoryPoint[]> {
+  validate(VaultHistoryQuerySchema, params ?? {}, "VaultHistoryQuery");
   try {
     const data = await apiClient.get<unknown>("/mock-api/vault-history.json");
     if (isValidHistory(data)) {
@@ -95,4 +91,16 @@ export async function getVaultHistory(): Promise<VaultHistoryPoint[]> {
     // Use mock below
   }
   return MOCK_VAULT_HISTORY;
+}
+
+export async function submitDeposit(params: unknown) {
+  validate(DepositRequestSchema, params, "DepositRequest");
+  // Simulate backend interaction
+  return new Promise<void>((resolve) => setTimeout(resolve, 2000));
+}
+
+export async function submitWithdrawal(params: unknown) {
+  validate(WithdrawalRequestSchema, params, "WithdrawalRequest");
+  // Simulate backend interaction
+  return new Promise<void>((resolve) => setTimeout(resolve, 2000));
 }

@@ -16,7 +16,7 @@ vi.mock("../lib/transactionApi", async (importOriginal) => {
 
 const mockGetTransactions = vi.mocked(transactionApi.getTransactions);
 
-const WALLET = "GABC1234567890TESTWALLETADDRESS";
+const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
@@ -98,7 +98,12 @@ describe("TransactionHistory", () => {
     renderPage(WALLET);
 
     await waitFor(() =>
-      expect(mockGetTransactions).toHaveBeenCalledWith(WALLET),
+      expect(mockGetTransactions).toHaveBeenCalledWith({
+        walletAddress: WALLET,
+        limit: 10,
+        order: "desc",
+        type: "all",
+      }),
     );
   });
 
@@ -271,9 +276,10 @@ describe("TransactionHistory", () => {
   // Req 7.2 — filtered empty state message
   it("shows filtered empty state message when filter yields no results", async () => {
     // Only deposits — filtering by withdrawal should show filtered empty message
-    mockGetTransactions.mockResolvedValue([
-      makeTransaction({ id: "1", type: "deposit" }),
-    ]);
+    mockGetTransactions.mockImplementation(async (params: Parameters<typeof transactionApi.getTransactions>[0]) => {
+      if (params.type === "withdrawal") return [];
+      return [makeTransaction({ id: "1", type: "deposit" })];
+    });
 
     renderPage(WALLET);
 

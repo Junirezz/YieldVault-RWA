@@ -20,3 +20,31 @@ export {
   type ApiTelemetryEvent,
 } from "./telemetry";
 export { useApiTelemetry } from "./useApiTelemetry";
+export {
+  ValidationError,
+  isValidationError,
+  validate,
+  validateAsync,
+  type ValidationErrorCode,
+  type ValidationErrorDetail,
+  type ValidationErrorShape,
+} from "./validation";
+export {
+  StellarAddressSchema,
+  AmountSchema,
+  ShareCountSchema,
+  AssetCodeSchema,
+  IsoDatestamp,
+  DepositRequestSchema,
+  WithdrawalRequestSchema,
+  VaultHistoryQuerySchema,
+  PortfolioQuerySchema,
+  WalletAddressSchema,
+  TransactionQuerySchema,
+  type DepositRequest,
+  type WithdrawalRequest,
+  type VaultHistoryQuery,
+  type PortfolioQuery,
+  type WalletAddressParam,
+  type TransactionQuery,
+} from "./schemas";

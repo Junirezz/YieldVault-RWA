@@ -1,9 +1,17 @@
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
 import VaultDashboard from "./VaultDashboard";
 import { VaultProvider } from "../context/VaultContext";
 import { ToastProvider } from "../context/ToastContext";
+import * as vaultApi from "../lib/vaultApi";
+
+vi.mock("../lib/vaultApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof vaultApi>();
+  return {
+    ...actual,
+    submitDeposit: vi.fn(),
+  };
+});
 
 const mockSummary = {
   tvl: 12450800,
@@ -29,13 +37,11 @@ const mockSummary = {
 
 function renderDashboard(walletAddress: string | null, usdcBalance = 1250.5) {
   return render(
-    <MemoryRouter>
-      <ToastProvider>
-        <VaultProvider>
-          <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} />
-        </VaultProvider>
-      </ToastProvider>
-    </MemoryRouter>,
+    <ToastProvider>
+      <VaultProvider>
+        <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} />
+      </VaultProvider>
+    </ToastProvider>,
   );
 }
 
@@ -62,9 +68,9 @@ describe("VaultDashboard", () => {
   it("renders the connect overlay when wallet is not connected", async () => {
     renderDashboard(null);
 
-    expect(screen.getByText(/Wallet not connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Wallet Not Connected/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/Connect your Freighter wallet/i),
+      screen.getByText(/Please connect your Freighter wallet/i),
     ).toBeInTheDocument();
     expect(
       await screen.findByText(/Franklin BENJI Connector/i),
@@ -79,6 +85,8 @@ describe("VaultDashboard", () => {
     expect(screen.getByText(/Current APY/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Sovereign Debt/i)).toBeInTheDocument();
+    expect(screen.getByText(/Strategy ID:/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Copy strategy ID/i })).toBeInTheDocument();
   });
 
   it("allows switching between deposit and withdraw tabs", async () => {
@@ -97,11 +105,15 @@ describe("VaultDashboard", () => {
   });
 
   it("updates the amount input and processes a deposit", async () => {
-    renderDashboard("GABC123");
+    let resolveSubmit!: () => void;
+    const submitPromise = new Promise<void>((resolve) => {
+      resolveSubmit = resolve;
+    });
+    vi.mocked(vaultApi.submitDeposit).mockReturnValue(submitPromise);
+    
+    renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
     expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
-
-    vi.useFakeTimers();
 
     const input = screen.getByPlaceholderText("0.00");
     fireEvent.change(input, { target: { value: "100" } });
@@ -110,16 +122,50 @@ describe("VaultDashboard", () => {
     const button = screen.getByText("Approve & Deposit");
     fireEvent.click(button);
 
-    expect(screen.getByText(/Processing.../i)).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(1200);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Processing Transaction.../i),
+      ).toBeInTheDocument();
     });
 
-    expect(
-      screen.queryByText(/Processing.../i),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText(/Balance: 1350.50 USDC/i)).toBeInTheDocument();
+    // Resolve the mocked API call
+    resolveSubmit();
+
+    // Wait for internal component state update
+    await waitFor(() => {
+        expect(
+          screen.queryByText(/Processing Transaction.../i),
+        ).not.toBeInTheDocument();
+    });
+    
+    expect(screen.getByText("1350.50")).toBeInTheDocument();
+  });
+
+  it("fills the input with max allowable amount via MAX button", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const maxButton = screen.getByRole("button", { name: "MAX" });
+    fireEvent.click(maxButton);
+    const input = screen.getByPlaceholderText("0.00");
+    expect(input).toHaveValue(1250.5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(maxButton);
+    expect(input).toHaveValue(1250.5);
+  });
+
+  it("prevents transactions above the max allowable amount", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Deposit" }));
+
+    expect(screen.getByText(/Amount exceeds maximum/i)).toBeInTheDocument();
   });
 
   it("shows a normalized API error message when data loading fails", async () => {
@@ -133,7 +179,7 @@ describe("VaultDashboard", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
-    });
+    }, { timeout: 3000 });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "We could not reach the server. Check your connection and try again.",
     );

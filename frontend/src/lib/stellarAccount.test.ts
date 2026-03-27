@@ -39,22 +39,15 @@ describe("stellarAccount", () => {
     const call = vi.fn().mockResolvedValue({
       balances: [
         { asset_type: "native", balance: "10.0000000" },
-        {
-          asset_type: "credit_alphanum4",
-          asset_code: "USDC",
-          asset_issuer: "GA5ZSEJYB37L4Q2A6P2JQ5YN5Q6R3N2TGG4VQK6IY4H24M2WFQ6Z3LPA",
-          balance: "42.5",
-        },
+        { asset_type: "credit_alphanum4", asset_code: "USDC", balance: "42.5" },
       ],
     });
     const accountId = vi.fn().mockReturnValue({ call });
-    mockedServer.mockImplementation(
-      function () {
-        return {
-          accounts: () => ({ accountId }),
-        } as unknown as Horizon.Server;
-      },
-    );
+    mockedServer.mockImplementation(function () {
+      return {
+        accounts: () => ({ accountId }),
+      } as unknown as Horizon.Server;
+    });
 
     await expect(fetchUsdcBalance("GABC123")).resolves.toBe(42.5);
   });
