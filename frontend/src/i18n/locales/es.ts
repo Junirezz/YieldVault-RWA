@@ -63,4 +63,9 @@ export const es = {
     next: "Siguiente",
     sortBy: "Ordenar por",
   },
+  shortcuts: {
+    title: "Atajos de teclado",
+    close: "Cerrar",
+    hint: "Presiona Esc para cerrar este diálogo",
+  },
 } as const;
