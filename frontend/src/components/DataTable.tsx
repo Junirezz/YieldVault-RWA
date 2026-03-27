@@ -1,4 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
+import { useTranslation } from "../i18n";
 import { Pagination } from "./Pagination";
 
 export type TableSortDirection = "asc" | "desc";
@@ -61,6 +62,7 @@ export function DataTable<T>({
   onPageSizeChange,
   renderRowDetails,
 }: DataTableProps<T>) {
+  const { t } = useTranslation();
   const handleHeaderKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     columnId: string,
@@ -106,7 +108,7 @@ export function DataTable<T>({
                         onKeyDown={(event) =>
                           handleHeaderKeyDown(event, column.id)
                         }
-                        aria-label={`Sort by ${column.header}`}
+                        aria-label={`${t("dataTable.sortBy")} ${column.header}`}
                       >
                         <span>{column.header}</span>
                         <span className="data-table-sort-indicator" aria-hidden="true">
@@ -160,6 +162,30 @@ export function DataTable<T>({
         </table>
       </div>
 
+      {pagination && pagination.totalPages > 1 && (
+        <div className="data-table-pagination">
+          <div className="data-table-pagination-summary">
+            {t("dataTable.pageLabel")} {pagination.page}{" "}
+            {t("dataTable.pageOf")} {pagination.totalPages}
+          </div>
+          <div className="data-table-pagination-actions">
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => onPageChange?.(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+            >
+              {t("dataTable.previous")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => onPageChange?.(pagination.page + 1)}
+              disabled={pagination.page >= pagination.totalPages}
+            >
+              {t("dataTable.next")}
+            </button>
+          </div>
       {pagination && (
         <div className="data-table-pagination" style={{ padding: 0 }}>
           <Pagination
