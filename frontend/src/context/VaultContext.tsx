@@ -1,14 +1,13 @@
 import React, {
   createContext,
-  useCallback,
   useContext,
   useEffect,
-  useState,
 } from "react";
 import type { ApiError } from "../lib/api";
-import { normalizeApiError, subscribeToApiTelemetry } from "../lib/api";
-import { getVaultSummary, type VaultSummary } from "../lib/vaultApi";
+import { subscribeToApiTelemetry } from "../lib/api";
+import type { VaultSummary } from "../lib/vaultApi";
 import { networkConfig } from "../config/network";
+import { useVaultSummary } from "../hooks/useVaultData";
 
 interface VaultContextType {
   summary: VaultSummary;
@@ -49,43 +48,28 @@ const VaultContext = createContext<VaultContextType | undefined>(undefined);
 export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [summary, setSummary] = useState(DEFAULT_SUMMARY);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [lastUpdate, setLastUpdate] = useState(
-    new Date(DEFAULT_SUMMARY.updatedAt),
-  );
+  const { data, isLoading, error: queryError, refetch } = useVaultSummary();
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-
-    try {
-      const nextSummary = await getVaultSummary();
-      setSummary({
-        ...nextSummary,
+  const summary: VaultSummary = data
+    ? {
+        ...data,
         strategy: {
-          ...nextSummary.strategy,
+          ...data.strategy,
           rpcUrl: networkConfig.rpcUrl,
         },
-      });
-      setLastUpdate(new Date(nextSummary.updatedAt));
-      setError(null);
-    } catch (unknownError) {
-      setError(normalizeApiError(unknownError));
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+      }
+    : DEFAULT_SUMMARY;
 
-  useEffect(() => {
-    void refresh();
+  const error: ApiError | null = queryError
+    ? {
+        code: "FETCH_ERROR",
+        message: queryError.message,
+        userMessage: "Failed to load vault data",
+        statusCode: 500,
+      }
+    : null;
 
-    const interval = window.setInterval(() => {
-      void refresh();
-    }, 30000);
-
-    return () => window.clearInterval(interval);
-  }, [refresh]);
+  const lastUpdate = new Date(summary.updatedAt);
 
   useEffect(() => {
     const unsubscribe = subscribeToApiTelemetry((event) => {
@@ -104,6 +88,10 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
   }).format(summary.tvl);
 
   const formattedApy = `${summary.apy.toFixed(2)}%`;
+
+  const refresh = async () => {
+    await refetch();
+  };
 
   return (
     <VaultContext.Provider

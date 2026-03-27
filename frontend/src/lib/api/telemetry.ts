@@ -6,6 +6,7 @@ export type ApiTelemetryEvent =
       method: string;
       url: string;
       attempt: number;
+      correlationId?: string;
     }
   | {
       type: "retry";
@@ -14,6 +15,7 @@ export type ApiTelemetryEvent =
       attempt: number;
       delayMs: number;
       reason: string;
+      correlationId?: string;
     }
   | {
       type: "success";
@@ -22,6 +24,7 @@ export type ApiTelemetryEvent =
       attempt: number;
       durationMs: number;
       status: number;
+      correlationId?: string;
     }
   | {
       type: "error";
@@ -30,6 +33,7 @@ export type ApiTelemetryEvent =
       attempt: number;
       durationMs: number;
       error: ApiError;
+      correlationId?: string;
     };
 
 type ApiTelemetryListener = (event: ApiTelemetryEvent) => void;

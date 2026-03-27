@@ -43,12 +43,11 @@ describe("stellarAccount", () => {
       ],
     });
     const accountId = vi.fn().mockReturnValue({ call });
-    mockedServer.mockImplementation(
-      () =>
-        ({
-          accounts: () => ({ accountId }),
-        }) as unknown as Horizon.Server,
-    );
+    mockedServer.mockImplementation(function () {
+      return {
+        accounts: () => ({ accountId }),
+      } as unknown as Horizon.Server;
+    });
 
     await expect(fetchUsdcBalance("GABC123")).resolves.toBe(42.5);
   });

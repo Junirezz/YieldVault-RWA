@@ -1,10 +1,14 @@
+import type { ApiError, ValidationError } from "../lib/api";
+import type { FC } from "react";
 import type { ApiError } from "../lib/api";
+import { useTranslation } from "../i18n";
 
 interface ApiStatusBannerProps {
-  error: ApiError;
+  error: ApiError | ValidationError;
 }
 
-const ApiStatusBanner: React.FC<ApiStatusBannerProps> = ({ error }) => {
+const ApiStatusBanner: FC<ApiStatusBannerProps> = ({ error }) => {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
@@ -16,7 +20,9 @@ const ApiStatusBanner: React.FC<ApiStatusBannerProps> = ({ error }) => {
         border: "1px solid rgba(255, 107, 107, 0.25)",
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: "4px" }}>Data unavailable</div>
+      <div style={{ fontWeight: 600, marginBottom: "4px" }}>
+        {t("apiBanner.title")}
+      </div>
       <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
         {error.userMessage}
       </div>

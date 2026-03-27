@@ -1,1 +1,2 @@
 {"root":["./e2e/dashboard-load.spec.ts","./e2e/deposit-withdraw.spec.ts","./e2e/fixtures.ts","./e2e/portfolio.spec.ts","./playwright.config.ts"],"errors":true,"version":"5.9.3"}
+{"root":["./e2e/dashboard-load.spec.ts","./e2e/deposit-withdraw.spec.ts","./e2e/fixtures.ts","./e2e/portfolio.spec.ts","./playwright.config.ts"],"version":"5.9.3"}

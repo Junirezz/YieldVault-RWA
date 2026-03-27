@@ -13,18 +13,11 @@ const Home: React.FC<HomeProps> = ({ walletAddress, usdcBalance }) => {
         <span className="tag cyan" style={{ marginBottom: "16px" }}>
           Stellar RWA Yield
         </span>
-        <h1 style={{ fontSize: "3.5rem", marginBottom: "16px" }}>
+        <h1 style={{ marginBottom: "16px" }}>
           Institutional Yields, <br />
           <span className="text-gradient">Decentralized Access.</span>
         </h1>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: "1.2rem",
-            maxWidth: "600px",
-            margin: "0 auto",
-          }}
-        >
+        <p className="text-body-lg" style={{ maxWidth: "600px", margin: "0 auto" }}>
           Deposit USDC to earn stable, predictable yield backed by tokenized
           Sovereign Debt and Real-World Assets.
         </p>

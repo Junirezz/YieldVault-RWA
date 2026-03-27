@@ -86,7 +86,7 @@ function LocationDisplay() {
 
 function renderPortfolio(
   initialEntry = "/portfolio",
-  walletAddress: string | null = "GABC123",
+  walletAddress: string | null = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 ) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -138,6 +138,8 @@ describe("Portfolio", () => {
     expect(await screen.findByText(/Tokenized T-Bills/i)).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Sort by Asset/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Position ID:/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Copy position ID/i }).length).toBeGreaterThan(0);
   });
 
   it("persists filter state in the URL", async () => {
@@ -158,7 +160,7 @@ describe("Portfolio", () => {
   });
 
   it("supports keyboard sorting and pagination state from the URL", async () => {
-    renderPortfolio("/portfolio?page=2&pageSize=4&sortBy=asset&direction=asc");
+    renderPortfolio("/portfolio?page=2&pageSize=4&sortBy=asset&sortDirection=asc");
 
     expect(await screen.findByText(/Yield Bearing Cash/i)).toBeInTheDocument();
     expect(screen.getByText(/USDC Treasury Pool/i)).toBeInTheDocument();
@@ -171,7 +173,7 @@ describe("Portfolio", () => {
         "sortBy=asset",
       );
       expect(screen.getByTestId("location-display")).toHaveTextContent(
-        "direction=desc",
+        "sortDirection=desc",
       );
       expect(screen.getByTestId("location-display")).toHaveTextContent("page=1");
     });

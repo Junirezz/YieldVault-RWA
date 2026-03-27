@@ -1,0 +1,26 @@
+﻿
+> frontend@0.0.0 lint
+> eslint .
+
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\e2e\fixtures.ts
+  199:11  error  React Hook "use" is called in function "appPage" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"  react-hooks/rules-of-hooks
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\src\components\VaultDashboard.tsx
+   61:90  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  103:67  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\src\components\WalletConnect.test.tsx
+    1:46  error  'act' is defined but never used                     @typescript-eslint/no-unused-vars
+  104:15  error  'flushPromises' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\src\forms\useForm.ts
+  18:44  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  28:41  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Users\HP\Desktop\YieldVault-RWA\frontend\src\hooks\useUrlState.ts
+  48:23  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  83:47  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+Γ£û 9 problems (9 errors, 0 warnings)
+

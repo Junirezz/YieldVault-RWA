@@ -19,11 +19,14 @@
   "dependencies": {
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.6.1",
+    "@tanstack/react-query": "^5.95.2",
+    "es-toolkit": "^1.33.0",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.2",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -43,6 +46,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "jsdom": "^29.0.1",
+    "playwright": "^1.58.2",
     "typedoc": "^0.28.14",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",

@@ -17,6 +17,7 @@ export interface ApiErrorMetadata {
   url?: string;
   method?: string;
   traceId?: string;
+  correlationId?: string;
   details?: unknown;
   cause?: unknown;
 }
@@ -30,6 +31,7 @@ export class ApiError extends Error {
   readonly url?: string;
   readonly method?: string;
   readonly traceId?: string;
+  readonly correlationId?: string;
   readonly details?: unknown;
   override readonly cause?: unknown;
 
@@ -44,6 +46,7 @@ export class ApiError extends Error {
     this.url = metadata.url;
     this.method = metadata.method;
     this.traceId = metadata.traceId;
+    this.correlationId = metadata.correlationId;
     this.details = metadata.details;
     this.cause = metadata.cause;
   }
@@ -56,6 +59,7 @@ export interface NormalizeApiErrorOptions {
   method?: string;
   details?: unknown;
   traceId?: string;
+  correlationId?: string;
 }
 
 const DEFAULT_USER_MESSAGE =
@@ -85,6 +89,7 @@ export function normalizeApiError(
     method: options.method,
     details: options.details,
     traceId: options.traceId,
+    correlationId: options.correlationId,
   };
 
   if (error instanceof DOMException && error.name === "AbortError") {

@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useSearchParams } from "react-router-dom";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
+import PageHeader from "../components/PageHeader";
 import { normalizeApiError, type ApiError } from "../lib/api";
+import { normalizeApiError, isValidationError, type ApiError, type ValidationError } from "../lib/api";
 import {
-  getTransactions,
   formatAmount,
   formatTimestamp,
   truncateHash,
@@ -12,6 +13,7 @@ import {
 } from "../lib/transactionApi";
 import { useClientDataTable } from "../hooks/useClientDataTable";
 import { useDataTableState } from "../hooks/useDataTableState";
+import { getStellarExplorerUrl } from "../lib/security";
 
 interface TransactionHistoryProps {
   walletAddress: string | null;
@@ -58,7 +60,7 @@ const columns: DataTableColumn<Transaction>[] = [
     sortable: false,
     cell: (row) => (
       <a
-        href={`https://stellar.expert/explorer/testnet/tx/${row.transactionHash}`}
+        href={getStellarExplorerUrl(row.transactionHash, "testnet")}
         target="_blank"
         rel="noopener noreferrer"
         style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
@@ -75,7 +77,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
+  const [error, setError] = useState<ApiError | ValidationError | null>(null);
 
   // Task 4.3: Wire useDataTableState for sort, page, pageSize URL persistence
   const { state, setSort, setPage, setPageSize } = useDataTableState({
@@ -107,13 +109,22 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       setIsLoading(true);
 
       try {
-        const data = await getTransactions(walletAddress);
+        const data = await getTransactions({
+          walletAddress,
+          limit: state.pageSize,
+          order: state.sortDirection,
+          type: txType,
+        });
         if (!isMounted) return;
         setTransactions(data);
         setError(null);
       } catch (unknownError) {
         if (!isMounted) return;
-        setError(normalizeApiError(unknownError));
+        if (isValidationError(unknownError)) {
+          setError(unknownError);
+        } else {
+          setError(normalizeApiError(unknownError));
+        }
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -126,13 +137,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [walletAddress]);
+  }, [walletAddress, state.pageSize, state.sortDirection, txType]);
 
   // Apply type filter before passing to useClientDataTable
-  const filteredByType =
-    txType === "all"
-      ? transactions
-      : transactions.filter((tx) => tx.type === txType);
+  const filteredByType = transactions; // already filtered by API
 
   const { rows, page, totalItems, totalPages } = useClientDataTable({
     rows: filteredByType,
@@ -161,14 +169,32 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
   return (
     <div className="glass-panel" style={{ padding: "32px" }}>
-      <header style={{ textAlign: "center", marginBottom: "48px" }}>
-        <h1 style={{ fontSize: "2.5rem", marginBottom: "16px" }}>
-          Transaction <span className="text-gradient">History</span>
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "1.1rem" }}>
-          View all your past deposits and withdrawals.
-        </p>
-      </header>
+      <PageHeader
+        title={
+          <>
+            Transaction <span className="text-gradient">History</span>
+          </>
+        }
+        description="View all your past deposits and withdrawals."
+        breadcrumbs={[
+          { label: "Home", href: "/" },
+          { label: "Transactions" },
+        ]}
+        statusChips={
+          walletAddress
+            ? [
+                {
+                  label: `${transactions.length} Total`,
+                  variant: "cyan" as const,
+                },
+                {
+                  label: isLoading ? "Loading..." : "Up to date",
+                  variant: (isLoading ? "warning" : "success") as const,
+                },
+              ]
+            : undefined
+        }
+      />
 
       {!walletAddress ? (
         <div style={{ textAlign: "center", padding: "48px" }}>
@@ -183,24 +209,19 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           <section
             className="glass-panel"
             style={{ padding: "24px", background: "var(--bg-muted)" }}
-            aria-label="Transaction history"
+            aria-labelledby="transactions-heading"
           >
             <div className="portfolio-toolbar">
               <div>
-                <h3 style={{ marginBottom: "6px" }}>Transactions</h3>
-                <p
-                  style={{
-                    color: "var(--text-secondary)",
-                    fontSize: "0.92rem",
-                  }}
-                >
+                <h2 id="transactions-heading" style={{ marginBottom: "6px" }}>Transactions</h2>
+                <p className="text-body-sm" style={{ color: "var(--text-secondary)" }}>
                   Sort and filter your deposit and withdrawal history.
                 </p>
               </div>
 
               <div className="portfolio-toolbar-controls">
                 <label className="input-group" style={{ minWidth: "160px" }}>
-                  <span>Type</span>
+                  <span className="text-body-sm">Type</span>
                   <div className="input-wrapper">
                     <select
                       aria-label="Filter by type"
@@ -218,7 +239,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                 </label>
 
                 <label className="input-group" style={{ minWidth: "120px" }}>
-                  <span>Rows</span>
+                  <span className="text-body-sm">Rows</span>
                   <div className="input-wrapper">
                     <select
                       aria-label="Rows per page"
@@ -235,13 +256,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
               </div>
             </div>
 
-            <div
-              style={{
-                color: "var(--text-secondary)",
-                fontSize: "0.86rem",
-                marginBottom: "16px",
-              }}
-            >
+            <div className="text-body-sm" style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>
               {isLoading
                 ? "Loading transactions..."
                 : `${totalItems} transactions found`}

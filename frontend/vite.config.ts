@@ -8,6 +8,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
   return {
+    resolve: {
+      alias: {
+        "es-toolkit/compat/sortBy": "/src/shims/esToolkitSortBy.ts",
+      },
+    },
     build: {
       sourcemap: true,
     },
@@ -24,8 +29,8 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       setupFiles: "./src/tests/setup.ts",
       css: true,
-      include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-      exclude: ["e2e/**"],
+      include: ["src/**/*.{test,spec}.{ts,tsx}"],
+      exclude: ["e2e/**", "node_modules/**", "dist/**"],
     },
   };
 });

@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -9,10 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import { TrendingUp } from "./icons";
-import {
-  getVaultHistory,
-  type VaultHistoryPoint,
-} from "../lib/vaultApi";
+import { useVaultHistory } from "../hooks/useVaultData";
 
 function formatTick(iso: string) {
   const d = new Date(iso.includes("T") ? iso : `${iso}T12:00:00`);
@@ -25,17 +21,7 @@ function formatTick(iso: string) {
 const chartMargin = { top: 8, right: 12, left: 4, bottom: 8 };
 
 const VaultPerformanceChart: React.FC = () => {
-  const [data, setData] = useState<VaultHistoryPoint[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getVaultHistory().then((points) => {
-      if (!cancelled) setData(points);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data = [] } = useVaultHistory();
 
   return (
     <div style={{ width: "100%" }}>
@@ -96,7 +82,7 @@ const VaultPerformanceChart: React.FC = () => {
               axisLine={false}
               tickLine={false}
               width={44}
-              tickFormatter={(v) => (typeof v === "number" ? v.toFixed(1) : String(v))}
+              tickFormatter={(v: unknown) => (typeof v === "number" ? v.toFixed(1) : String(v))}
             />
             <Tooltip
               contentStyle={{
@@ -106,10 +92,10 @@ const VaultPerformanceChart: React.FC = () => {
                 color: "var(--text-primary)",
                 fontSize: "0.85rem",
               }}
-              labelFormatter={(label) =>
+              labelFormatter={(label: unknown) =>
                 typeof label === "string" ? formatTick(label) : String(label)
               }
-              formatter={(value) => [
+              formatter={(value: unknown) => [
                 typeof value === "number" ? value.toFixed(3) : String(value),
                 "Index",
               ]}

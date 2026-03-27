@@ -15,7 +15,7 @@ export function useForm<T extends object>(
   const [touched, setTouched] = useState<Partial<Record<keyof T, boolean>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleChange = (event: ChangeEvent<any>) => {
+  const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = event.target;
     const key = name as keyof T;
 
@@ -25,7 +25,7 @@ export function useForm<T extends object>(
     }));
   };
 
-  const handleBlur = (event: FocusEvent<any>) => {
+  const handleBlur = (event: FocusEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name } = event.target;
     const key = name as keyof T;
 

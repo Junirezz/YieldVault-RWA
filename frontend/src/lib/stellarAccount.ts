@@ -9,6 +9,14 @@ const MAINNET_HORIZON = "https://horizon.stellar.org";
 const USDC_CODE = "USDC";
 const USDC_ISSUER = import.meta.env.VITE_USDC_ISSUER;
 
+function isCreditBalance(
+  balance: Horizon.HorizonApi.BalanceLine,
+): balance is
+  | Horizon.HorizonApi.BalanceLineAsset<"credit_alphanum4">
+  | Horizon.HorizonApi.BalanceLineAsset<"credit_alphanum12"> {
+  return balance.asset_type === "credit_alphanum4" || balance.asset_type === "credit_alphanum12";
+}
+
 function toHorizonUrl(rpcUrl: string): string {
   if (rpcUrl.includes(TESTNET_SOROBAN_RPC)) return TESTNET_HORIZON;
   if (rpcUrl.includes(MAINNET_SOROBAN_RPC)) return MAINNET_HORIZON;
@@ -35,7 +43,7 @@ export async function fetchUsdcBalance(
   const account = await server.accounts().accountId(walletAddress).call();
 
   const usdc = account.balances.find((balance) => {
-    if (balance.asset_type === "native") return false;
+    if (!isCreditBalance(balance)) return false;
     if (balance.asset_code !== USDC_CODE) return false;
     if (USDC_ISSUER && balance.asset_issuer !== USDC_ISSUER) return false;
     return true;
