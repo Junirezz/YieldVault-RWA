@@ -96,7 +96,7 @@ const VaultPerformanceChart: React.FC = () => {
               axisLine={false}
               tickLine={false}
               width={44}
-              tickFormatter={(v) => (typeof v === "number" ? v.toFixed(1) : String(v))}
+              tickFormatter={(v: unknown) => (typeof v === "number" ? v.toFixed(1) : String(v))}
             />
             <Tooltip
               contentStyle={{
@@ -106,10 +106,10 @@ const VaultPerformanceChart: React.FC = () => {
                 color: "var(--text-primary)",
                 fontSize: "0.85rem",
               }}
-              labelFormatter={(label) =>
+              labelFormatter={(label: unknown) =>
                 typeof label === "string" ? formatTick(label) : String(label)
               }
-              formatter={(value) => [
+              formatter={(value: unknown) => [
                 typeof value === "number" ? value.toFixed(3) : String(value),
                 "Index",
               ]}

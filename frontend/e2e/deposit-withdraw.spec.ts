@@ -1,7 +1,7 @@
 ﻿/**
  * Flow 2: Deposit & Withdraw Transaction
  */
-import { test, expect, interceptApiRoutes, stubFreighterConnected } from './fixtures';
+import { test, expect, interceptApiRoutes, stubFreighterConnected, stubFreighterDisconnected } from './fixtures';
 
 const MOCK_ADDRESS = 'GABC1TEST2STELLAR3ADDRESS4FAKE5XYZ6ABCDEFGHIJKLMNOPQRSTU';
 const SHORT_ADDR = `${MOCK_ADDRESS.substring(0, 5)}...${MOCK_ADDRESS.substring(MOCK_ADDRESS.length - 4)}`;
@@ -10,6 +10,7 @@ const SHORT_ADDR = `${MOCK_ADDRESS.substring(0, 5)}...${MOCK_ADDRESS.substring(M
 test.describe('Deposit panel  no wallet', () => {
   test.beforeEach(async ({ page }) => {
     await interceptApiRoutes(page);
+    await stubFreighterDisconnected(page);
   });
 
   test('deposit panel shows wallet-not-connected overlay', async ({ page }) => {

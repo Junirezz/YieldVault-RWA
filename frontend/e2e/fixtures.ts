@@ -188,6 +188,60 @@ export async function stubFreighterConnected(page: Page, address: string) {
   }, address);
 }
 
+export async function stubFreighterDisconnected(page: Page) {
+  await page.addInitScript(() => {
+    const stub = { connected: false };
+    (window as unknown as Record<string, unknown>).__freighterStub = stub;
+
+    window.addEventListener("message", (event) => {
+      if (
+        event.source !== window ||
+        !event.data ||
+        event.data.source !== "FREIGHTER_EXTERNAL_MSG_REQUEST"
+      ) {
+        return;
+      }
+
+      const { messageId, type } = event.data as { messageId: number; type: string };
+
+      let response: Record<string, unknown> = {
+        source: "FREIGHTER_EXTERNAL_MSG_RESPONSE",
+        messagedId: messageId,
+      };
+
+      switch (type) {
+        case "REQUEST_ALLOWED_STATUS":
+        case "SET_ALLOWED_STATUS":
+          response = { ...response, isAllowed: false };
+          break;
+        case "REQUEST_PUBLIC_KEY":
+        case "REQUEST_ACCESS":
+          response = { ...response, publicKey: "" };
+          break;
+        case "REQUEST_CONNECTION_STATUS":
+          response = { ...response, isConnected: false };
+          break;
+        case "REQUEST_NETWORK_DETAILS":
+          response = {
+            ...response,
+            networkDetails: {
+              network: "TESTNET",
+              networkName: "Test SDF Network",
+              networkUrl: "https://horizon-testnet.stellar.org",
+              networkPassphrase: "Test SDF Network ; September 2015",
+              sorobanRpcUrl: "https://soroban-testnet.stellar.org",
+            },
+          };
+          break;
+        default:
+          return;
+      }
+
+      window.postMessage(response, window.location.origin);
+    });
+  });
+}
+
 type Fixtures = {
   /** Page with API routes intercepted — no wallet connected */
   appPage: Page;

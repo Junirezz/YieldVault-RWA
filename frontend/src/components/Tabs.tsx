@@ -151,7 +151,7 @@ export function TabsTrigger({ value, children, className = "" }: { value: string
     const parent = e.currentTarget.closest('[role="tablist"]');
     if (!parent) return;
 
-    const tabs = Array.from(parent.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
+    const tabs = Array.from(parent.querySelectorAll('button[data-value]')) as HTMLButtonElement[];
     const index = tabs.indexOf(e.currentTarget);
     if (index === -1) return;
 
@@ -175,13 +175,10 @@ export function TabsTrigger({ value, children, className = "" }: { value: string
 
   return (
     <button
-      role="tab"
-      aria-selected={isActive}
-      aria-controls={`tabpanel-${value}`}
-      id={`tab-${value}`}
+      type="button"
+      aria-pressed={isActive}
       data-state={isActive ? "active" : "inactive"}
       data-value={value}
-      tabIndex={isActive ? 0 : -1}
       className={`tabs-trigger ${isActive ? "active" : ""} ${className}`}
       onClick={() => onValueChange(value)}
       onKeyDown={handleKeyDown}
@@ -199,9 +196,6 @@ export function TabsContent({ value, children, className = "" }: { value: string
 
   return (
     <div
-      role="tabpanel"
-      id={`tabpanel-${value}`}
-      aria-labelledby={`tab-${value}`}
       data-state={isActive ? "active" : "inactive"}
       className={`tabs-content ${className}`}
       tabIndex={0}

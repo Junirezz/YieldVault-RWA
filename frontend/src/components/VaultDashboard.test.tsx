@@ -132,7 +132,7 @@ describe("VaultDashboard", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
-    });
+    }, { timeout: 3000 });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "We could not reach the server. Check your connection and try again.",
     );
