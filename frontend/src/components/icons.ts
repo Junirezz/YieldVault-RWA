@@ -1,5 +1,8 @@
 export {
   Activity,
+  AlertCircle,
+  Check,
+  Copy,
   Layers,
   Loader2,
   LogOut,

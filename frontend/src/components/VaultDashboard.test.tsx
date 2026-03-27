@@ -85,6 +85,8 @@ describe("VaultDashboard", () => {
     expect(screen.getByText(/Current APY/i)).toBeInTheDocument();
 
     expect(await screen.findByText(/Sovereign Debt/i)).toBeInTheDocument();
+    expect(screen.getByText(/Strategy ID:/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Copy strategy ID/i })).toBeInTheDocument();
   });
 
   it("allows switching between deposit and withdraw tabs", async () => {
@@ -137,6 +139,33 @@ describe("VaultDashboard", () => {
     });
     
     expect(screen.getByText("1350.50")).toBeInTheDocument();
+  });
+
+  it("fills the input with max allowable amount via MAX button", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const maxButton = screen.getByRole("button", { name: "MAX" });
+    fireEvent.click(maxButton);
+    const input = screen.getByPlaceholderText("0.00");
+    expect(input).toHaveValue(1250.5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(maxButton);
+    expect(input).toHaveValue(1250.5);
+  });
+
+  it("prevents transactions above the max allowable amount", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Deposit" }));
+
+    expect(screen.getByText(/Amount exceeds maximum/i)).toBeInTheDocument();
   });
 
   it("shows a normalized API error message when data loading fails", async () => {

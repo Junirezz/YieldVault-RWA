@@ -138,6 +138,8 @@ describe("Portfolio", () => {
     expect(await screen.findByText(/Tokenized T-Bills/i)).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Sort by Asset/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Position ID:/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Copy position ID/i }).length).toBeGreaterThan(0);
   });
 
   it("persists filter state in the URL", async () => {

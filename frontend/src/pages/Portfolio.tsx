@@ -5,6 +5,8 @@ import {
   type DataTableColumn,
 } from "../components/DataTable";
 import { normalizeApiError, isValidationError, type ApiError, type ValidationError } from "../lib/api";
+import CopyButton from "../components/CopyButton";
+import { normalizeApiError, type ApiError } from "../lib/api";
 import {
   getPortfolioHoldings,
   type PortfolioHolding,
@@ -38,6 +40,18 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
         <div style={{ fontWeight: 600 }}>{row.asset}</div>
         <div style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
           {row.vaultName}
+        </div>
+        <div
+          className="copy-field"
+          style={{ marginTop: "8px", color: "var(--text-secondary)", fontSize: "0.78rem" }}
+        >
+          <span>Position ID:</span>
+          <span className="copy-field-value copy-field-value-mono">{row.id}</span>
+          <CopyButton
+            value={row.id}
+            label="position ID"
+            successDescription={`Position ID ${row.id} has been copied to your clipboard.`}
+          />
         </div>
       </div>
     ),

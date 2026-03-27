@@ -1,9 +1,11 @@
 import React from 'react';
 import { Sun, Moon } from './icons';
 import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from '../i18n';
 
 const ThemeToggle: React.FC = () => {
     const { theme, toggleTheme } = useTheme();
+    const { t } = useTranslation();
 
     return (
         <button
@@ -23,7 +25,11 @@ const ThemeToggle: React.FC = () => {
                 color: 'var(--text-primary)',
                 boxShadow: 'var(--shadow-glass)'
             }}
-            aria-label={`Toggle to ${theme === 'light' ? 'dark' : 'light'} mode`}
+            aria-label={
+                theme === "light"
+                    ? t("theme.toggleToDark")
+                    : t("theme.toggleToLight")
+            }
         >
             <div style={{ position: 'relative', width: '20px', height: '20px' }}>
                 <div style={{

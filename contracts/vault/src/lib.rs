@@ -1,5 +1,6 @@
 #![no_std]
 
+#[cfg(test)]
 mod test;
 #[cfg(test)]
 mod fuzz_math;
@@ -104,8 +105,15 @@ impl YieldVault {
             return Err(VaultError::AlreadyInitialized);
         }
 
+        let state = VaultState {
+            total_shares: 0,
+            total_assets: 0,
+            is_paused: false,
+        };
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TokenAsset, &token);
+        env.storage().instance().set(&DataKey::State, &state);
         env.storage().instance().set(&DataKey::TotalAssets, &0i128);
         env.storage().instance().set(&DataKey::TotalShares, &0i128);
 
@@ -165,8 +173,9 @@ impl YieldVault {
         Self::get_state(&env).total_shares
     }
 
-    /// Read the total underlying assets (idle in vault + invested in strategy).
+    /// Read the total underlying assets represented by the vault.
     pub fn total_assets(env: Env) -> i128 {
+        Self::get_state(&env).total_assets
         let idle_assets = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
 
         let strategy_assets = if let Some(strategy_addr) = Self::strategy(env.clone()) {
@@ -562,6 +571,34 @@ impl YieldVault {
         }
     }
 
+    /// Returns the current share price scaled by 10^18 (1_000_000_000_000_000_000).
+    ///
+    /// Formula: share_price = (total_assets * 10^18) / total_shares
+    ///
+    /// To convert to a human-readable price, divide the result by 10^18.
+    /// Examples:
+    ///   1_000_000_000_000_000_000 → 1.0  (1 share = 1 token)
+    ///   1_200_000_000_000_000_000 → 1.2  (1 share = 1.2 tokens, after yield accrual)
+    ///   500_000_000_000_000_000  → 0.5  (1 share = 0.5 tokens)
+    ///
+    /// Returns 1:1 (10^18) when no shares have been minted yet (fresh vault).
+    pub fn get_share_price(env: Env) -> i128 {
+        let ts = Self::total_shares(env.clone());
+        let ta = Self::total_assets(env.clone());
+
+        if ts == 0 {
+            // No shares minted yet — initial price is 1:1
+            return 1_000_000_000_000_000_000i128;
+        }
+
+        // Scale TVL up before dividing to preserve decimal precision.
+        // Using checked arithmetic to guard against overflow.
+        ta.checked_mul(1_000_000_000_000_000_000i128)
+            .expect("overflow in share price calculation")
+            .checked_div(ts)
+            .expect("division error in share price calculation")
+    }
+
     /// Deposits underlying tokens in exchange for vault shares.
     ///
     /// ### Parameters
@@ -695,6 +732,77 @@ impl YieldVault {
     pub fn accrue_yield(env: Env, amount: i128) -> Result<(), VaultError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
+
+        let strategy_addr = Self::strategy(env.clone()).expect("no strategy set");
+        let strategy_client = StrategyClient::new(&env, &strategy_addr);
+
+        let mut idle_ta = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
+        if idle_ta < amount { panic!("insufficient idle assets"); }
+
+        // Approve and deposit to strategy
+        let token_addr = Self::token(env.clone());
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.approve(&env.current_contract_address(), &strategy_addr, &amount, &env.ledger().sequence());
+        
+        strategy_client.deposit(&amount);
+
+        // Update idle assets
+        env.storage().instance().set(&DataKey::TotalAssets, &(idle_ta - amount));
+    }
+
+    /// Recall funds from the strategy.
+    pub fn divest(env: Env, amount: i128) {
+        // Can be called by admin or internally by withdraw
+        let strategy_addr = Self::strategy(env.clone()).expect("no strategy set");
+        let strategy_client = StrategyClient::new(&env, &strategy_addr);
+
+        strategy_client.withdraw(&amount);
+
+        // The strategy contract should have transferred funds back to the vault
+        let idle_ta = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalAssets, &(idle_ta + amount));
+    }
+
+    /// Admin function to distribute realized yield into the vault.
+    ///
+    /// Yield increases `total_assets` without minting any new shares, which
+    /// raises the share price for existing holders.
+    pub fn distribute_yield(env: Env, amount: i128) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if amount <= 0 {
+            panic!("yield amount must be > 0");
+        }
+
+        let token_addr = Self::token(env.clone());
+        let token_client = token::Client::new(&env, &token_addr);
+
+        token_client.transfer(&admin, &env.current_contract_address(), &amount);
+
+        let ta = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&DataKey::TotalAssets)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalAssets, &(ta + amount));
+
+        let mut state = Self::get_state(&env);
+        state.total_assets += amount;
+        env.storage().instance().set(&DataKey::State, &state);
+
+        env.events().publish(
+            (symbol_short!("yielddist"), admin),
+            (amount, state.total_assets, state.total_shares),
+        );
+    }
+
+    /// Legacy admin function retained for compatibility.
+    pub fn accrue_yield(env: Env, amount: i128) {
+        Self::distribute_yield(env, amount);
+    }
+
+    pub fn report_benji_yield(env: Env, strategy: Address, amount: i128) {
+        strategy.require_auth();
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
