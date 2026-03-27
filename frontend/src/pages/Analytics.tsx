@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity } from "../components/icons";
 import ApiStatusBanner from "../components/ApiStatusBanner";
+import PageHeader from "../components/PageHeader";
 import { useVault } from "../context/VaultContext";
 
 const Analytics: React.FC = () => {
@@ -10,14 +11,20 @@ const Analytics: React.FC = () => {
         <div className="glass-panel" style={{ padding: '32px' }}>
             {error && <ApiStatusBanner error={error} />}
 
-            <header style={{ textAlign: 'center', marginBottom: '48px' }}>
-                <h1 style={{ fontSize: '2.5rem', marginBottom: '16px' }}>
-                    <span className="text-gradient">Project Analytics</span>
-                </h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem' }}>
-                    Historical performance and pool health metrics.
-                </p>
-            </header>
+            <PageHeader
+                title={<span className="text-gradient">Project Analytics</span>}
+                description="Historical performance and pool health metrics."
+                breadcrumbs={[
+                    { label: "Home", href: "/" },
+                    { label: "Analytics" },
+                ]}
+                statusChips={[
+                    {
+                        label: isLoading ? "Syncing" : "Live",
+                        variant: (isLoading ? "warning" : "success") as const,
+                    },
+                ]}
+            />
 
             <div className="flex gap-lg" style={{ flexWrap: 'wrap' }}>
                 <div className="glass-panel" style={{ flex: '1 1 300px', padding: '24px', background: 'var(--bg-muted)' }}>

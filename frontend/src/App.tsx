@@ -1,3 +1,13 @@
+import { useEffect, useState, lazy, Suspense } from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { ThemeProvider } from "./context/ThemeContext";
+import { ToastProvider } from "./context/ToastContext";
+import { VaultProvider } from "./context/VaultContext";
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
@@ -92,6 +102,45 @@ function AppErrorFallback() {
   return (
     <Sentry.ErrorBoundary fallback={<AppErrorFallback />} showDialog>
       <ThemeProvider>
+        <ToastProvider>
+          <VaultProvider>
+            <Router>
+              <div className="app-container">
+                <Navbar
+                  walletAddress={walletAddress}
+                  onConnect={handleConnect}
+                  onDisconnect={handleDisconnect}
+                />
+                <main
+                  className="container"
+                  style={{ marginTop: "100px", paddingBottom: "60px" }}
+                >
+                  <Suspense fallback={<LoadingPage />}>
+                    {/* Replaced Routes with SentryRoutes to capture performance events */}
+                    <SentryRoutes>
+                      <Route
+                        path="/"
+                        element={<Home walletAddress={walletAddress} usdcBalance={usdcBalance} />}
+                      />
+                      <Route
+                        path="/portfolio"
+                        element={<Portfolio walletAddress={walletAddress} />}
+                      />
+                      <Route path="/analytics" element={<Analytics />} />
+                      <Route
+                        path="/transactions"
+                        element={
+                          <TransactionHistory walletAddress={walletAddress} />
+                        }
+                      />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </SentryRoutes>
+                  </Suspense>
+                </main>
+              </div>
+            </Router>
+          </VaultProvider>
+        </ToastProvider>
         <VaultProvider>
           <Router>
             <div className="app-container">

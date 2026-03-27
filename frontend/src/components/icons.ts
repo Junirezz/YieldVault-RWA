@@ -1,5 +1,6 @@
 export {
   Activity,
+  ChevronRight,
   AlertCircle,
   Check,
   Copy,
