@@ -19,7 +19,8 @@ export function useUrlState<TFilters extends Record<string, string>>(
   const state = useMemo(() => {
     const pageRaw = searchParams.get("page");
     const pageSizeRaw = searchParams.get("pageSize");
-    const sortDirectionRaw = searchParams.get("sortDirection");
+    // Support both "direction" and "sortDirection" as URL param names
+    const sortDirectionRaw = searchParams.get("direction") ?? searchParams.get("sortDirection");
 
     const pageNum = Number(pageRaw);
     const page =
@@ -74,7 +75,7 @@ export function useUrlState<TFilters extends Record<string, string>>(
             next.set("sortBy", updates.sortBy);
           }
           if (updates.sortDirection !== undefined) {
-            next.set("sortDirection", updates.sortDirection);
+            next.set("direction", updates.sortDirection);
           }
 
           if (updates.filters !== undefined) {

@@ -1,4 +1,4 @@
-import { createApiClient } from "./api";
+import { apiClient } from "./apiClient";
 
 export interface StrategyMetadata {
   id: string;
@@ -74,12 +74,6 @@ const MOCK_VAULT_HISTORY: VaultHistoryPoint[] = [
   { date: "2026-03-25", value: 103.75 },
 ];
 
-const apiClient = createApiClient({
-  baseUrl: import.meta.env.VITE_API_BASE_URL,
-  headers: {
-    Accept: "application/json",
-  },
-});
 
 export async function getVaultSummary() {
   return apiClient.get<VaultSummary>("/mock-api/vault-summary.json");
