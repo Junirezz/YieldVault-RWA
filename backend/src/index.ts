@@ -2,6 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
+import listEndpoints from './listEndpoints';
 
 dotenv.config();
 
@@ -29,12 +30,11 @@ const globalLimiter = rateLimit({
     // Skip rate limiting for health and ready checks
     return req.path === '/health' || req.path === '/ready';
   },
-  handler: (req: Request, res: Response) => {
+  handler: (_req: Request, res: Response) => {
     res.status(429).json({
       error: 'Too many requests',
       status: 429,
       message: 'Rate limit exceeded. Please try again later.',
-      retryAfter: req.rateLimit?.resetTime,
     });
   },
 });
@@ -43,19 +43,18 @@ const globalLimiter = rateLimit({
  * API endpoint rate limiter (stricter)
  * Per-user or per-API-key rate limiting
  */
-const apiLimiter = rateLimit({
+export const apiLimiter = rateLimit({
   windowMs: parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
   max: parseInt(process.env.API_RATE_LIMIT_MAX_REQUESTS || '30', 10),
   keyGenerator: (req: Request) => {
     // Use API key if provided, otherwise use IP
     return req.headers['x-api-key'] as string || req.ip || 'unknown';
   },
-  handler: (req: Request, res: Response) => {
+  handler: (_req: Request, res: Response) => {
     res.status(429).json({
       error: 'API rate limit exceeded',
       status: 429,
       message: 'Too many API requests. Please try again later.',
-      retryAfter: req.rateLimit?.resetTime,
     });
   },
 });
@@ -86,7 +85,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
  * 
  * Response: 200 OK or 503 Service Unavailable
  */
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   const health = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -112,7 +111,7 @@ app.get('/health', (req: Request, res: Response) => {
  * 
  * Response: 200 OK if ready, 503 Service Unavailable if not ready
  */
-app.get('/ready', (req: Request, res: Response) => {
+app.get('/ready', (_req: Request, res: Response) => {
   const readiness = {
     ready: true,
     timestamp: new Date().toISOString(),
@@ -138,7 +137,7 @@ app.get('/ready', (req: Request, res: Response) => {
  * Example protected API endpoint
  * Demonstrates rate limiting per API key
  */
-app.get('/api/vault/summary', apiLimiter, (req: Request, res: Response) => {
+app.get('/api/vault/summary', apiLimiter, (_req: Request, res: Response) => {
   // This would typically fetch data from Stellar RPC or database
   res.json({
     totalAssets: 0,
@@ -148,6 +147,10 @@ app.get('/api/vault/summary', apiLimiter, (req: Request, res: Response) => {
   });
 });
 
+// ─── List Endpoints with Pagination ─────────────────────────────────────────
+
+app.use(listEndpoints);
+
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
 /**
@@ -155,7 +158,6 @@ app.get('/api/vault/summary', apiLimiter, (req: Request, res: Response) => {
  */
 function getCacheHealth(): string {
   try {
-    const keys = cache.keys();
     cache.set('health-check', true);
     const value = cache.get('health-check');
     return value ? 'up' : 'down';
@@ -195,7 +197,7 @@ function checkStellarRpcDependency(): boolean {
 
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled error:', err);
   res.status(500).json({
     error: 'Internal Server Error',
@@ -220,20 +222,23 @@ app.use((req: Request, res: Response) => {
 
 // ─── Server Start ───────────────────────────────────────────────────────────
 
-const server = app.listen(port, () => {
-  console.log(`🚀 YieldVault Backend listening on port ${port}`);
-  console.log(`📊 Health check: http://localhost:${port}/health`);
-  console.log(`✅ Ready check: http://localhost:${port}/ready`);
-  console.log(`🌍 Environment: ${nodeEnv}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+// Only start server if this file is run directly (not imported as a module)
+if (require.main === module) {
+  const server = app.listen(port, () => {
+    console.log(`🚀 YieldVault Backend listening on port ${port}`);
+    console.log(`📊 Health check: http://localhost:${port}/health`);
+    console.log(`✅ Ready check: http://localhost:${port}/ready`);
+    console.log(`🌍 Environment: ${nodeEnv}`);
   });
-});
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+}
 
 export default app;
