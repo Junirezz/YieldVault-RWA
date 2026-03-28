@@ -1,7 +1,7 @@
 #![no_std]
 
 #[cfg(test)]
-mod test;
+mod event_tests;
 #[cfg(test)]
 mod fuzz_math;
 pub mod strategy;
@@ -126,6 +126,11 @@ impl YieldVault {
         env.storage().instance().set(&DataKey::DaoThreshold, &1i128);
         env.storage().instance().set(&DataKey::ProposalNonce, &0u32);
 
+        env.events().publish(
+            (symbol_short!("vault_initialized"), admin.clone()),
+            (token,),
+        );
+
         Ok(())
     }
 
@@ -134,6 +139,10 @@ impl YieldVault {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::Strategy, &strategy);
+        env.events().publish(
+            (symbol_short!("strategy_set"), admin),
+            (strategy,),
+        );
     }
 
     /// Read the active strategy address.
@@ -148,6 +157,10 @@ impl YieldVault {
         let mut state = Self::get_state(&env);
         state.is_paused = paused;
         env.storage().instance().set(&DataKey::State, &state);
+        env.events().publish(
+            (symbol_short!("vault_paused"), admin),
+            (paused,),
+        );
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -214,6 +227,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::KoreanDebtStrategy, &strategy);
+        env.events().publish(
+            (symbol_short!("korean_strategy_configured"), admin),
+            (strategy,),
+        );
     }
 
     pub fn accrue_korean_debt_yield(env: Env) -> i128 {
@@ -235,6 +252,10 @@ impl YieldVault {
         let mut state = Self::get_state(&env);
         state.total_assets += harvested;
         env.storage().instance().set(&DataKey::State, &state);
+        env.events().publish(
+            (symbol_short!("korean_yield_accrued"), admin),
+            (harvested, state.total_assets),
+        );
 
         harvested
     }
@@ -248,6 +269,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::DaoThreshold, &threshold);
+        env.events().publish(
+            (symbol_short!("dao_threshold_set"), admin),
+            (threshold,),
+        );
     }
 
     pub fn create_strategy_proposal(env: Env, proposer: Address, strategy: Address) -> u32 {
@@ -271,6 +296,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(next_nonce), &proposal);
+        env.events().publish(
+            (symbol_short!("strategy_proposal_created"), proposer),
+            (next_nonce, strategy),
+        );
         next_nonce
     }
 
@@ -313,7 +342,11 @@ impl YieldVault {
             .set(&DataKey::Proposal(proposal_id), &proposal);
         env.storage()
             .instance()
-            .set(&DataKey::Vote(proposal_id, voter), &true);
+            .set(&DataKey::Vote(proposal_id, voter.clone()), &true);
+        env.events().publish(
+            (symbol_short!("proposal_voted"), voter),
+            (proposal_id, support, weight),
+        );
     }
 
     pub fn execute_strategy_proposal(env: Env, proposal_id: u32) {
@@ -345,6 +378,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.events().publish(
+            (symbol_short!("proposal_executed"), env.storage().instance().get(&DataKey::Admin).unwrap()),
+            (proposal_id, proposal.strategy),
+        );
     }
 
     /// Adds a new RWA shipment to the tracking system.
@@ -380,6 +417,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::ShipmentStatusOf(shipment_id), &status);
+        env.events().publish(
+            (symbol_short!("shipment_added"), admin),
+            (shipment_id, status),
+        );
     }
 
     pub fn update_shipment_status(env: Env, shipment_id: u64, new_status: ShipmentStatus) {
@@ -395,7 +436,7 @@ impl YieldVault {
             return;
         }
 
-        let old_key = DataKey::ShipmentByStatus(old_status);
+        let old_key = DataKey::ShipmentByStatus(old_status.clone());
         let new_key = DataKey::ShipmentByStatus(new_status.clone());
 
         let old_ids = env
@@ -417,6 +458,10 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::ShipmentStatusOf(shipment_id), &new_status);
+        env.events().publish(
+            (symbol_short!("shipment_status_updated"), admin),
+            (shipment_id, old_status, new_status),
+        );
     }
 
     /// Returns a paginated list of shipment IDs filtered by status.
@@ -645,6 +690,10 @@ impl YieldVault {
             &DataKey::ShareBalance(user.clone()),
             &Self::checked_add(user_shares, shares_to_mint)?,
         );
+        env.events().publish(
+            (symbol_short!("deposit"), user.clone()),
+            (amount, shares_to_mint),
+        );
         
         Ok(shares_to_mint)
     }
@@ -741,12 +790,19 @@ impl YieldVault {
 
         // Update idle assets
         env.storage().instance().set(&DataKey::TotalAssets, &(idle_ta - amount));
+        env.events().publish(
+            (symbol_short!("strategy_invested"), admin),
+            (strategy_addr, amount),
+        );
         Ok(())
     }
 
     /// Recall funds from the strategy.
     pub fn divest(env: Env, amount: i128) {
         // Can be called by admin or internally by withdraw
+        if amount <= 0 {
+            return;
+        }
         let strategy_addr = Self::strategy(env.clone()).expect("no strategy set");
         let strategy_client = StrategyClient::new(&env, &strategy_addr);
 
@@ -755,6 +811,10 @@ impl YieldVault {
         // The strategy contract should have transferred funds back to the vault
         let idle_ta = env.storage().instance().get::<_, i128>(&DataKey::TotalAssets).unwrap_or(0);
         env.storage().instance().set(&DataKey::TotalAssets, &(idle_ta + amount));
+        env.events().publish(
+            (symbol_short!("strategy_divested"),),
+            (strategy_addr, amount),
+        );
     }
 
     /// Admin function to distribute realized yield into the vault.
@@ -787,7 +847,7 @@ impl YieldVault {
         env.storage().instance().set(&DataKey::State, &state);
 
         env.events().publish(
-            (symbol_short!("yielddist"), admin),
+            (symbol_short!("yield_distributed"), admin),
             (amount, state.total_assets, state.total_shares),
         );
     }
@@ -807,6 +867,11 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::TotalAssets, &Self::checked_add(ta, amount)?);
+
+        env.events().publish(
+            (symbol_short!("yield_reported"), strategy),
+            (amount,),
+        );
 
         Ok(())
     }
