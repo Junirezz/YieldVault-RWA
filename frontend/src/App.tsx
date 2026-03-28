@@ -10,6 +10,8 @@ import { VaultProvider } from "./context/VaultContext";
 import { KeyboardShortcutProvider } from "./context/KeyboardShortcutContext";
 import Navbar from "./components/Navbar";
 import ShortcutHelpModal from "./components/ShortcutHelpModal";
+import { FeatureGate } from "./components/FeatureGate";
+import { FeatureFlagProvider } from "./context/FeatureFlagContext";
 import "./index.css";
 
 import * as Sentry from "@sentry/react";
@@ -101,13 +103,25 @@ function AppContent() {
             <SentryRoutes>
               <Route
                 path="/"
-                element={<Home walletAddress={walletAddress} usdcBalance={usdcBalance} />}
+                element={
+                  <Home
+                    walletAddress={walletAddress}
+                    usdcBalance={usdcBalance}
+                  />
+                }
               />
               <Route
                 path="/portfolio"
                 element={<Portfolio walletAddress={walletAddress} />}
               />
-              <Route path="/analytics" element={<Analytics />} />
+              <Route
+                path="/analytics"
+                element={
+                  <FeatureGate flag="ANALYTICS_PAGE">
+                    <Analytics />
+                  </FeatureGate>
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </SentryRoutes>
           </Suspense>
@@ -121,13 +135,15 @@ function AppContent() {
 function App() {
   return (
     <Sentry.ErrorBoundary fallback={<AppErrorFallback />} showDialog>
-      <ThemeProvider>
-        <VaultProvider>
-          <Router>
-            <AppContent />
-          </Router>
-        </VaultProvider>
-      </ThemeProvider>
+      <FeatureFlagProvider>
+        <ThemeProvider>
+          <VaultProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </VaultProvider>
+        </ThemeProvider>
+      </FeatureFlagProvider>
     </Sentry.ErrorBoundary>
   );
 }

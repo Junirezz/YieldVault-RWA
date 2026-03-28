@@ -444,6 +444,49 @@ button {
   border: 1px solid rgba(0, 240, 255, 0.3);
 }
 
+/* Feature Gate */
+.feature-gate-fallback {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 44px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 85% 10%, var(--bg-gradient-2), transparent 45%),
+    radial-gradient(circle at 10% 100%, var(--bg-gradient-1), transparent 45%),
+    var(--bg-surface);
+}
+
+.feature-gate-icon {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-cyan);
+  background: var(--accent-cyan-dim);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+}
+
+.feature-gate-tag {
+  margin-bottom: 12px;
+}
+
+.feature-gate-title {
+  font-size: clamp(var(--text-2xl), 4vw, var(--text-3xl));
+  margin-bottom: 10px;
+  line-height: var(--leading-tight);
+}
+
+.feature-gate-description {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  max-width: 56ch;
+  margin: 0 auto;
+}
+
 /* Base button styles */
 .btn {
   display: inline-flex;
@@ -1123,6 +1166,18 @@ button {
 
 /* Mobile responsiveness for PageHeader */
 @media (max-width: 768px) {
+  .feature-gate-fallback {
+    padding: 28px 20px;
+  }
+
+  .feature-gate-title {
+    font-size: var(--text-2xl);
+  }
+
+  .feature-gate-description {
+    font-size: var(--text-sm);
+  }
+
   .page-header {
     text-align: left !important;
   }
@@ -1196,4 +1251,3 @@ button {
   background: var(--border-glass);
   margin: 16px 0;
 }
-
