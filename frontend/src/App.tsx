@@ -21,6 +21,7 @@ const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 const Home = lazy(() => import("./pages/Home"));
 const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Analytics = lazy(() => import("./pages/Analytics"));
+const UIPreview = lazy(() => import("./pages/UIPreview"));
 
 const LoadingPage = () => {
   const { t } = useTranslation();
@@ -108,6 +109,7 @@ function AppContent() {
                 element={<Portfolio walletAddress={walletAddress} />}
               />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/ui-kit" element={<UIPreview />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </SentryRoutes>
           </Suspense>

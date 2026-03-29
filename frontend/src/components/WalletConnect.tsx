@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { setAllowed } from "@stellar/freighter-api";
+import { setAllowed, isAllowed, getAddress } from "@stellar/freighter-api";
 import { Loader2, LogOut, Wallet } from './icons';
 import { hasCustomRpcConfig, networkConfig } from '../config/network';
 import { useToast } from '../context/ToastContext';
@@ -62,6 +62,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({ walletAddress, onConnect,
                         description: t('toast.walletConnected.description'),
                     });
                 }
+            }
             const discoveredAddress = await discoverConnectedAddress();
             if (discoveredAddress) {
                 onConnect(discoveredAddress);

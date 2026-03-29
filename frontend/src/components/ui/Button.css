@@ -1,0 +1,111 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-md);
+  font-weight: var(--font-semibold);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  width: fit-content;
+  white-space: nowrap;
+}
+
+/* Variants */
+.btn-primary {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.8), rgba(112, 0, 255, 0.8));
+  color: white;
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 1), rgba(112, 0, 255, 1));
+  transform: translateY(-2px);
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.3);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  border-color: var(--border-glass);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-danger {
+  background: var(--bg-error);
+  border-color: var(--border-error);
+  color: var(--text-error);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 50, 50, 0.2);
+  border-color: rgba(255, 50, 50, 0.4);
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--border-glass);
+  color: var(--text-primary);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-cyan);
+}
+
+/* Sizes */
+.btn-sm {
+  padding: 8px 16px;
+  font-size: var(--text-xs);
+  min-height: 36px;
+}
+
+.btn-md {
+  padding: 12px 24px;
+  font-size: var(--text-sm);
+  min-height: 44px;
+}
+
+.btn-lg {
+  padding: 16px 32px;
+  font-size: var(--text-base);
+  min-height: 52px;
+}
+
+/* States */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn.is-loading {
+  position: relative;
+  color: transparent !important;
+}
+
+.btn-spinner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn-icon-left, .btn-icon-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

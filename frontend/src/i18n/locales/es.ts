@@ -67,6 +67,7 @@ export const es = {
     title: "Atajos de teclado",
     close: "Cerrar",
     hint: "Presiona Esc para cerrar este dilogo",
+    hint: "Presiona Esc para cerrar este diálogo",
   },
   refresh: {
     live: "En vivo",
