@@ -1,0 +1,48 @@
+{
+  "detectors_to_run": [
+    "reentrancy",
+    "unchecked-transfer",
+    "unchecked-lowlevel",
+    "uninitialized-state",
+    "uninitialized-local",
+    "constant-function-asm",
+    "constant-function-state",
+    "arbitrary-send",
+    "arbitrary-send-erc20",
+    "arbitrary-send-erc20-permit",
+    "unchecked-send",
+    "suicidal",
+    "unprotected-upgrade",
+    "erc20-interface",
+    "erc721-interface",
+    "incorrect-equality",
+    "locked-ether",
+    "shadowing-state",
+    "shadowing-abstract",
+    "shadowing-builtin",
+    "shadowing-local",
+    "void-cst",
+    "back-to-back-txs",
+    "tx-origin",
+    "assembly",
+    "controlled-array-length"
+  ],
+  "exclude": [
+    "naming-convention",
+    "solc-description",
+    "solc-version",
+    "low-level-calls",
+    "too-many-digits",
+    "constable-states"
+  ],
+  "filter_paths": [
+    "node_modules",
+    "lib",
+    "test",
+    "mock"
+  ],
+  "json": "-",
+  "markdown_root": "./",
+  "severity_filter": "medium"
+}
+
