@@ -1,0 +1,97 @@
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: fit-content;
+}
+
+.input-group.full-width {
+  width: 100%;
+}
+
+.input-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+}
+
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 0 16px;
+  transition: all 0.2s ease;
+  min-height: 44px;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px var(--accent-cyan-dim);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.input-wrapper.is-error {
+  border-color: var(--text-error);
+  box-shadow: 0 0 0 1px rgba(255, 107, 107, 0.2);
+}
+
+.input-wrapper.is-disabled {
+  opacity: 0.5;
+  background: rgba(0, 0, 0, 0.1);
+  cursor: not-allowed;
+}
+
+.input-field {
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 12px 0;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.input-field:disabled {
+  cursor: not-allowed;
+}
+
+.input-field::placeholder {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.input-icon-left, .input-icon-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: color 0.2s ease;
+}
+
+.input-wrapper:focus-within .input-icon-left,
+.input-wrapper:focus-within .input-icon-right {
+  color: var(--accent-cyan);
+}
+
+.input-message {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.input-message.is-error {
+  color: var(--text-error);
+}
+
+/* Chrome autofill fix */
+.input-field:-webkit-autofill,
+.input-field:-webkit-autofill:hover,
+.input-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0px 1000px transparent inset;
+  transition: background-color 5000s ease-in-out 0s;
+}

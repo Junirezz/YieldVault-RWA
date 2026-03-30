@@ -1,0 +1,61 @@
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-glass);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.ui-th {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--text-xs);
+  border-bottom: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ui-td {
+  padding: 16px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-glass);
+  transition: background 0.2s ease;
+}
+
+.ui-tr:last-child .ui-td {
+  border-bottom: none;
+}
+
+.ui-tr:hover .ui-td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ui-th.align-center, .ui-td.align-center { text-align: center; }
+.ui-th.align-right, .ui-td.align-right { text-align: right; }
+
+/* Custom scrollbar for table container */
+.table-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: var(--border-glass);
+  border-radius: 10px;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}

@@ -67,6 +67,7 @@ export const en = {
     title: "Keyboard Shortcuts",
     close: "Close",
     hint: "Press Esc to close this dialog",
+  },
   refresh: {
     live: "Live",
     stopped: "Stopped",
@@ -80,5 +81,11 @@ export const en = {
     pausedHidden: "Paused (tab hidden)",
     pausedOffline: "Paused (offline)",
     pausedManual: "Paused",
+  },
+  timeline: {
+    loading: "Loading activity...",
+    empty: "No activity to display",
+    today: "Today",
+    yesterday: "Yesterday",
   },
 } as const;

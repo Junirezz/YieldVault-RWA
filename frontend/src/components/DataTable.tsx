@@ -186,6 +186,8 @@ export function DataTable<T>({
               {t("dataTable.next")}
             </button>
           </div>
+        </div>
+      )}
       {pagination && (
         <div className="data-table-pagination" style={{ padding: 0 }}>
           <Pagination

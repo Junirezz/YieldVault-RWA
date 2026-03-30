@@ -100,6 +100,8 @@ describe('WalletConnect', () => {
         expect(mockOnDisconnect).toHaveBeenCalled();
     });
 
+    it('polls wallet permissions on an interval', async () => {
+        vi.useFakeTimers();
     it('handles wallet disconnects gracefully during polling', async () => {
         // Helper to flush all pending promises
         const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -107,7 +109,8 @@ describe('WalletConnect', () => {
         vi.useFakeTimers({ shouldAdvanceTime: false });
         mockedFreighter.isAllowed
             .mockResolvedValueOnce({ isAllowed: true })
-            .mockResolvedValueOnce({ isAllowed: false });
+            .mockResolvedValueOnce({ isAllowed: false })
+            .mockResolvedValue({ isAllowed: false });
         mockedFreighter.getAddress.mockResolvedValue({ address: 'GABC123' });
 
         render(
@@ -118,6 +121,14 @@ describe('WalletConnect', () => {
             />
         );
 
+        expect(mockOnConnect).toHaveBeenCalledWith('GABC123');
+
+        act(() => {
+            vi.advanceTimersByTime(10000);
+        });
+
+        expect(mockedFreighter.isAllowed.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
         // Advance timers by 0 to flush the initial synchronous setup,
         // then flush microtasks from the async calls
         vi.advanceTimersByTime(0);

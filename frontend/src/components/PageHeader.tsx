@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "./icons";
+import Badge, { BadgeColor } from "./Badge";
 
 export interface Breadcrumb {
   label: string;
@@ -28,6 +29,15 @@ export interface PageHeaderProps {
   actions?: PageHeaderAction[];
   centered?: boolean;
 }
+
+const variantToColor: Record<string, BadgeColor> = {
+  default: "default",
+  cyan: "cyan",
+  purple: "purple",
+  success: "success",
+  warning: "warning",
+  error: "error",
+};
 
 const PageHeader: React.FC<PageHeaderProps> = ({
   title,
@@ -150,34 +160,13 @@ const PageHeader: React.FC<PageHeaderProps> = ({
             aria-live="polite"
           >
             {statusChips.map((chip, index) => (
-              <span
+              <Badge
                 key={index}
-                className={`tag ${chip.variant || "default"}`}
-                style={{
-                  ...(chip.variant === "success" && {
-                    background: "rgba(34, 197, 94, 0.1)",
-                    color: "#22c55e",
-                    border: "1px solid rgba(34, 197, 94, 0.3)",
-                  }),
-                  ...(chip.variant === "warning" && {
-                    background: "rgba(245, 158, 11, 0.1)",
-                    color: "#f59e0b",
-                    border: "1px solid rgba(245, 158, 11, 0.3)",
-                  }),
-                  ...(chip.variant === "error" && {
-                    background: "var(--bg-error)",
-                    color: "var(--text-error)",
-                    border: "1px solid var(--border-error)",
-                  }),
-                  ...(chip.variant === "purple" && {
-                    background: "rgba(112, 0, 255, 0.1)",
-                    color: "#a855f7",
-                    border: "1px solid rgba(112, 0, 255, 0.3)",
-                  }),
-                }}
+                variant="pill"
+                color={variantToColor[chip.variant || "default"]}
               >
                 {chip.label}
-              </span>
+              </Badge>
             ))}
           </div>
         )}

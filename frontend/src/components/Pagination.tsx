@@ -53,6 +53,10 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       <div className="pagination-controls-wrapper">
+        <div className="pagination-size-label" aria-live="polite">
+          Page {page} of {totalPages}
+        </div>
+
         {onPageSizeChange && (
           <div className="pagination-size-selector">
             <label htmlFor="pageSizeSelect" className="sr-only">
@@ -83,7 +87,7 @@ export const Pagination: React.FC<PaginationProps> = ({
             className="btn btn-outline pagination-btn-nav"
             onClick={() => onPageChange?.(page - 1)}
             disabled={page <= 1}
-            aria-label="Go to previous page"
+            aria-label="Previous"
           >
             <ChevronLeft size={16} />
           </button>
@@ -124,7 +128,7 @@ export const Pagination: React.FC<PaginationProps> = ({
             className="btn btn-outline pagination-btn-nav"
             onClick={() => onPageChange?.(page + 1)}
             disabled={page >= totalPages}
-            aria-label="Go to next page"
+            aria-label="Next"
           >
             <ChevronRight size={16} />
           </button>

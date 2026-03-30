@@ -1,5 +1,5 @@
 :root {
-  /* Default Dark Mode */
+  /* Color tokens - default dark theme */
   --bg-main: #0a0b10;
   --bg-surface: rgba(18, 20, 29, 0.6);
   --bg-surface-hover: rgba(28, 30, 40, 0.8);
@@ -16,6 +16,15 @@
 
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-display: "Avenir Next", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --line-height-tight: 1.2;
+  --line-height-base: 1.5;
+  --line-height-relaxed: 1.7;
   
   /* Typography Scale */
   --text-xs: 0.75rem;      /* 12px */
@@ -49,6 +58,15 @@
   --radius-md: 12px;
   --radius-lg: 20px;
   --radius-xl: 32px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
 
   --bg-gradient-1: rgba(112, 0, 255, 0.08);
   --bg-gradient-2: rgba(0, 240, 255, 0.05);
@@ -102,6 +120,7 @@ body {
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
+  line-height: var(--line-height-base);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   background-image: 
@@ -294,6 +313,15 @@ a {
   text-decoration: none;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
 button {
   font-family: var(--font-sans);
   border: none;
@@ -321,7 +349,7 @@ button {
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 var(--space-6);
 }
 
 .flex {
@@ -336,10 +364,46 @@ button {
   justify-content: space-between;
 }
 
-.gap-sm { gap: 8px; }
-.gap-md { gap: 16px; }
-.gap-lg { gap: 24px; }
-.gap-xl { gap: 32px; }
+.gap-sm { gap: var(--space-2); }
+.gap-md { gap: var(--space-4); }
+.gap-lg { gap: var(--space-6); }
+.gap-xl { gap: var(--space-8); }
+
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: calc(-1 * var(--space-12));
+  z-index: 999;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+.app-main {
+  margin-top: 100px;
+  padding-bottom: 60px;
+}
+
+.loading-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  color: var(--accent-cyan);
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+}
+
+.loading-title {
+  font-size: 2rem;
+  margin-bottom: var(--space-4);
+}
 
 /* Vault dashboard: two columns on desktop; stacked on narrow viewports */
 .vault-dashboard {

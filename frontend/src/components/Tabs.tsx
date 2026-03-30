@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
 import "./Tabs.css";
 
 interface TabsContextType {
@@ -36,6 +35,15 @@ function TabsWithUrl({
   urlParam = "tab",
   children,
   className = "",
+}: TabsProps) {
+  const [internalValue, setInternalValue] = useState(defaultValue || "");
+
+  const [urlValue, setUrlValue] = useState<string | null>(() => {
+    if (!syncWithUrl || typeof window === "undefined") {
+      return null;
+    }
+    return new URLSearchParams(window.location.search).get(urlParam);
+  });
 }: Omit<TabsProps, "syncWithUrl">) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [internalValue, setInternalValue] = useState(defaultValue || "");
@@ -49,6 +57,31 @@ function TabsWithUrl({
       : internalValue;
 
   useEffect(() => {
+    if (!syncWithUrl || typeof window === "undefined") {
+      return;
+    }
+
+    const handlePopState = () => {
+      setUrlValue(new URLSearchParams(window.location.search).get(urlParam));
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [syncWithUrl, urlParam]);
+
+  useEffect(() => {
+    if (!syncWithUrl || typeof window === "undefined") {
+      return;
+    }
+    if (!urlValue && defaultValue) {
+      const params = new URLSearchParams(window.location.search);
+      params.set(urlParam, defaultValue);
+      window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+      setUrlValue(defaultValue);
+    }
+  }, [syncWithUrl, urlValue, defaultValue, urlParam]);
     if (!urlValue && defaultValue) {
       setSearchParams(
         (prev) => {
@@ -66,6 +99,11 @@ function TabsWithUrl({
       setInternalValue(newValue);
     }
 
+    if (syncWithUrl) {
+      const params = new URLSearchParams(window.location.search);
+      params.set(urlParam, newValue);
+      window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+      setUrlValue(newValue);
     setSearchParams(
       (prev) => {
         const newParams = new URLSearchParams(prev);

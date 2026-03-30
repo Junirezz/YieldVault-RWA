@@ -1,0 +1,53 @@
+.glass-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glass);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.glass-card:not(.no-hover):hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-card.is-clickable {
+  cursor: pointer;
+}
+
+.card-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.card-body {
+  padding: 24px;
+  flex: 1;
+}
+
+.card-body.no-padding {
+  padding: 0;
+}
+
+.card-footer {
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border-top: 1px solid var(--border-glass);
+}
+
+/* Specific spacing rules for common card content */
+.card-body > *:not(:last-child) {
+  margin-bottom: 16px;
+}
+
+.card-header h1, 
+.card-header h2, 
+.card-header h3 {
+  margin: 0;
+}

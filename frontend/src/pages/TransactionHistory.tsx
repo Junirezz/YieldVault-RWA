@@ -1,6 +1,7 @@
 import React from "react";
 import { useSearchParams } from "react-router-dom";
 import ApiStatusBanner from "../components/ApiStatusBanner";
+import Badge from "../components/Badge";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import PageHeader from "../components/PageHeader";
 import { normalizeApiError, type ApiError } from "../lib/api";
@@ -21,19 +22,18 @@ interface TransactionHistoryProps {
 
 type TxTypeFilter = "all" | "deposit" | "withdrawal";
 
-// Task 4.2: DataTable column config for transactions
 const columns: DataTableColumn<Transaction>[] = [
   {
     id: "type",
     header: "Type",
     sortable: true,
     cell: (row) => (
-      <span
-        className={`tag ${row.type === "deposit" ? "cyan" : "red"}`}
-        style={{ textTransform: "capitalize" }}
+      <Badge
+        variant="status"
+        color={row.type === "deposit" ? "cyan" : "error"}
       >
         {row.type}
-      </span>
+      </Badge>
     ),
   },
   {

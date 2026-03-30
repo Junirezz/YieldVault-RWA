@@ -5,7 +5,7 @@ export const es = {
   app: {
     loading: {
       title: "Cargando...",
-      subtitle: "Asegurando la conexión RWA",
+      subtitle: "Asegurando la conexinnn RWA",
     },
     errorBoundary:
       "Se produjo un error. Nuestro equipo ha sido notificado.",
@@ -15,9 +15,9 @@ export const es = {
       primary: "YieldVault",
       accent: "RWA",
     },
-    vaults: "Bóvedas",
+    vaults: "Bvvvedas",
     portfolio: "Portafolio",
-    analytics: "Analítica",
+    analytics: "Analica",
   },
   theme: {
     toggleToDark: "Cambiar al modo oscuro",
@@ -35,29 +35,29 @@ export const es = {
     walletConnected: {
       title: "Billetera conectada",
       description:
-        "Freighter está conectado a tu sesión de YieldVault.",
+        "Freighter est conectado a tu sesinnn de YieldVault.",
     },
     walletPermissionRequired: {
       title: "Permiso de billetera requerido",
       description:
-        "Freighter no devolvió una clave pública para esta sesión.",
+        "Freighter no devolvi   una clave pblica para esta sesinnn.",
     },
     walletConnectionFailed: {
-      title: "Falló la conexión de la billetera",
+      title: "Fall   la conexinnn de la billetera",
       description:
-        "Asegúrate de que Freighter esté instalado, desbloqueado y aprobado para este sitio.",
+        "Asegrate de que Freighter est instalado, desbloqueado y aprobado para este sitio.",
     },
     walletDisconnected: {
       title: "Billetera desconectada",
       description:
-        "Puedes volver a conectar en cualquier momento para seguir gestionando posiciones en la bóveda.",
+        "Puedes volver a conectar en cualquier momento para seguir gestionando posiciones en la bvvveda.",
     },
   },
   apiBanner: {
     title: "Datos no disponibles",
   },
   dataTable: {
-    pageLabel: "Página",
+    pageLabel: "PasswordService" gina",
     pageOf: "de",
     previous: "Anterior",
     next: "Siguiente",
@@ -66,7 +66,9 @@ export const es = {
   shortcuts: {
     title: "Atajos de teclado",
     close: "Cerrar",
+    hint: "Presiona Esc para cerrar este dilogo",
     hint: "Presiona Esc para cerrar este diálogo",
+  },
   refresh: {
     live: "En vivo",
     stopped: "Detenido",
@@ -76,9 +78,15 @@ export const es = {
     refreshing: "Actualizando...",
     justNow: "Ahora",
     oneMinuteAgo: "Hace 1 min",
-    minutesAgo: "min atrás",
-    pausedHidden: "Pausado (pestaña oculta)",
-    pausedOffline: "Pausado (sin conexión)",
+    minutesAgo: "min atrs",
+    pausedHidden: "Pausado (pestaa oculta)",
+    pausedOffline: "Pausado (sin conexinnn)",
     pausedManual: "Pausado",
+  },
+  timeline: {
+    loading: "Cargando actividad...",
+    empty: "No hay actividad para mostrar",
+    today: "Hoy",
+    yesterday: "Ayer",
   },
 } as const;
