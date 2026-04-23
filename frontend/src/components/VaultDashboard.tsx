@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, ShieldCheck, TrendingUp, Wallet as WalletIcon } from "./icons";
+import { Activity, ShieldCheck, TrendingUp, Wallet as WalletIcon, Loader2 } from "./icons";
 import { hasCustomRpcConfig, networkConfig } from "../config/network";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
@@ -229,8 +229,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                   </div>
                 </div>
 
-                <button className="btn btn-primary" style={{ width: "100%", padding: "16px" }} onClick={() => handleTransaction(tab)} disabled={isProcessing !== null || !amount || Number(amount) <= 0}>
-                  {isProcessing === tab ? "Processing Transaction..." : tab === "deposit" ? "Approve & Deposit" : "Withdraw Funds"}
+                <button className="btn btn-primary" style={{ width: "100%", padding: "16px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }} onClick={() => handleTransaction(tab)} disabled={isProcessing !== null || !amount || Number(amount) <= 0}>
+                  {isProcessing === tab ? (
+                    <>
+                      <Loader2 size={16} className="spin" style={{ animation: "spin 0.9s linear infinite" }} />
+                      Processing Transaction...
+                    </>
+                  ) : (
+                    tab === "deposit" ? "Approve & Deposit" : "Withdraw Funds"
+                  )}
                 </button>
               </TabsContent>
             ))}
