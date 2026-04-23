@@ -9,7 +9,6 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { apiLimiter } from './rateLimiter';
 import {
   parsePaginationQuery,
   paginateWithCursor,
@@ -168,7 +167,7 @@ function filterVaultHistory(
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 /**
- * GET /api/transactions
+ * GET /transactions
  * 
  * List transactions with pagination and filtering.
  * 
@@ -197,7 +196,7 @@ function filterVaultHistory(
  *   timestamp: string
  * }
  */
-router.get('/api/transactions', apiLimiter, (req: Request, res: Response) => {
+router.get('/transactions', (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, TRANSACTION_PAGINATION_CONFIG);
     const filters = {
@@ -232,7 +231,7 @@ router.get('/api/transactions', apiLimiter, (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/portfolio/holdings
+ * GET /portfolio/holdings
  * 
  * List portfolio holdings with pagination and filtering.
  * 
@@ -261,7 +260,7 @@ router.get('/api/transactions', apiLimiter, (req: Request, res: Response) => {
  *   timestamp: string
  * }
  */
-router.get('/api/portfolio/holdings', apiLimiter, (req: Request, res: Response) => {
+router.get('/portfolio/holdings', (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, PORTFOLIO_PAGINATION_CONFIG);
     const filters = {
@@ -296,7 +295,7 @@ router.get('/api/portfolio/holdings', apiLimiter, (req: Request, res: Response) 
 });
 
 /**
- * GET /api/vault/history
+ * GET /vault/history
  * 
  * List vault history points with pagination and filtering.
  * 
@@ -325,7 +324,7 @@ router.get('/api/portfolio/holdings', apiLimiter, (req: Request, res: Response) 
  *   timestamp: string
  * }
  */
-router.get('/api/vault/history', apiLimiter, (req: Request, res: Response) => {
+router.get('/vault/history', (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, VAULT_HISTORY_PAGINATION_CONFIG);
     const filters = {

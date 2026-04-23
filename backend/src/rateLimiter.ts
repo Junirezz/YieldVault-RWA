@@ -13,13 +13,11 @@ import { Request, Response } from 'express';
 export const apiLimiter = rateLimit({
   windowMs: parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
   max: parseInt(process.env.API_RATE_LIMIT_MAX_REQUESTS || '30', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
   keyGenerator: (req: Request) => {
     // Use API key if provided, otherwise use IP
     return req.headers['x-api-key'] as string || req.ip || 'unknown';
-  },
-  skip: (req: Request) => {
-    // Skip rate limiting in test environment
-    return process.env.NODE_ENV === 'test';
   },
   handler: (_req: Request, res: Response) => {
     res.status(429).json({

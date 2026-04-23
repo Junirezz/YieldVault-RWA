@@ -1,8 +1,14 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
-import rateLimit from 'express-rate-limit';
 import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
 import listEndpoints from './listEndpoints';
+import { apiLimiter } from './rateLimiter';
+import {
+  buildIdempotencyFingerprint,
+  idempotencyStore,
+  IdempotencyConflictError,
+} from './idempotency';
+import { getJobHealthStatus, getJobMetrics } from './jobGovernance';
 
 dotenv.config();
 
@@ -13,56 +19,32 @@ const nodeEnv = process.env.NODE_ENV || 'development';
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
 
-// ─── Rate Limiting Middleware ────────────────────────────────────────────────
-// Issue #145: Rate limiting per IP/user key
-
-/**
- * Global rate limiter
- * Default: 100 requests per 15 minutes per IP
- */
-const globalLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skip: (req: Request) => {
-    // Skip rate limiting for health and ready checks
-    return req.path === '/health' || req.path === '/ready';
-  },
-  handler: (_req: Request, res: Response) => {
-    res.status(429).json({
-      error: 'Too many requests',
-      status: 429,
-      message: 'Rate limit exceeded. Please try again later.',
-    });
-  },
-});
-
-/**
- * API endpoint rate limiter (stricter)
- * Per-user or per-API-key rate limiting
- */
-export const apiLimiter = rateLimit({
-  windowMs: parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
-  max: parseInt(process.env.API_RATE_LIMIT_MAX_REQUESTS || '30', 10),
-  keyGenerator: (req: Request) => {
-    // Use API key if provided, otherwise use IP
-    return req.headers['x-api-key'] as string || req.ip || 'unknown';
-  },
-  handler: (_req: Request, res: Response) => {
-    res.status(429).json({
-      error: 'API rate limit exceeded',
-      status: 429,
-      message: 'Too many API requests. Please try again later.',
-    });
-  },
-});
-
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
 app.use(express.json());
-app.use(globalLimiter);
+
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/v1')) {
+    next();
+    return;
+  }
+
+  const redirectedPath = req.originalUrl.replace(/^\/api(?!\/v1)/, '/api/v1');
+  res.setHeader('Deprecation', 'true');
+  res.setHeader(
+    'Sunset',
+    new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString()
+  );
+  res.setHeader('Link', `<${redirectedPath}>; rel="alternate"`);
+  res.redirect(308, redirectedPath);
+});
+
+app.use('/api/v1', (_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-API-Version', 'v1');
+  next();
+});
+
+app.use('/api/v1', apiLimiter);
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -95,6 +77,7 @@ app.get('/health', (_req: Request, res: Response) => {
       api: 'up',
       cache: getCacheHealth(),
       stellarRpc: getStellarRpcHealth(),
+      jobs: getJobHealthStatus(),
     },
   };
 
@@ -137,7 +120,7 @@ app.get('/ready', (_req: Request, res: Response) => {
  * Example protected API endpoint
  * Demonstrates rate limiting per API key
  */
-app.get('/api/vault/summary', apiLimiter, (_req: Request, res: Response) => {
+app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
   // This would typically fetch data from Stellar RPC or database
   res.json({
     totalAssets: 0,
@@ -147,9 +130,70 @@ app.get('/api/vault/summary', apiLimiter, (_req: Request, res: Response) => {
   });
 });
 
+app.post('/api/v1/vault/deposits', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const idempotencyKey = getIdempotencyKey(req);
+    if (!idempotencyKey) {
+      res.status(400).json({
+        error: 'Missing Idempotency Key',
+        status: 400,
+        message: 'Provide x-idempotency-key for mutation requests.',
+      });
+      return;
+    }
+
+    const depositRequest = normalizeDepositRequest(req.body);
+    if (!depositRequest.valid) {
+      res.status(400).json({
+        error: 'Invalid request body',
+        status: 400,
+        message: depositRequest.message,
+      });
+      return;
+    }
+
+    const fingerprint = buildIdempotencyFingerprint(depositRequest.value);
+    const { result, replayed } = await idempotencyStore.execute(
+      idempotencyKey,
+      fingerprint,
+      async () => ({
+        statusCode: 201,
+        body: {
+          depositId: `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          status: 'queued',
+          receivedAt: new Date().toISOString(),
+          ...depositRequest.value,
+        },
+      })
+    );
+
+    res.setHeader('Idempotency-Key', idempotencyKey);
+    res.setHeader('Idempotency-Status', replayed ? 'replayed' : 'created');
+    res.status(result.statusCode).json(result.body);
+  } catch (error) {
+    if (error instanceof IdempotencyConflictError) {
+      res.status(409).json({
+        error: 'Idempotency conflict',
+        status: 409,
+        message: error.message,
+      });
+      return;
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/v1/ops/job-metrics', (_req: Request, res: Response) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    ...getJobMetrics(),
+  });
+});
+
 // ─── List Endpoints with Pagination ─────────────────────────────────────────
 
-app.use(listEndpoints);
+app.use('/api/v1', listEndpoints);
 
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
@@ -178,12 +222,11 @@ function getStellarRpcHealth(): string {
   try {
     // Simulate RPC availability check
     // In production: make actual call to VITE_SOROBAN_RPC_URL
-    const rpcUrl = process.env.STELLAR_RPC_URL;
+    const rpcUrl = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
     if (!rpcUrl) {
-      console.warn('STELLAR_RPC_URL not configured');
       return 'down';
     }
-    // Assume up if URL is configured
+    // Assume up if a URL is configured
     // Real implementation would make a test RPC call
     return 'up';
   } catch {
@@ -193,6 +236,52 @@ function getStellarRpcHealth(): string {
 
 function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
+}
+
+interface DepositRequest {
+  amount: number;
+  asset: string;
+  walletAddress: string;
+}
+
+function getIdempotencyKey(req: Request): string | undefined {
+  const key = req.header('x-idempotency-key');
+  return key?.trim() || undefined;
+}
+
+function normalizeDepositRequest(body: unknown):
+  | { valid: true; value: DepositRequest }
+  | { valid: false; message: string } {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const payload = body as Record<string, unknown>;
+  const amount = typeof payload.amount === 'number' ? payload.amount : Number(payload.amount);
+  const asset = typeof payload.asset === 'string' ? payload.asset.trim() : '';
+  const walletAddress =
+    typeof payload.walletAddress === 'string' ? payload.walletAddress.trim() : '';
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { valid: false, message: 'amount must be a positive number.' };
+  }
+
+  if (!asset) {
+    return { valid: false, message: 'asset is required.' };
+  }
+
+  if (!walletAddress) {
+    return { valid: false, message: 'walletAddress is required.' };
+  }
+
+  return {
+    valid: true,
+    value: {
+      amount,
+      asset,
+      walletAddress,
+    },
+  };
 }
 
 // ─── Error Handler ──────────────────────────────────────────────────────────

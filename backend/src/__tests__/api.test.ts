@@ -75,7 +75,7 @@ describe('Backend API', () => {
 
   describe('Rate Limiting - API Endpoints', () => {
     it('should include rate limit headers in response', async () => {
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       expect(response.status).toBe(200);
       expect(response.headers).toHaveProperty('ratelimit-limit');
@@ -88,7 +88,9 @@ describe('Backend API', () => {
       // It attempts to exceed the API rate limit
       const requests = Array(35).fill(null); // More than configured limit
       const results = await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() =>
+          request(app).get('/api/v1/vault/summary').set('x-api-key', 'rate-limit-test')
+        )
       );
 
       expect(results.some((r) => r.status === 429)).toBe(true);
@@ -98,10 +100,12 @@ describe('Backend API', () => {
       // Make multiple requests to trigger rate limit
       const requests = Array(35).fill(null);
       await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() =>
+          request(app).get('/api/v1/vault/summary').set('x-api-key', 'rate-limit-test')
+        )
       );
 
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       if (response.status === 429) {
         expect(response.body).toHaveProperty('error');
@@ -113,7 +117,7 @@ describe('Backend API', () => {
     it('should support per-user rate limiting with API key', async () => {
       // Test that API key in header is used for rate limiting
       const response = await request(app)
-        .get('/api/vault/summary')
+        .get('/api/v1/vault/summary')
         .set('x-api-key', 'test-key-123');
 
       expect([200, 429]).toContain(response.status);
@@ -124,7 +128,7 @@ describe('Backend API', () => {
 
   describe('Error Responses', () => {
     it('should return 404 for unknown endpoint', async () => {
-      const response = await request(app).get('/api/unknown');
+      const response = await request(app).get('/api/v1/unknown');
 
       expect(response.status).toBe(404);
       expect(response.body).toHaveProperty('error', 'Not Found');
@@ -134,7 +138,7 @@ describe('Backend API', () => {
     });
 
     it('should return proper JSON error format', async () => {
-      const response = await request(app).get('/api/nonexistent');
+      const response = await request(app).get('/api/v1/nonexistent');
 
       expect(response.headers['content-type']).toContain('application/json');
       expect(response.body).toHaveProperty('error');
@@ -152,7 +156,7 @@ describe('Backend API', () => {
     });
 
     it('should not expose sensitive info in error responses', async () => {
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       // Ensure no stack traces in error responses in production-like environment
       if (response.status >= 500) {
@@ -178,13 +182,18 @@ describe('Backend API', () => {
 
     it('should handle JSON body parsing', async () => {
       const response = await request(app)
-        .post('/api/vault/summary')
+        .post('/api/v1/vault/deposits')
+        .set('x-idempotency-key', 'integration-deposit-1')
         .send({
-          test: 'data',
+          amount: 1250,
+          asset: 'USDC',
+          walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz234567',
         });
 
-      // Should either accept or reject with proper error
-      expect([200, 405, 404, 400]).toContain(response.status);
+      // Should accept with a replay-safe mutation response
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('depositId');
+      expect(response.headers).toHaveProperty('idempotency-status', 'created');
     });
   });
 });

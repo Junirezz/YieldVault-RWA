@@ -10,7 +10,9 @@
     "test": "jest",
     "test:smoke": "npm run build && npm run start &",
     "lint": "eslint src",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "check:migrations": "node scripts/check-migrations.js",
+    "ci:governance": "npm run lint && npm run test && npm run build && npm run check:migrations"
   },
   "keywords": [
     "stellar",
