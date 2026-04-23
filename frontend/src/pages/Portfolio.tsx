@@ -25,14 +25,7 @@ interface PortfolioProps {
   walletAddress: string | null;
 }
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
-
-const numberFormatter = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 2,
-});
+import { formatCurrency, formatNumber } from "../lib/formatters";
 
 const columns: DataTableColumn<PortfolioHolding>[] = [
   {
@@ -69,7 +62,7 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
     cell: (row) => (
       <div>
         <div style={{ fontWeight: 600 }}>
-          {numberFormatter.format(row.shares)} {row.symbol}
+          {formatNumber(row.shares)} {row.symbol}
         </div>
         <div style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
           Issuer: {row.issuer}
@@ -93,7 +86,7 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
     header: "Value",
     sortable: true,
     align: "right",
-    cell: (row) => <span>{currencyFormatter.format(row.valueUsd)}</span>,
+    cell: (row) => <span>{formatCurrency(row.valueUsd)}</span>,
   },
   {
     id: "unrealizedGainUsd",
@@ -111,7 +104,7 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
         }}
       >
         {row.unrealizedGainUsd >= 0 ? "+" : ""}
-        {currencyFormatter.format(row.unrealizedGainUsd)}
+        {formatCurrency(row.unrealizedGainUsd)}
       </span>
     ),
   },
@@ -276,7 +269,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                 Total Assets
               </div>
               <div style={{ fontSize: "var(--text-4xl)", fontWeight: "var(--font-semibold)" }}>
-                {currencyFormatter.format(totalValue)}
+                {formatCurrency(totalValue)}
               </div>
             </div>
             <div
@@ -293,7 +286,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                   fontWeight: "var(--font-semibold)",
                 }}
               >
-                +{currencyFormatter.format(totalGain)}
+                +{formatCurrency(totalGain)}
               </div>
             </div>
           </div>
