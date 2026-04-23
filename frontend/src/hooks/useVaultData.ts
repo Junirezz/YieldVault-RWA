@@ -11,6 +11,7 @@ export function useVaultSummary() {
     queryKey: queryKeys.vault.summary(),
     queryFn: getVaultSummary,
     staleTime: 30000, // 30 seconds
+    refetchInterval: 30000, // 30 seconds
   });
 }
 

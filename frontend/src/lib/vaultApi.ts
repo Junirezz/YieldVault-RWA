@@ -13,6 +13,7 @@ export interface StrategyMetadata {
 
 export interface VaultSummary {
   tvl: number;
+  depositCap: number;
   apy: number;
   participantCount: number;
   monthlyGrowthPct: number;

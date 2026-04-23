@@ -3,8 +3,8 @@ import React, {
   useContext,
   useEffect,
 } from "react";
+import { subscribeToApiTelemetry, normalizeApiError } from "../lib/api";
 import type { ApiError } from "../lib/api";
-import { subscribeToApiTelemetry } from "../lib/api";
 import type { VaultSummary } from "../lib/vaultApi";
 import { networkConfig } from "../config/network";
 import { useVaultSummary } from "../hooks/useVaultData";
@@ -12,6 +12,10 @@ import { useVaultSummary } from "../hooks/useVaultData";
 interface VaultContextType {
   summary: VaultSummary;
   tvl: number;
+  depositCap: number;
+  utilization: number;
+  isCapWarning: boolean;
+  isCapReached: boolean;
   apy: number;
   formattedTvl: string;
   formattedApy: string;
@@ -23,6 +27,7 @@ interface VaultContextType {
 
 const DEFAULT_SUMMARY: VaultSummary = {
   tvl: 12450800,
+  depositCap: 15000000,
   apy: 8.45,
   participantCount: 1248,
   monthlyGrowthPct: 12.5,
@@ -61,15 +66,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
     : DEFAULT_SUMMARY;
 
   const error: ApiError | null = queryError
-    ? {
-        code: "FETCH_ERROR",
-        message: queryError.message,
-        userMessage: "Failed to load vault data",
-        statusCode: 500,
-      }
+    ? normalizeApiError(queryError)
     : null;
 
   const lastUpdate = new Date(summary.updatedAt);
+
+  const utilization = summary.depositCap > 0 ? summary.tvl / summary.depositCap : 0;
+  const isCapWarning = utilization > 0.9 && utilization < 1.0;
+  const isCapReached = utilization >= 1.0;
 
   useEffect(() => {
     const unsubscribe = subscribeToApiTelemetry((event) => {
@@ -98,6 +102,10 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
       value={{
         summary,
         tvl: summary.tvl,
+        depositCap: summary.depositCap,
+        utilization,
+        isCapWarning,
+        isCapReached,
         apy: summary.apy,
         formattedTvl,
         formattedApy,
