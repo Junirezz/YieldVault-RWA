@@ -158,16 +158,39 @@ describe("VaultDashboard", () => {
     expect(input).toHaveValue(1250.5);
   });
 
-  it("prevents transactions above the max allowable amount", async () => {
+  it("shows inline error and blocks submit for amounts above balance", async () => {
     renderDashboard("GABC123");
 
     expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText("0.00");
     fireEvent.change(input, { target: { value: "2000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approve & Deposit" }));
+    fireEvent.blur(input);
 
-    expect(await screen.findByText(/Amount exceeds maximum/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Deposit amount cannot exceed your available USDC balance./i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve & Deposit" })).toBeDisabled();
+  });
+
+  it("shows minimum deposit validation and clears error when corrected", async () => {
+    renderDashboard("GABC123");
+
+    expect(await screen.findByText(/Approve & Deposit/i)).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "0.5" } });
+    fireEvent.blur(input);
+
+    expect(screen.getByText(/Minimum deposit is 1.00 USDC./i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve & Deposit" })).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "10" } });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Minimum deposit is 1.00 USDC./i)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Approve & Deposit" })).toBeEnabled();
+    });
   });
 
   it("shows a normalized API error message when data loading fails", async () => {
@@ -182,5 +205,8 @@ describe("VaultDashboard", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
     }, { timeout: 3000 });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "We could not reach the server. Check your connection and try again.",
+    );
   });
 });

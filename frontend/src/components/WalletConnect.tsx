@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { setAllowed, isAllowed, getAddress } from "@stellar/freighter-api";
-import { Loader2, LogOut, Wallet, AlertCircle, Check } from './icons';
+import { Loader2, LogOut, Wallet, AlertCircle } from "./icons";
 import { hasCustomRpcConfig, networkConfig } from '../config/network';
 import { useToast } from '../context/ToastContext';
 import { useTranslation } from '../i18n';

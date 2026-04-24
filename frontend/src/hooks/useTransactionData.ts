@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getTransactions } from "../lib/transactionApi";
+import type { TransactionQueryInput } from "../lib/api/schemas";
 import { queryKeys } from "../lib/queryClient";
 
 /**
@@ -14,7 +15,8 @@ export function useTransactionHistory(walletAddress: string | null) {
       if (!walletAddress) {
         throw new Error("Wallet address required");
       }
-      return getTransactions(walletAddress);
+      const query: TransactionQueryInput = { walletAddress };
+      return getTransactions(query);
     },
     staleTime: 15000, // 15 seconds
     enabled: !!walletAddress, // Only fetch when wallet is connected

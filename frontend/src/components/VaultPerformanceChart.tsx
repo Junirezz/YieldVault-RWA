@@ -3,7 +3,7 @@ import { TrendingUp } from "./icons";
 import { useVaultHistory } from "../hooks/useVaultData";
 
 const VaultPerformanceChart: React.FC = () => {
-  const { data = [] } = useVaultHistory();
+  const { data: _history = [] } = useVaultHistory();
 
   return (
     <div style={{ width: "100%" }}>

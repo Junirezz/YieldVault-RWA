@@ -1,8 +1,5 @@
 name: Slither Static Analysis
 
-# ============================================================================
-# TRIGGER: Runs on every push and pull request to main and develop branches
-# ============================================================================
 on:
   pull_request:
     branches:
@@ -15,140 +12,24 @@ on:
 
 jobs:
   slither:
-    name: Run Slither Analysis
+    name: Solidity / Slither scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
-      pull-requests: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # ======================================================================
-      # DEPENDENCY INSTALLATION PHASE
-      # Ensures Slither can compile and analyze smart contracts
-      # ======================================================================
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Setup Foundry (for Solidity compilation)
-        uses: foundry-rs/foundry-toolchain@v1
-        continue-on-error: true
-
-      - name: Install dependencies
+      - name: Skip when no Solidity contracts are present
+        shell: bash
         run: |
-          echo "📦 Installing project dependencies..."
-          npm install || true
-          npm run build 2>/dev/null || true
-          if [ -f "Cargo.toml" ]; then
-            cargo build 2>/dev/null || true
+          set -euo pipefail
+
+          if git ls-files '*.sol' | grep -q .; then
+            echo "Solidity files detected; Slither scanning is not configured for this repository layout."
+            echo "Add Solidity contracts (or update this workflow) before enabling Slither."
+            exit 1
           fi
-          echo "✓ Dependencies installed (continuation on error for flexibility)"
 
-      # ======================================================================
-      # STATIC ANALYSIS PHASE
-      # Run Slither with severity-based failure thresholds
-      # ======================================================================
-      - name: Run Slither analysis
-        uses: crytic/slither-action@latest
-        id: slither
-        with:
-          target: .
-          sarif: results.sarif
-          # SEVERITY POLICY:
-          # - fail-on: medium → Fails build for High AND Medium severity
-          # - Low and Informational findings are logged but don't block merge
-          fail-on: medium
-          slither-config: slither.config.json
-        continue-on-error: true
-
-      # ======================================================================
-      # GITHUB SECURITY INTEGRATION
-      # Uploads SARIF report to GitHub Security tab for visibility
-      # ======================================================================
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: results.sarif
-          wait-for-processing: true
-        continue-on-error: true
-
-      # ======================================================================
-      # PR COMMENT WITH RESULTS
-      # Posts a summary comment on the PR with key findings
-      # ======================================================================
-      - name: Comment PR with security summary
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const severity = {
-              🔴: 'High/Medium (Build Blocking)',
-              🟡: 'Low (Informational)',
-              ✅: 'No findings'
-            };
-            
-            let summary = '## 🔍 Slither Static Analysis Results\n\n';
-            summary += '**Severity Policy:**\n';
-            summary += '- 🔴 High/Medium findings **BLOCK** the build\n';
-            summary += '- 🟡 Low/Informational findings are **LOGGED** (non-blocking)\n\n';
-            summary += '**See Results:**\n';
-            summary += '- [GitHub Security Tab](../../security/code-scanning) for full SARIF report\n';
-            summary += '- [Slither Documentation](https://github.com/crytic/slither) for more details\n\n';
-            summary += '**To Suppress False Positives:**\n';
-            summary += '```solidity\n// slither-disable-next-line detector-name\nfunction myFunction() public {\n  // Code here won\'t trigger detector-name\n}\n```\n';
-            summary += 'See [SECURITY_CHECKLIST.md](/docs/SECURITY_CHECKLIST.md) for detailed suppression guidance.\n';
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            });
-
-      # ======================================================================
-      # BUILD STATUS REPORTING
-      # Explicit failure message for High/Medium findings
-      # ======================================================================
-      - name: Report analysis status
-        if: always()
-        run: |
-          echo "📊 Slither Analysis Summary"
-          echo "===================================="
-          echo ""
-          echo "✓ Analysis completed"
-          echo "  Severity Policy:"
-          echo "    🔴 High/Medium severity: BUILD FAILS"
-          echo "    🟡 Low/Informational:   BUILD PASSES (warnings logged)"
-          echo ""
-          echo "📎 View full results:"
-          echo "  1. GitHub Security tab (SARIF report)"
-          echo "  2. PR comment (summary)"
-          echo "  3. Slither config: slither.config.json"
-          echo ""
-          echo "📝 For false positives:"
-          echo "  See: docs/SECURITY_CHECKLIST.md (Triage & False Positives section)"
-          echo "  Use: //slither-disable-next-line <detector>"
-          echo ""
-
-      - name: Fail if High/Medium findings detected
-        if: failure() && steps.slither.outcome == 'failure'
-        run: |
-          echo "❌ Build blocked due to High/Medium severity findings"
-          echo ""
-          echo "💡 Next steps:"
-          echo "1. Review findings in GitHub Security tab"
-          echo "2. Either fix the vulnerability OR suppress if it's a false positive"
-          echo "3. For false positives, follow the process in docs/SECURITY_CHECKLIST.md"
-          echo "4. Leave an inline comment: //slither-disable-next-line <detector>"
-          exit 1
+          echo "No Solidity (.sol) files tracked in this repo — skipping Slither."

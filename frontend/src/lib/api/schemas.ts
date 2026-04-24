@@ -20,8 +20,9 @@ import { z } from "zod";
  * Validates format only — not an on-chain account existence check.
  */
 export const StellarAddressSchema = z
-  .string({ required_error: "Wallet address is required" })
+  .string()
   .trim()
+  .min(1, { message: "Wallet address is required" })
   .regex(/^G[A-Z2-7]{55}$/, {
     message: "Must be a valid Stellar public key (starts with G, 56 chars)",
   });
@@ -31,8 +32,9 @@ export const StellarAddressSchema = z
  * Allows up to 7 decimal places to match Stellar's stroop precision.
  */
 export const AmountSchema = z
-  .string({ required_error: "Amount is required" })
+  .string()
   .trim()
+  .min(1, { message: "Amount is required" })
   .regex(/^\d+(\.\d{1,7})?$/, {
     message: "Amount must be a positive number with up to 7 decimal places",
   })
@@ -42,14 +44,14 @@ export const AmountSchema = z
 
 /** Positive integer share count. */
 export const ShareCountSchema = z
-  .number({ required_error: "Share count is required", invalid_type_error: "Share count must be a number" })
+  .number({ error: "Share count is required" })
   .int("Share count must be a whole number")
   .positive("Share count must be greater than zero")
   .max(1_000_000_000, "Share count exceeds maximum allowed value");
 
 /** Supported asset codes. Extend as new assets are on-boarded. */
-export const AssetCodeSchema = z.enum(["XLM", "USDC", "yUSDC", "RWA"], {
-  errorMap: () => ({ message: "Asset must be one of: XLM, USDC, yUSDC, RWA" }),
+export const AssetCodeSchema = z.enum(["XLM", "USDC", "yUSDC", "RWA"] as const, {
+  error: "Asset must be one of: XLM, USDC, yUSDC, RWA",
 });
 
 /** ISO 8601 date string (YYYY-MM-DD). */
@@ -182,3 +184,4 @@ export const TransactionQuerySchema = z.object({
 });
 
 export type TransactionQuery = z.infer<typeof TransactionQuerySchema>;
+export type TransactionQueryInput = z.input<typeof TransactionQuerySchema>;

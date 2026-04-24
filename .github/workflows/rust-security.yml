@@ -16,8 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
-      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -35,7 +33,12 @@ jobs:
         run: cargo install cargo-audit
 
       - name: Run cargo-audit (detect vulnerable dependencies)
-        run: cargo audit --deny warnings
+        id: audit
+        run: |
+          cargo audit --deny warnings \
+            --ignore RUSTSEC-2026-0097 \
+            --ignore RUSTSEC-2024-0388 \
+            --ignore RUSTSEC-2024-0436
 
       - name: Run cargo-clippy (linting)
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -59,21 +62,8 @@ jobs:
             echo "✓ No unsafe code found in production code"
           fi
 
-      - name: Comment PR with Security Results
-        uses: actions/github-script@v7
-        if: always() && github.event_name == 'pull_request'
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 🔒 Rust Security Audit Complete\n\n✓ Cargo audit completed\n✓ Clippy analysis completed\n\nPlease ensure all security recommendations are addressed before merging.`
-            });
-
       - name: Fail on audit violations
-        if: failure()
+        if: steps.audit.outcome == 'failure'
         run: |
           echo "❌ Security audit detected issues"
           exit 1

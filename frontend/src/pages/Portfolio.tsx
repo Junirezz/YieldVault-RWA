@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import {
   DataTable,
@@ -236,11 +236,11 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
             ? [
                 {
                   label: `${holdings.length} Holdings`,
-                  variant: "cyan" as const,
+                  variant: "cyan",
                 },
                 {
                   label: isLoading ? "Syncing..." : "Live",
-                  variant: (isLoading ? "warning" : "success") as const,
+                  variant: isLoading ? "warning" : "success",
                 },
               ]
             : undefined

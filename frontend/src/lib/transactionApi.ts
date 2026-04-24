@@ -1,5 +1,6 @@
 import { validate, TransactionQuerySchema } from "./api";
 import { formatNumber } from "./formatters";
+import type { TransactionQueryInput } from "./api/schemas";
 
 export interface Transaction {
   id: string;
@@ -47,7 +48,7 @@ export function normalizeOperation(
 const HORIZON_BASE_URL = "https://horizon-testnet.stellar.org";
 
 export async function getTransactions(
-  params: unknown,
+  params: TransactionQueryInput,
 ): Promise<Transaction[]> {
   const query = validate(TransactionQuerySchema, params, "TransactionQuery");
   const url = `${HORIZON_BASE_URL}/accounts/${query.walletAddress}/operations?limit=${query.limit}&order=${query.order}`;

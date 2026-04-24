@@ -8,7 +8,6 @@ import { MemoryRouter } from 'react-router-dom';
 describe('Navbar', () => {
     const mockOnConnect = vi.fn();
     const mockOnDisconnect = vi.fn();
-    const mockOnNavigate = vi.fn();
 
     it('renders the navbar with navigation links', () => {
         render(
@@ -16,8 +15,6 @@ describe('Navbar', () => {
                 <ToastProvider>
                     <ThemeProvider>
                         <Navbar
-                            currentPath="/"
-                            onNavigate={mockOnNavigate}
                             walletAddress={null}
                             onConnect={mockOnConnect}
                             onDisconnect={mockOnDisconnect}
@@ -40,8 +37,6 @@ describe('Navbar', () => {
                 <ToastProvider>
                     <ThemeProvider>
                         <Navbar
-                            currentPath="/"
-                            onNavigate={mockOnNavigate}
                             walletAddress={null}
                             onConnect={mockOnConnect}
                             onDisconnect={mockOnDisconnect}
@@ -62,8 +57,6 @@ describe('Navbar', () => {
                 <ToastProvider>
                     <ThemeProvider>
                         <Navbar
-                            currentPath="/portfolio"
-                            onNavigate={mockOnNavigate}
                             walletAddress={fullAddress}
                             onConnect={mockOnConnect}
                             onDisconnect={mockOnDisconnect}

@@ -1,20 +1,21 @@
-import { NavLink } from 'react-router-dom';
-import WalletConnect from './WalletConnect';
-import type { DisconnectReason } from './WalletConnect';
-import ThemeToggle from './ThemeToggle';
-import { Layers } from './icons';
-import { useTranslation } from '../i18n';
+import type { FC } from "react";
+import { NavLink } from "react-router-dom";
+import WalletConnect from "./WalletConnect";
+import type { DisconnectReason } from "./WalletConnect";
+import ThemeToggle from "./ThemeToggle";
+import { Layers } from "./icons";
+import { useTranslation } from "../i18n";
 
 interface NavbarProps {
-    currentPath?: '/' | '/analytics' | '/portfolio';
-    onNavigate?: (path: '/' | '/analytics' | '/portfolio') => void;
-    walletAddress: string | null;
-    usdcBalance?: number;
-    onConnect: (address: string) => void;
-    onDisconnect: (reason?: DisconnectReason) => void;
+  currentPath?: "/" | "/analytics" | "/portfolio";
+  onNavigate?: (path: "/" | "/analytics" | "/portfolio") => void;
+  walletAddress: string | null;
+  usdcBalance?: number;
+  onConnect: (address: string) => void;
+  onDisconnect: (reason?: DisconnectReason) => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({
+const Navbar: FC<NavbarProps> = ({
   walletAddress,
   usdcBalance = 0,
   onConnect,

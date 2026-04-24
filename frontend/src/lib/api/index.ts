@@ -47,4 +47,5 @@ export {
   type PortfolioQuery,
   type WalletAddressParam,
   type TransactionQuery,
+  type TransactionQueryInput,
 } from "./schemas";

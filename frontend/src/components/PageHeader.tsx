@@ -1,10 +1,9 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "./icons";
-import Badge, { BadgeColor } from "./Badge";
-import { usePageHeadingFocus } from "../hooks/usePageHeadingFocus";
 import Badge from "./Badge";
 import type { BadgeColor } from "./Badge";
+import { usePageHeadingFocus } from "../hooks/usePageHeadingFocus";
 
 export interface Breadcrumb {
   label: string;

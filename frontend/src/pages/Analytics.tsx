@@ -28,7 +28,7 @@ const Analytics: React.FC = () => {
                 statusChips={[
                     {
                         label: isLoading ? "Syncing" : "Live",
-                        variant: (isLoading ? "warning" : "success") as const,
+                        variant: isLoading ? "warning" : "success",
                     },
                 ]}
             />
