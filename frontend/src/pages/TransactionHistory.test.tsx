@@ -278,8 +278,9 @@ describe("TransactionHistory", () => {
   // Req 7.2 — filtered empty state message
   it("shows filtered empty state message when filter yields no results", async () => {
     // Only deposits — filtering by withdrawal should show filtered empty message
-    mockGetTransactions.mockImplementation(async (params: any) => {
-      if (params.type === "withdrawal") return [];
+    mockGetTransactions.mockImplementation(async (params: unknown) => {
+      const p = params as { type?: string };
+      if (p.type === "withdrawal") return [];
       return [makeTransaction({ id: "1", type: "deposit" })];
     });
 

@@ -1,3 +1,4 @@
+/* eslint-disable no-script-url */
 /**
  * XSS Prevention Test Suite
  * 
@@ -6,7 +7,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render } from "@testing-library/react";
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import FormField from '../forms/components/FormField';
 

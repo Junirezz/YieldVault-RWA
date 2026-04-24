@@ -229,6 +229,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     } catch (err: unknown) {
       toast.error({
         title: "Transaction Failed",
+        description: err instanceof Error ? err.message : "An error occurred during the transaction.",
         description:
           err instanceof Error
             ? err.message
@@ -457,6 +458,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
             </div>
           )}
 
+          <Tabs value={activeTab} defaultValue="deposit" onValueChange={(v) => setActiveTab(v as "deposit" | "withdraw")}>
           <Tabs
             value={activeTab}
             defaultValue="deposit"

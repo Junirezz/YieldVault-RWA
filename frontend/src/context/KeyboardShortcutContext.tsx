@@ -110,6 +110,7 @@ export const KeyboardShortcutProvider: React.FC<KeyboardShortcutProviderProps> =
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useKeyboardShortcutContext(): KeyboardShortcutContextValue {
   const context = useContext(KeyboardShortcutContext);
   if (!context) {

@@ -1,3 +1,4 @@
+/* eslint-disable no-script-url */
 import { describe, test, expect } from 'vitest';
 import {
   isValidTransactionHash,

@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
-    "docs:api": "typedoc --entryPointStrategy expand --out ../docs/api/frontend src"
+    "docs:api": "typedoc --entryPointStrategy expand --out ../docs/api/frontend src",
+    "check-size": "bundlesize"
   },
   "dependencies": {
     "@stellar/freighter-api": "^6.0.1",
@@ -42,16 +43,30 @@
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.1.5",
     "@vitest/ui": "^4.1.1",
+    "bundlesize2": "^0.0.35",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "jsdom": "^29.0.1",
     "playwright": "^1.58.2",
+    "rollup-plugin-visualizer": "^7.0.1",
     "typedoc": "^0.28.14",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1",
     "vitest": "^4.1.1"
-  }
+  },
+  "bundlesize": [
+    {
+      "path": "./dist/assets/index-*.js",
+      "maxSize": "450 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/index-*.css",
+      "maxSize": "50 kB",
+      "compression": "gzip"
+    }
+  ]
 }

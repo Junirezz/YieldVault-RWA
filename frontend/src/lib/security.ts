@@ -81,7 +81,7 @@ export function escapeHtml(text: string): string {
  * Useful for validating asset codes, symbols, etc.
  */
 export function isAlphanumericSafe(text: string): boolean {
-  const SAFE_ALPHANUMERIC_REGEX = /^[a-zA-Z0-9\s\-_\.]+$/;
+  const SAFE_ALPHANUMERIC_REGEX = /^[a-zA-Z0-9\s\-_.]+$/;
   return SAFE_ALPHANUMERIC_REGEX.test(text);
 }
 
