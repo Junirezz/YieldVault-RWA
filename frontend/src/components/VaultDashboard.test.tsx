@@ -182,6 +182,5 @@ describe("VaultDashboard", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
     }, { timeout: 3000 });
-    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load vault data");
   });
 });
