@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import TransactionHistory from "./TransactionHistory";
@@ -56,6 +56,7 @@ describe("TransactionHistory", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -208,6 +209,57 @@ describe("TransactionHistory", () => {
     expect(options).toContain("All");
     expect(options).toContain("Deposit");
     expect(options).toContain("Withdrawal");
+  });
+
+  it("filters transactions with a debounced client-side search input", async () => {
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ id: "1", asset: "USDC", type: "deposit" }),
+      makeTransaction({
+        id: "2",
+        asset: "EURC",
+        type: "withdrawal",
+        transactionHash: "eurcdef1234567890abcdef1234567890abcdef12",
+      }),
+    ]);
+
+    renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByText("USDC")).toBeInTheDocument());
+    vi.useFakeTimers();
+
+    const searchInput = screen.getByRole("searchbox", {
+      name: /Search transactions/i,
+    });
+    expect(searchInput).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: "EURC" } });
+
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("USDC")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("EURC")).toBeInTheDocument();
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(searchInput, { target: { value: "" } });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => expect(screen.getByText("USDC")).toBeInTheDocument());
+    expect(screen.getByText("EURC")).toBeInTheDocument();
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
   });
 
   // Req 5.3 — applying filter resets page to 1
