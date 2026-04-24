@@ -7,7 +7,6 @@ import VaultPerformanceChart from "./VaultPerformanceChart";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
-import TransactionStatus, { type ActionStatus } from "./TransactionStatus";
 import CopyButton from "./CopyButton";
 import {
   useDepositMutation,

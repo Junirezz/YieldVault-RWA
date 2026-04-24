@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ErrorFallback from './ErrorFallback';
+import * as ErrorNavigation from './errorNavigation';
 
 describe('ErrorFallback', () => {
   const mockError = new Error('Test error message');
@@ -14,7 +15,7 @@ describe('ErrorFallback', () => {
   });
 
   it('calls reload when reload button is clicked', () => {
-    const reloadSpy = vi.fn();
+    const reloadSpy = vi.spyOn(ErrorNavigation, 'reloadPage').mockImplementation(() => undefined);
 
     render(<ErrorFallback error={mockError} resetError={mockResetError} onReload={reloadSpy} />);
     
@@ -22,10 +23,11 @@ describe('ErrorFallback', () => {
     fireEvent.click(reloadButton);
     
     expect(reloadSpy).toHaveBeenCalled();
+    reloadSpy.mockRestore();
   });
 
   it('navigates to home when Go Home button is clicked', () => {
-    const assignSpy = vi.fn();
+    const assignSpy = vi.spyOn(ErrorNavigation, 'goHome').mockImplementation(() => undefined);
 
     render(<ErrorFallback error={mockError} resetError={mockResetError} onGoHome={assignSpy} />);
     
@@ -33,5 +35,6 @@ describe('ErrorFallback', () => {
     fireEvent.click(homeButton);
     
     expect(assignSpy).toHaveBeenCalled();
+    assignSpy.mockRestore();
   });
 });

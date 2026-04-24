@@ -1,5 +1,6 @@
 import React from "react";
 import { RefreshCw, Home, AlertOctagon } from "lucide-react";
+import { goHome, reloadPage } from "./errorNavigation";
 
 interface ErrorFallbackProps {
   error: Error;
@@ -7,9 +8,6 @@ interface ErrorFallbackProps {
   onReload?: () => void;
   onGoHome?: () => void;
 }
-
-export const reloadPage = () => window.location.reload();
-export const goHome = () => window.location.assign("/");
 
 const ErrorFallback: React.FC<ErrorFallbackProps> = ({
   error,
