@@ -386,6 +386,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
 
       {showTooltip && (
         <div
+          className="wallet-tooltip"
           style={{
             position: "absolute",
             bottom: "100%",
@@ -398,7 +399,9 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
             borderRadius: "4px",
             fontSize: "0.75rem",
             color: connectionError ? "var(--accent-red)" : "var(--text-secondary)",
-            whiteSpace: "nowrap",
+            whiteSpace: "normal",
+            wordWrap: "break-word",
+            maxWidth: "200px",
             zIndex: 1000,
             boxShadow: connectionError
               ? "0 0 12px rgba(255, 80, 100, 0.15)"

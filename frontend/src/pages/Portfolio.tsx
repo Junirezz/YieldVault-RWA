@@ -272,6 +272,25 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     return holdings.reduce((sum, h) => sum + (h.apy * h.valueUsd), 0) / totalValue;
   }, [holdings, totalValue]);
 
+  // Compute trend values
+  const totalNetValueTrend = useMemo(() => {
+    if (totalValue === 0) return "N/A";
+    // Calculate 7-day trend (simplified: using current value as proxy)
+    // In a real app, this would compare with historical data
+    const trendPercent = ((totalGain / (totalValue - totalGain)) * 100).toFixed(1);
+    return isFinite(Number(trendPercent)) ? `${trendPercent}% gain` : "N/A";
+  }, [totalValue, totalGain]);
+
+  const cumulativeYieldTrend = useMemo(() => {
+    if (totalGain === 0) return "--";
+    return `${formatCurrency(totalGain)} realized`;
+  }, [totalGain]);
+
+  const weightedApyTrend = useMemo(() => {
+    if (holdings.length === 0) return "N/A";
+    return `${holdings.length} position${holdings.length !== 1 ? 's' : ''}`;
+  }, [holdings.length]);
+
   return (
     <div className="glass-panel" style={{ padding: "32px" }}>
       <PageHeader
@@ -324,21 +343,21 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               label="Total Net Value" 
               value={formatCurrency(totalValue)} 
               icon={<DollarSign size={20} color="var(--accent-cyan)" />}
-              trend="+4.2% since last week"
-              trendPositive={true}
+              trend={totalNetValueTrend}
+              trendPositive={totalGain >= 0}
             />
             <PortfolioSummaryCard 
               label="Cumulative Yield" 
-              value={`+${formatCurrency(totalGain)}`} 
+              value={`${totalGain >= 0 ? '+' : ''}${formatCurrency(totalGain)}`} 
               icon={<TrendingUp size={20} color="var(--accent-purple)" />}
-              trend="All-time unrealized"
+              trend={cumulativeYieldTrend}
               trendPositive={totalGain >= 0}
             />
             <PortfolioSummaryCard 
               label="Weighted Avg APY" 
               value={`${weightedApy.toFixed(2)}%`} 
               icon={<Percent size={20} color="var(--accent-cyan)" />}
-              trend="Current performance"
+              trend={weightedApyTrend}
               trendPositive={true}
             />
             <PortfolioSummaryCard 

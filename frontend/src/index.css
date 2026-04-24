@@ -1182,11 +1182,6 @@ button {
     right: 16px;
     width: auto;
   }
-
-  /* Settings page mobile overrides */
-  .settings-locale-grid {
-    grid-template-columns: 1fr !important;
-  }
 }
 
 /* ── Compact Mode ───────────────────────────────────────────────── */
@@ -1298,6 +1293,11 @@ button {
   .page-header-actions .btn {
     width: 100%;
     flex: 1 1 100%;
+  }
+
+  /* Settings page mobile overrides */
+  .settings-locale-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 .compact-mode .data-table th,
@@ -1668,3 +1668,17 @@ button {
   border-radius: 50%;
 }
 
+
+/* Wallet tooltip responsive positioning */
+.wallet-tooltip {
+  max-width: calc(100vw - 32px);
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 480px) {
+  .wallet-tooltip {
+    max-width: 150px;
+    font-size: 0.7rem;
+    padding: 6px 10px;
+  }
+}
