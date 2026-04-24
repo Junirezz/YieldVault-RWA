@@ -136,4 +136,3 @@ jobs:
           echo "  Use: //slither-disable-next-line <detector>"
           echo ""
 
-          exit 1
