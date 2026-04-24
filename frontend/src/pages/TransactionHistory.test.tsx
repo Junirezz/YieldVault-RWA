@@ -5,6 +5,18 @@ import TransactionHistory from "./TransactionHistory";
 import * as transactionApi from "../lib/transactionApi";
 import type { Transaction } from "../lib/transactionApi";
 
+// Hoisted so it can be referenced inside vi.mock factories
+const mockNetworkConfig = vi.hoisted(() => ({
+  isTestnet: true,
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractId: "",
+}));
+
+vi.mock("../config/network", () => ({
+  networkConfig: mockNetworkConfig,
+}));
+
 // Mock the transactionApi module
 vi.mock("../lib/transactionApi", async (importOriginal) => {
   const actual = await importOriginal<typeof transactionApi>();
@@ -53,6 +65,7 @@ describe("TransactionHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockNetworkConfig.isTestnet = true;
   });
 
   afterEach(() => {
@@ -298,5 +311,65 @@ describe("TransactionHistory", () => {
         screen.getByText("No transactions matched the current filter."),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stellar Explorer link — network-aware URL (issue #294)
+// ---------------------------------------------------------------------------
+
+const VALID_HASH = "a".repeat(64);
+
+describe("TransactionHistory — Stellar Explorer link network", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockNetworkConfig.isTestnet = true;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("generates a testnet explorer URL when networkConfig.isTestnet is true", async () => {
+    mockNetworkConfig.isTestnet = true;
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/testnet/tx/${VALID_HASH}`,
+    );
+  });
+
+  it("generates a mainnet explorer URL when networkConfig.isTestnet is false", async () => {
+    mockNetworkConfig.isTestnet = false;
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/public/tx/${VALID_HASH}`,
+    );
+  });
+
+  it("renders the explorer link with correct security attributes", async () => {
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 });

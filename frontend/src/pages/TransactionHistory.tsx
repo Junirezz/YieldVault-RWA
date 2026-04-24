@@ -20,6 +20,7 @@ import {
 import { useClientDataTable } from "../hooks/useClientDataTable";
 import { useDataTableState } from "../hooks/useDataTableState";
 import { getStellarExplorerUrl } from "../lib/security";
+import { networkConfig } from "../config/network";
 
 interface TransactionHistoryProps {
   walletAddress: string | null;
@@ -65,7 +66,7 @@ const columns: DataTableColumn<Transaction>[] = [
     sortable: false,
     cell: (row) => (
       <a
-        href={getStellarExplorerUrl(row.transactionHash, "testnet")}
+        href={getStellarExplorerUrl(row.transactionHash, networkConfig.isTestnet ? "testnet" : "mainnet")}
         target="_blank"
         rel="noopener noreferrer"
         style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
