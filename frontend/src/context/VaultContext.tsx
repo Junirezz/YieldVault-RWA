@@ -8,6 +8,7 @@ import type { ApiError } from "../lib/api";
 import type { VaultSummary } from "../lib/vaultApi";
 import { networkConfig } from "../config/network";
 import { useVaultSummary } from "../hooks/useVaultData";
+import { formatCurrency, formatPercent } from "../lib/formatters";
 
 interface VaultContextType {
   summary: VaultSummary;
@@ -85,13 +86,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
     return unsubscribe;
   }, []);
 
-  const formattedTvl = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(summary.tvl);
+  const formattedTvl = formatCurrency(summary.tvl, "USD", 0);
 
-  const formattedApy = `${summary.apy.toFixed(2)}%`;
+  const formattedApy = formatPercent(summary.apy);
 
   const refresh = async () => {
     await refetch();

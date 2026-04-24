@@ -1,4 +1,5 @@
 import { validate, TransactionQuerySchema } from "./api";
+import { formatNumber } from "./formatters";
 
 export interface Transaction {
   id: string;
@@ -80,10 +81,7 @@ export function formatAmount(
   if (isNaN(num)) {
     return "—";
   }
-  const formatted = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num);
+  const formatted = formatNumber(num, 2);
   return `${formatted} ${asset}`;
 }
 
