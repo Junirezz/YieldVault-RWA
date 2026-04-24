@@ -722,6 +722,8 @@ impl YieldVault {
     }
 
     /// Calculates the number of shares given an asset amount based on the current exchange rate.
+    /// Uses integer division which naturally floors the result. This rounds down the number
+    /// of shares issued, which is consistently in favour of the vault.
     pub fn calculate_shares(env: Env, assets: i128) -> Result<i128, VaultError> {
         let ts = Self::total_shares(env.clone());
         let ta = Self::total_assets(env.clone());
@@ -733,6 +735,8 @@ impl YieldVault {
     }
 
     /// Calculates the underlying asset value given an amount of shares.
+    /// Uses integer division which naturally floors the result. This rounds down the number
+    /// of assets returned, which is consistently in favour of the vault.
     pub fn calculate_assets(env: Env, shares: i128) -> Result<i128, VaultError> {
         let ts = Self::total_shares(env.clone());
         let ta = Self::total_assets(env.clone());
@@ -799,6 +803,11 @@ impl YieldVault {
 
         let shares_to_mint = Self::calculate_shares(env.clone(), amount)?;
 
+        // Prevent users from silently losing funds due to rounding on tiny deposits
+        if shares_to_mint == 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
         // Transfer assets from user to vault
         token_client.transfer(&user, &env.current_contract_address(), &amount);
 
@@ -854,6 +863,11 @@ impl YieldVault {
         }
 
         let assets_to_return = Self::calculate_assets(env.clone(), shares)?;
+
+        // Prevent users from silently losing shares due to rounding on tiny withdrawals
+        if assets_to_return == 0 {
+            return Err(VaultError::InvalidAmount);
+        }
 
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
