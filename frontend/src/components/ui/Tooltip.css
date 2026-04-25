@@ -1,0 +1,14 @@
+.tooltip-panel {
+  position: fixed;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-glass);
+  padding: 6px 10px;
+  z-index: 9999;
+  pointer-events: none;
+  max-width: 280px;
+  word-wrap: break-word;
+}

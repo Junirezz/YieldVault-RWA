@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Activity, AlertCircle, ShieldCheck, TrendingUp, Wallet as WalletIcon, Loader2, AlertTriangle, Info } from "./icons";
+import { Activity, AlertCircle, ShieldCheck, TrendingUp, Wallet as WalletIcon, Loader2, AlertTriangle } from "./icons";
+import { HelpIcon } from "./ui";
 import { hasCustomRpcConfig, networkConfig } from "../config/network";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
@@ -272,9 +273,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
             <div style={{ textAlign: "right" }}>
               <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
                 Current APY
-                <div title="Annualized yield based on the historical performance of the vault's underlying assets." style={{ cursor: "help", display: "flex", alignItems: "center" }}>
-                  <Info size={14} color="var(--text-secondary)" />
-                </div>
+                <HelpIcon
+                  variant="tooltip"
+                  content="Annualized yield based on the historical performance of the vault's underlying assets."
+                />
               </div>
               <div className="text-gradient" style={{ fontSize: "2rem", fontFamily: "var(--font-display)", fontWeight: 700 }}>
                 {isLoading ? <Skeleton width="100px" height="2.5rem" /> : formattedApy}
@@ -539,8 +541,12 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                     }}
                   >
                     <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem" }}>
+                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem", display: "flex", alignItems: "center", gap: "6px" }}>
                         Estimated protocol fee
+                        <HelpIcon
+                          variant="popover"
+                          content="A protocol fee of 35 basis points (0.35%) of the transaction amount is applied. This fee is deducted before settlement."
+                        />
                       </span>
                       <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
                         {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
@@ -579,7 +585,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                           className="spin"
                           style={{ animation: "spin 0.9s linear infinite" }}
                         />
-                        Processing Transaction...
+                        Waiting for confirmation...
                       </>
                     ) : tab === "deposit" ? (
                       isCapReached ? "Vault is full" : "Approve & Deposit"
