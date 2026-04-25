@@ -4,9 +4,20 @@ import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import { corsMiddleware } from './middleware/cors';
 import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
 import { validateApiKey, registerApiKey } from './middleware/apiKeyAuth';
 import { GracefulShutdownHandler } from './gracefulShutdown';
+import { db } from './database';
+import vaultRouter from './vaultEndpoints';
+import listRouter from './listEndpoints';
+import {
+  register,
+  httpRequestCount,
+  httpResponseTime,
+  activeConnections,
+  updateVaultMetrics,
+} from './metrics';
 
 declare global {
   namespace Express {
@@ -87,15 +98,56 @@ const apiLimiter = rateLimit({
 
 app.use(express.json());
 
+// CORS configuration (restricted origins)
+app.use(corsMiddleware);
+
 // Correlation ID must be first to inject on all requests
 app.use(correlationIdMiddleware);
 
 // Structured logging with correlation IDs
 app.use(structuredLoggingMiddleware);
 
+// Metrics middleware to track HTTP requests
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = process.hrtime();
+  activeConnections.inc();
+
+  res.on('finish', () => {
+    activeConnections.dec();
+    const duration = process.hrtime(start);
+    const durationSeconds = duration[0] + duration[1] / 1e9;
+
+    // Use the path pattern (e.g., /api/vault/:id) instead of the actual path if available
+    const route = req.route ? req.route.path : req.path;
+    const labels = {
+      method: req.method,
+      route,
+      status_code: res.statusCode,
+    };
+
+    httpRequestCount.inc(labels);
+    httpResponseTime.observe(labels, durationSeconds);
+  });
+
+  next();
+});
+
 app.use(globalLimiter);
 
 // ─── Health Check Endpoints (Issue #148) ────────────────────────────────────
+
+/**
+ * GET /metrics
+ * Exposes Prometheus metrics for operational monitoring
+ */
+app.get('/metrics', async (_req: Request, res: Response) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    res.status(500).end(err);
+  }
+});
 
 /**
  * GET /health
@@ -104,7 +156,8 @@ app.use(globalLimiter);
  * 
  * Response: 200 OK or 503 Service Unavailable
  */
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health', async (_req: Request, res: Response) => {
+  const dbHealth = await getDatabaseHealth();
   const health = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -114,6 +167,8 @@ app.get('/health', (_req: Request, res: Response) => {
       api: 'up',
       cache: getCacheHealth(),
       stellarRpc: getStellarRpcHealth(),
+      databasePrimary: dbHealth.primary,
+      databaseReplica: dbHealth.replica,
     },
   };
 
@@ -130,20 +185,23 @@ app.get('/health', (_req: Request, res: Response) => {
  * 
  * Response: 200 OK if ready, 503 Service Unavailable if not ready
  */
-app.get('/ready', (_req: Request, res: Response) => {
+app.get('/ready', async (_req: Request, res: Response) => {
+  const dbHealth = await getDatabaseHealth();
   const readiness = {
     ready: true,
     timestamp: new Date().toISOString(),
     dependencies: {
       cache: checkCacheDependency(),
       stellarRpc: checkStellarRpcDependency(),
+      database: dbHealth.primary === 'up',
     },
   };
 
   // Service is ready only if all critical dependencies are available
   const isReady =
     readiness.dependencies.cache &&
-    readiness.dependencies.stellarRpc;
+    readiness.dependencies.stellarRpc &&
+    readiness.dependencies.database;
 
   readiness.ready = isReady;
 
@@ -151,6 +209,22 @@ app.get('/ready', (_req: Request, res: Response) => {
 });
 
 // ─── API Routes (with strict rate limiting) ────────────────────────────────
+
+/**
+ * Version redirect for unversioned API routes (Issue #150)
+ */
+app.get('/api/vault/summary', (req: Request, res: Response) => {
+  res.setHeader('deprecation', 'true');
+  res.redirect(308, '/api/v1/vault/summary');
+});
+
+// Versioned API v1
+const apiV1 = express.Router();
+app.use('/api/v1', apiV1);
+
+// Mount routers to v1
+apiV1.use('/vault', vaultRouter);
+apiV1.use('/', listRouter);
 
 /**
  * Example protected API endpoint with caching
@@ -245,6 +319,30 @@ app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Respons
   });
 });
 
+// ─── Vault Metrics Poll Cycle ────────────────────────────────────────────────
+
+/**
+ * Mock vault metrics poll cycle
+ * In a real application, this would fetch data from a database or Stellar RPC
+ */
+const pollVaultMetrics = () => {
+  // Mock data for TVL and Share Price
+  const mockTvl = 1000000 + Math.random() * 100000;
+  const mockSharePrice = 1.25 + Math.random() * 0.05;
+
+  updateVaultMetrics(mockTvl, mockSharePrice);
+
+  logger.log('info', 'Vault metrics updated in Prometheus gauges', {
+    tvl: mockTvl,
+    sharePrice: mockSharePrice,
+  });
+};
+
+// Start poll cycle every 60 seconds (configurable)
+const METRICS_POLL_INTERVAL = parseInt(process.env.METRICS_POLL_INTERVAL_MS || '60000', 10);
+const metricsInterval = setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
+pollVaultMetrics(); // Initial call
+
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
 /**
@@ -262,6 +360,17 @@ function getCacheHealth(): string {
 
 function checkCacheDependency(): boolean {
   return getCacheHealth() === 'up';
+}
+
+/**
+ * Check database health
+ */
+async function getDatabaseHealth(): Promise<{ primary: string; replica: string }> {
+  try {
+    return await db.getHealth();
+  } catch {
+    return { primary: 'down', replica: 'down' };
+  }
 }
 
 /**
@@ -345,5 +454,10 @@ const server = app.listen(port, () => {
 // Register graceful shutdown handler
 const shutdownHandler = new GracefulShutdownHandler(drainTimeout);
 shutdownHandler.register(server);
+
+// Register database shutdown task
+shutdownHandler.onShutdown(async () => {
+  await db.shutdown();
+});
 
 export default app;

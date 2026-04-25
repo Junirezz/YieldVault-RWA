@@ -206,3 +206,31 @@ export async function submitWithdrawal(params: unknown) {
   // Simulate backend interaction
   return new Promise<void>((resolve) => setTimeout(resolve, 2000));
 }
+
+export async function getXlmPrice(): Promise<number> {
+  try {
+    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd");
+    const data = await response.json();
+    return data.stellar.usd;
+  } catch (error) {
+    console.error("Failed to fetch XLM price", error);
+    return 0.12; // Fallback price
+  }
+}
+
+export async function estimateNetworkFee(_params: {
+  walletAddress: string;
+  amount: number;
+  action: "deposit" | "withdraw";
+}): Promise<string> {
+  // In a real implementation, this would use StellarSdk.SorobanRpc.Server.simulateTransaction
+  // For this exercise, we simulate the RPC response delay and return a realistic estimate
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  
+  // Simulate variation based on action and some randomness
+  const baseFee = _params.action === "deposit" ? 0.05 : 0.07;
+  const randomFactor = 0.95 + Math.random() * 0.1;
+  const xlmAmount = baseFee * randomFactor;
+  
+  return xlmAmount.toFixed(6);
+}
