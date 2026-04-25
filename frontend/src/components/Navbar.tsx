@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useRef, useState, type FC } from "react";
 import { NavLink } from "react-router-dom";
 import WalletConnect from "./WalletConnect";
 import type { DisconnectReason } from "./WalletConnect";
@@ -26,6 +26,20 @@ const Navbar: FC<NavbarProps> = ({
   const [networkLabel, setNetworkLabel] = useState(
     networkConfig.isTestnet ? "Testnet" : "Mainnet",
   );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +76,7 @@ const Navbar: FC<NavbarProps> = ({
   return (
     <nav
       aria-label="Primary"
+      ref={menuRef}
       style={{
         position: "fixed",
         top: 0,
@@ -110,9 +125,10 @@ const Navbar: FC<NavbarProps> = ({
             </span>
           </NavLink>
 
-          <div className="flex gap-lg" style={{ marginLeft: "32px" }}>
+          <div className="nav-links flex gap-lg" style={{ marginLeft: "32px" }}>
             <NavLink
               to="/"
+              className="nav-link"
               style={({ isActive }) => ({
                 color: isActive
                   ? "var(--accent-cyan)"
@@ -126,6 +142,7 @@ const Navbar: FC<NavbarProps> = ({
             </NavLink>
             <NavLink
               to="/portfolio"
+              className="nav-link"
               style={({ isActive }) => ({
                 color: isActive
                   ? "var(--accent-cyan)"
@@ -139,6 +156,7 @@ const Navbar: FC<NavbarProps> = ({
             </NavLink>
             <NavLink
               to="/analytics"
+              className="nav-link"
               style={({ isActive }) => ({
                 color: isActive
                   ? "var(--accent-cyan)"
@@ -158,6 +176,7 @@ const Navbar: FC<NavbarProps> = ({
             <span
               aria-label="Network badge"
               title={`Connected network: ${networkLabel}`}
+              className="nav-network-badge"
               style={{
                 padding: "6px 10px",
                 borderRadius: "999px",
@@ -189,8 +208,59 @@ const Navbar: FC<NavbarProps> = ({
             onConnect={onConnect}
             onDisconnect={onDisconnect}
           />
+          {/* Hamburger — mobile only */}
+          <button
+            className="nav-hamburger"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-nav-menu"
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <span className={`nav-hamburger-bar ${menuOpen ? "open" : ""}`} />
+            <span className={`nav-hamburger-bar ${menuOpen ? "open" : ""}`} />
+            <span className={`nav-hamburger-bar ${menuOpen ? "open" : ""}`} />
+          </button>
         </div>
       </div>
+
+      {/* Mobile dropdown menu */}
+      {menuOpen && (
+        <div id="mobile-nav-menu" className="nav-mobile-menu" role="menu">
+          <NavLink
+            to="/"
+            role="menuitem"
+            className="nav-mobile-link"
+            onClick={() => setMenuOpen(false)}
+            style={({ isActive }) => ({
+              color: isActive ? "var(--accent-cyan)" : "var(--text-primary)",
+            })}
+          >
+            {t("nav.vaults")}
+          </NavLink>
+          <NavLink
+            to="/portfolio"
+            role="menuitem"
+            className="nav-mobile-link"
+            onClick={() => setMenuOpen(false)}
+            style={({ isActive }) => ({
+              color: isActive ? "var(--accent-cyan)" : "var(--text-primary)",
+            })}
+          >
+            {t("nav.portfolio")}
+          </NavLink>
+          <NavLink
+            to="/analytics"
+            role="menuitem"
+            className="nav-mobile-link"
+            onClick={() => setMenuOpen(false)}
+            style={({ isActive }) => ({
+              color: isActive ? "var(--accent-cyan)" : "var(--text-primary)",
+            })}
+          >
+            {t("nav.analytics")}
+          </NavLink>
+        </div>
+      )}
     </nav>
   );
 };

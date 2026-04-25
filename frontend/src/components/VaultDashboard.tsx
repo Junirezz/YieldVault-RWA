@@ -19,6 +19,7 @@ import { FormField } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
+import HelpIcon from "./ui/HelpIcon";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -254,7 +255,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   return (
     <div className="vault-dashboard gap-lg">
       <div className="vault-dashboard-stats">
-        <div className="glass-panel" style={{ padding: "32px" }}>
+        <div className="glass-panel vault-stats-panel">
           {error && (
             <ApiStatusBanner error={{ ...error, userMessage: "Failed to load vault data" }} />
           )}
@@ -447,8 +448,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
       <div className="vault-dashboard-actions">
         <div
-          className="glass-panel"
-          style={{ padding: "32px", position: "relative", overflow: "hidden" }}
+          className="glass-panel vault-actions-panel"
+          style={{ position: "relative", overflow: "hidden" }}
         >
           <div
             style={{

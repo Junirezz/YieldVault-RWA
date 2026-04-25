@@ -1705,3 +1705,232 @@ button {
     padding: 6px 10px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE MOBILE LAYOUT  (375px and above)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Navbar ─────────────────────────────────────────────────── */
+.nav-links {
+  display: flex;
+}
+
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.nav-hamburger-bar {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: var(--text-primary);
+  border-radius: 2px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.nav-mobile-menu {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-glass);
+  padding: 8px 0;
+}
+
+.nav-mobile-link {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  text-decoration: none;
+  color: var(--text-primary);
+  min-height: 48px;
+  transition: background 0.15s ease;
+}
+
+.nav-mobile-link:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ── Page panels ─────────────────────────────────────────────── */
+.vault-stats-panel {
+  padding: 32px;
+}
+
+.vault-actions-panel {
+  padding: 32px;
+}
+
+.portfolio-page-panel {
+  padding: 32px;
+}
+
+.analytics-header {
+  padding: 32px;
+}
+
+/* ── Portfolio summary cards grid ────────────────────────────── */
+.portfolio-summary-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+/* ── Analytics metrics grid ──────────────────────────────────── */
+.analytics-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+}
+
+/* ── 768px breakpoint ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Nav: hide desktop links, show hamburger */
+  .nav-links {
+    display: none;
+  }
+
+  .nav-network-badge {
+    display: none;
+  }
+
+  .nav-hamburger {
+    display: flex;
+  }
+
+  /* Reduce top margin now that nav is same height */
+  .app-main {
+    margin-top: 72px !important;
+  }
+
+  /* Page panels */
+  .vault-stats-panel,
+  .vault-actions-panel,
+  .portfolio-page-panel,
+  .analytics-header {
+    padding: 20px 16px;
+  }
+
+  /* Vault dashboard gap */
+  .vault-dashboard {
+    gap: var(--space-4);
+  }
+
+  /* Portfolio summary cards: 2-col on tablet */
+  .portfolio-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  /* Analytics metrics: 2-col on tablet */
+  .analytics-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  /* Portfolio toolbar: stack vertically */
+  .portfolio-toolbar {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .portfolio-toolbar-controls {
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .portfolio-toolbar-controls .input-group {
+    width: 100%;
+    min-width: unset !important;
+  }
+
+  .portfolio-toolbar-controls .btn {
+    width: 100%;
+  }
+
+  /* Pagination: stack on mobile */
+  .data-table-pagination {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .pagination-container {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pagination-controls-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .pagination-nav-buttons {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ── 480px breakpoint ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Container padding tighter */
+  .container {
+    padding: 0 var(--space-4);
+  }
+
+  /* Portfolio summary cards: single column */
+  .portfolio-summary-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Analytics metrics: single column */
+  .analytics-metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Vault stats meta: tighter */
+  .vault-stats-meta {
+    gap: 16px;
+  }
+
+  /* Strategy allocation cards: full width */
+  .vault-dashboard .flex.gap-md > div[style*="flex: 1 1 150px"] {
+    flex: 1 1 100%;
+  }
+
+  /* Reduce value font size on very small screens */
+  .portfolio-summary-grid .glass-panel div[style*="font-size: 2rem"] {
+    font-size: 1.5rem !important;
+  }
+
+  /* Vault APY value */
+  .vault-stats-header .text-gradient[style*="font-size: 2rem"] {
+    font-size: 1.6rem !important;
+  }
+
+  /* Analytics header h2 */
+  .analytics-header h2 {
+    font-size: 1.8rem !important;
+  }
+
+  /* Metric card value */
+  .analytics-metrics-grid article div[style*="font-size: 1.8rem"] {
+    font-size: 1.4rem !important;
+  }
+}

@@ -27,6 +27,7 @@ interface PortfolioProps {
 }
 
 import { formatCurrency, formatNumber } from "../lib/formatters";
+import HelpIcon from "../components/ui/HelpIcon";
 
 const columns: DataTableColumn<PortfolioHolding>[] = [
   {
@@ -291,7 +292,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   }, [holdings.length]);
 
   return (
-    <div className="glass-panel" style={{ padding: "32px" }}>
+    <div className="glass-panel portfolio-page-panel">
       <PageHeader
         title={
           <>
@@ -331,12 +332,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
 
           <div
             className="portfolio-summary-grid"
-            style={{ 
-              display: "grid", 
-              gap: "24px", 
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              marginBottom: "8px"
-            }}
+            style={{ marginBottom: "8px" }}
           >
             <PortfolioSummaryCard 
               label="Total Net Value" 

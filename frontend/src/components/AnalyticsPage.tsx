@@ -30,7 +30,7 @@ const metricCards = [
 function AnalyticsPage() {
   return (
     <section className="flex flex-col gap-lg">
-      <header className="glass-panel" style={{ padding: '32px' }}>
+      <header className="glass-panel analytics-header">
         <span className="tag cyan" style={{ marginBottom: '16px' }}>
           Live Analytics
         </span>
@@ -47,13 +47,7 @@ function AnalyticsPage() {
         </p>
       </header>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: '24px',
-        }}
-      >
+      <div className="analytics-metrics-grid">
         {metricCards.map(({ icon: Icon, label, value, detail }) => (
           <article key={label} className="glass-panel" style={{ padding: '24px' }}>
             <div
