@@ -2,7 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
 import listEndpoints from './listEndpoints';
-import { apiLimiter } from './rateLimiter';
+import { depositsLimiter, summaryLimiter, defaultLimiter } from './rateLimiter';
 import {
   buildIdempotencyFingerprint,
   idempotencyStore,
@@ -44,7 +44,7 @@ app.use('/api/v1', (_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use('/api/v1', apiLimiter);
+app.use('/api/v1', defaultLimiter);
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -120,7 +120,7 @@ app.get('/ready', (_req: Request, res: Response) => {
  * Example protected API endpoint
  * Demonstrates rate limiting per API key
  */
-app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
+app.get('/api/v1/vault/summary', summaryLimiter, (_req: Request, res: Response) => {
   // This would typically fetch data from Stellar RPC or database
   res.json({
     totalAssets: 0,
@@ -130,7 +130,7 @@ app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/v1/vault/deposits', async (req: Request, res: Response, next: NextFunction) => {
+app.post('/api/v1/vault/deposits', depositsLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const idempotencyKey = getIdempotencyKey(req);
     if (!idempotencyKey) {
