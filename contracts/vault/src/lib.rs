@@ -5,18 +5,18 @@ pub mod external_calls;
 #[cfg(test)]
 mod fuzz_math;
 pub mod permissions;
-pub mod strategy;
-pub mod upgrade;
 #[cfg(test)]
 pub mod proxy_tests;
+pub mod strategy;
 mod test;
+pub mod upgrade;
 
 use crate::strategy::StrategyClient;
+use crate::upgrade::{get_admin, is_initialized, set_admin, set_initialized};
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
-    Address, Env, Vec, BytesN,
+    Address, BytesN, Env, Vec,
 };
-use crate::upgrade::{get_admin, set_admin, is_initialized, set_initialized};
 
 const MAX_PAGE_SIZE: u32 = 50;
 
@@ -109,7 +109,7 @@ impl YieldVault {
 
         set_admin(&env, &admin);
         set_initialized(&env);
-        
+
         env.storage().instance().set(&DataKey::TokenAsset, &token);
         env.storage().instance().set(&DataKey::TotalAssets, &0i128);
         env.storage().instance().set(&DataKey::DaoThreshold, &1i128);
