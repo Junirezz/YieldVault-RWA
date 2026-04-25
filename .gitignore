@@ -12,3 +12,8 @@
 
 # Agents
 GEMINI.md
+
+.agents/
+.claude/
+skills-lock.json
+issue.md

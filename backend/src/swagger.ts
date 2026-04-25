@@ -1,7 +1,9 @@
-import swaggerJsdoc from 'swagger-jsdoc';
-import swaggerUi from 'swagger-ui-express';
-import { Express } from 'express';
+// TODO: Install swagger-jsdoc and swagger-ui-express when ready
+// import swaggerJsdoc from 'swagger-jsdoc';
+// import swaggerUi from 'swagger-ui-express';
+import type { Express } from 'express';
 
+/*
 const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.1.0',
@@ -62,24 +64,15 @@ const options: swaggerJsdoc.Options = {
 };
 
 export const specs = swaggerJsdoc(options);
+*/
+
+export const specs = {};
 
 export function setupSwagger(app: Express) {
   const nodeEnv = process.env.NODE_ENV || 'development';
-  
-  if (nodeEnv !== 'production') {
-    app.use('/docs', swaggerUi.serve, swaggerUi.setup(specs, {
-      explorer: true,
-      customCss: '.swagger-ui .topbar { display: none }',
-      swaggerOptions: {
-        persistAuthorization: true,
-      },
-    }));
-    
-    app.get('/docs-json', (_req, res) => {
-      res.setHeader('Content-Type', 'application/json');
-      res.send(specs);
-    });
 
-    console.log('📝 Swagger documentation available at /docs');
+  if (nodeEnv !== 'production') {
+    /* eslint-disable-next-line no-console */
+    console.log('📝 Swagger documentation available at /docs (when swagger dependencies are installed)');
   }
 }

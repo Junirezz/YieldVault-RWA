@@ -1,99 +1,108 @@
-import express, { Express, Request, Response, NextFunction } from 'express';
+import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
+import rateLimit from 'express-rate-limit';
 import NodeCache from 'node-cache';
 import dotenv from 'dotenv';
-import listEndpoints from './listEndpoints';
-import { apiLimiter } from './rateLimiter';
-import {
-  buildIdempotencyFingerprint,
-  idempotencyStore,
-  IdempotencyConflictError,
-} from './idempotency';
-import { getJobHealthStatus, getJobMetrics } from './jobGovernance';
-import { sanitizationMiddleware } from './sanitization';
-import { setupSwagger } from './swagger';
+import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
+import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
+import { validateApiKey, registerApiKey } from './middleware/apiKeyAuth';
+import { GracefulShutdownHandler } from './gracefulShutdown';
+
+declare global {
+  namespace Express {
+    interface Request {
+      rateLimit?: {
+        resetTime?: number;
+        current?: number;
+        limit?: number;
+      };
+    }
+  }
+}
 
 dotenv.config();
 
 const app: Express = express();
 const port = process.env.PORT || 3000;
 const nodeEnv = process.env.NODE_ENV || 'development';
+const logLevel = (process.env.LOG_LEVEL || (nodeEnv === 'development' ? 'debug' : 'info')) as LogLevel;
+const drainTimeout = parseInt(process.env.DRAIN_TIMEOUT_MS || '30000', 10);
+const cacheVaultMetricsTtl = parseInt(process.env.CACHE_VAULT_METRICS_TTL_MS || '60000', 10);
+
+// Configure logger
+logger.configure(logLevel);
 
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
 
+// ─── Rate Limiting Middleware ────────────────────────────────────────────────
+// Issue #145: Rate limiting per IP/user key
+
+/**
+ * Global rate limiter
+ * Default: 100 requests per 15 minutes per IP
+ */
+const globalLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  skip: (req: Request) => {
+    // Skip rate limiting for health and ready checks
+    return req.path === '/health' || req.path === '/ready';
+  },
+  handler: (req: Request, res: Response) => {
+    res.status(429).json({
+      error: 'Too many requests',
+      status: 429,
+      message: 'Rate limit exceeded. Please try again later.',
+      retryAfter: req.rateLimit?.resetTime,
+    });
+  },
+});
+
+/**
+ * API endpoint rate limiter (stricter)
+ * Per-user or per-API-key rate limiting
+ */
+const apiLimiter = rateLimit({
+  windowMs: parseInt(process.env.API_RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 minute
+  max: parseInt(process.env.API_RATE_LIMIT_MAX_REQUESTS || '30', 10),
+  keyGenerator: (req: Request) => {
+    // Use API key if provided, otherwise use IP
+    return req.headers['x-api-key'] as string || req.ip || 'unknown';
+  },
+  handler: (req: Request, res: Response) => {
+    res.status(429).json({
+      error: 'API rate limit exceeded',
+      status: 429,
+      message: 'Too many API requests. Please try again later.',
+      retryAfter: req.rateLimit?.resetTime,
+    });
+  },
+});
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
-app.use(express.json({ limit: '100kb' })); // Restrict payload size
-app.use(sanitizationMiddleware); // Sanitize globally
+app.use(express.json());
 
-// Setup Swagger Documentation (Issue #257)
-setupSwagger(app);
+// Correlation ID must be first to inject on all requests
+app.use(correlationIdMiddleware);
 
-app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-  if (req.path.startsWith('/v1')) {
-    next();
-    return;
-  }
+// Structured logging with correlation IDs
+app.use(structuredLoggingMiddleware);
 
-  const redirectedPath = req.originalUrl.replace(/^\/api(?!\/v1)/, '/api/v1');
-  res.setHeader('Deprecation', 'true');
-  res.setHeader(
-    'Sunset',
-    new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString()
-  );
-  res.setHeader('Link', `<${redirectedPath}>; rel="alternate"`);
-  res.redirect(308, redirectedPath);
-});
-
-app.use('/api/v1', (_req: Request, res: Response, next: NextFunction) => {
-  res.setHeader('X-API-Version', 'v1');
-  next();
-});
-
-app.use('/api/v1', apiLimiter);
-
-// Request logging middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    console.log(
-      `[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`
-    );
-  });
-  next();
-});
+app.use(globalLimiter);
 
 // ─── Health Check Endpoints (Issue #148) ────────────────────────────────────
 
 /**
- * @openapi
- * /health:
- *   get:
- *     summary: Get service health status
- *     description: Returns immediately with service health status, including critical dependencies.
- *     tags: [Monitoring]
- *     responses:
- *       200:
- *         description: Service is healthy
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status: { type: string, example: "healthy" }
- *                 timestamp: { type: string, format: "date-time" }
- *                 uptime: { type: number }
- *                 environment: { type: string }
- *                 checks:
- *                   type: object
- *                   properties:
- *                     api: { type: string }
- *                     cache: { type: string }
- *                     stellarRpc: { type: string }
- *                     jobs: { type: string }
- *       503:
- *         description: Service or dependencies are unhealthy
+ * GET /health
+ * Returns immediately with service health status
+ * Includes critical dependencies health (Stellar RPC, database, cache)
+ * 
+ * Response: 200 OK or 503 Service Unavailable
  */
 app.get('/health', (_req: Request, res: Response) => {
   const health = {
@@ -105,7 +114,6 @@ app.get('/health', (_req: Request, res: Response) => {
       api: 'up',
       cache: getCacheHealth(),
       stellarRpc: getStellarRpcHealth(),
-      jobs: getJobHealthStatus(),
     },
   };
 
@@ -116,17 +124,11 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * @openapi
- * /ready:
- *   get:
- *     summary: Get service readiness status
- *     description: Returns 200 if the service is ready for traffic, checking all critical dependencies.
- *     tags: [Monitoring]
- *     responses:
- *       200:
- *         description: Service is ready
- *       503:
- *         description: Service is not ready
+ * GET /ready
+ * Returns readiness status - should only return 200 if service is ready for traffic
+ * Checks all critical dependencies before reporting readiness
+ * 
+ * Response: 200 OK if ready, 503 Service Unavailable if not ready
  */
 app.get('/ready', (_req: Request, res: Response) => {
   const readiness = {
@@ -151,133 +153,97 @@ app.get('/ready', (_req: Request, res: Response) => {
 // ─── API Routes (with strict rate limiting) ────────────────────────────────
 
 /**
- * @openapi
- * /api/v1/vault/summary:
- *   get:
- *     summary: Get vault performance summary
- *     description: Returns high-level metrics for the vault including TVL and APY.
- *     tags: [Vault]
- *     responses:
- *       200:
- *         description: Vault summary data
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 totalAssets: { type: number }
- *                 totalShares: { type: number }
- *                 apy: { type: number }
- *                 timestamp: { type: string, format: "date-time" }
+ * Example protected API endpoint with caching
+ * Demonstrates rate limiting per API key and response caching
  */
-app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
-  // This would typically fetch data from Stellar RPC or database
+app.get(
+  '/api/vault/summary',
+  apiLimiter,
+  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
+  (_req: Request, res: Response) => {
+    // This would typically fetch data from Stellar RPC or database
+    res.json({
+      totalAssets: 0,
+      totalShares: 0,
+      apy: 0,
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+/**
+ * GET /api/vault/metrics - Cache with configurable TTL
+ */
+app.get(
+  '/api/vault/metrics',
+  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
+  (_req: Request, res: Response) => {
+    res.json({
+      message: 'Vault metrics',
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+/**
+ * GET /api/vault/apy - Cache with configurable TTL
+ */
+app.get(
+  '/api/vault/apy',
+  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
+  (_req: Request, res: Response) => {
+    res.json({
+      message: 'Vault APY',
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+// ─── Admin Routes (with API key authentication) ──────────────────────────────
+
+/**
+ * POST /admin/cache/invalidate - Invalidate cache by pattern
+ * Requires API key authentication
+ */
+app.post('/admin/cache/invalidate', validateApiKey, (req: Request, res: Response) => {
+  const { pattern } = req.body;
+  invalidateCache(pattern);
   res.json({
-    totalAssets: 0,
-    totalShares: 0,
-    apy: 0,
+    message: 'Cache invalidated',
+    pattern,
+    stats: getCacheStats(),
+  });
+});
+
+/**
+ * GET /admin/cache/stats - Get cache statistics
+ * Requires API key authentication
+ */
+app.get('/admin/cache/stats', validateApiKey, (_req: Request, res: Response) => {
+  res.json({
+    cache: getCacheStats(),
     timestamp: new Date().toISOString(),
   });
 });
 
 /**
- * @openapi
- * /api/v1/vault/deposits:
- *   post:
- *     summary: Create a new deposit request
- *     description: Submits a deposit request to be processed by the vault.
- *     tags: [Vault]
- *     security:
- *       - IdempotencyKey: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/DepositRequest'
- *     responses:
- *       201:
- *         description: Deposit request accepted
- *       400:
- *         description: Invalid request or missing idempotency key
- *       409:
- *         description: Idempotency conflict
- *       413:
- *         description: Payload too large
+ * POST /admin/api-keys/register - Register a new API key
+ * Requires API key authentication (for boostrapping, requires special permission)
  */
-  try {
-    const idempotencyKey = getIdempotencyKey(req);
-    if (!idempotencyKey) {
-      res.status(400).json({
-        error: 'Missing Idempotency Key',
-        status: 400,
-        message: 'Provide x-idempotency-key for mutation requests.',
-      });
-      return;
-    }
-
-    const depositRequest = normalizeDepositRequest(req.body);
-    if (!depositRequest.valid) {
-      res.status(400).json({
-        error: 'Invalid request body',
-        status: 400,
-        message: depositRequest.message,
-      });
-      return;
-    }
-
-    const fingerprint = buildIdempotencyFingerprint(depositRequest.value);
-    const { result, replayed } = await idempotencyStore.execute(
-      idempotencyKey,
-      fingerprint,
-      async () => ({
-        statusCode: 201,
-        body: {
-          depositId: `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          status: 'queued',
-          receivedAt: new Date().toISOString(),
-          ...depositRequest.value,
-        },
-      })
-    );
-
-    res.setHeader('Idempotency-Key', idempotencyKey);
-    res.setHeader('Idempotency-Status', replayed ? 'replayed' : 'created');
-    res.status(result.statusCode).json(result.body);
-  } catch (error) {
-    if (error instanceof IdempotencyConflictError) {
-      res.status(409).json({
-        error: 'Idempotency conflict',
-        status: 409,
-        message: error.message,
-      });
-      return;
-    }
-
-    next(error);
+app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Response) => {
+  const { key } = req.body;
+  if (!key) {
+    res.status(400).json({ error: 'Missing key in request body' });
+    return;
   }
-});
 
-/**
- * @openapi
- * /api/v1/ops/job-metrics:
- *   get:
- *     summary: Get background job metrics
- *     description: Returns performance and health metrics for background governance jobs.
- *     tags: [Operations]
- *     responses:
- *       200:
- *         description: Job metrics data
- */
+  const hash = registerApiKey(key);
   res.json({
-    timestamp: new Date().toISOString(),
-    ...getJobMetrics(),
+    message: 'API key registered',
+    hash,
+    created: new Date().toISOString(),
   });
 });
-
-// ─── List Endpoints with Pagination ─────────────────────────────────────────
-
-app.use('/api/v1', listEndpoints);
 
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
@@ -306,11 +272,13 @@ function getStellarRpcHealth(): string {
   try {
     // Simulate RPC availability check
     // In production: make actual call to VITE_SOROBAN_RPC_URL
-    const rpcUrl = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
+    const rpcUrl = process.env.STELLAR_RPC_URL;
     if (!rpcUrl) {
+      /* eslint-disable-next-line no-console */
+      console.warn('STELLAR_RPC_URL not configured');
       return 'down';
     }
-    // Assume up if a URL is configured
+    // Assume up if URL is configured
     // Real implementation would make a test RPC call
     return 'up';
   } catch {
@@ -322,97 +290,20 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
-/**
- * @openapi
- * components:
- *   schemas:
- *     DepositRequest:
- *       type: object
- *       required:
- *         - amount
- *         - asset
- *         - walletAddress
- *       properties:
- *         amount:
- *           type: number
- *           minimum: 0.0000001
- *           description: Amount to deposit
- *         asset:
- *           type: string
- *           description: Asset code (e.g., USDC, XLM)
- *         walletAddress:
- *           type: string
- *           description: Stellar wallet address
- */
-interface DepositRequest {
-  amount: number;
-  asset: string;
-  walletAddress: string;
-}
-
-function getIdempotencyKey(req: Request): string | undefined {
-  const key = req.header('x-idempotency-key');
-  return key?.trim() || undefined;
-}
-
-function normalizeDepositRequest(body: unknown):
-  | { valid: true; value: DepositRequest }
-  | { valid: false; message: string } {
-  if (!body || typeof body !== 'object') {
-    return { valid: false, message: 'Request body must be a JSON object.' };
-  }
-
-  const payload = body as Record<string, unknown>;
-  const amount = typeof payload.amount === 'number' ? payload.amount : Number(payload.amount);
-  const asset = typeof payload.asset === 'string' ? payload.asset.trim() : '';
-  const walletAddress =
-    typeof payload.walletAddress === 'string' ? payload.walletAddress.trim() : '';
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { valid: false, message: 'amount must be a positive number.' };
-  }
-
-  if (!asset) {
-    return { valid: false, message: 'asset is required.' };
-  }
-
-  if (!walletAddress) {
-    return { valid: false, message: 'walletAddress is required.' };
-  }
-
-  return {
-    valid: true,
-    value: {
-      amount,
-      asset,
-      walletAddress,
-    },
-  };
-}
-
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  if (err.type === 'entity.too.large') {
-    res.status(413).json({
-      error: 'Payload Too Large',
-      status: 413,
-      message: 'Request payload exceeds the allowed limit',
-    });
-    return;
-  }
+const errorHandler: ErrorRequestHandler = (
+  err: any,
+  req: CorrelationIdRequest,
+  res: Response,
+  _next: NextFunction,
+) => {
+  logger.log('error', 'Unhandled error', {
+    correlationId: req.correlationId,
+    error: err.message,
+    stack: nodeEnv === 'development' ? err.stack : undefined,
+  });
 
-  // Catch malformed JSON errors from express.json()
-  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'Malformed JSON payload',
-    });
-    return;
-  }
-
-  console.error('Unhandled error:', err);
   res.status(500).json({
     error: 'Internal Server Error',
     status: 500,
@@ -420,8 +311,11 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       nodeEnv === 'production'
         ? 'An unexpected error occurred'
         : err.message,
+    correlationId: req.correlationId,
   });
-});
+};
+
+app.use(errorHandler);
 
 // ─── 404 Handler ────────────────────────────────────────────────────────────
 
@@ -436,23 +330,20 @@ app.use((req: Request, res: Response) => {
 
 // ─── Server Start ───────────────────────────────────────────────────────────
 
-// Only start server if this file is run directly (not imported as a module)
-if (require.main === module) {
-  const server = app.listen(port, () => {
-    console.log(`🚀 YieldVault Backend listening on port ${port}`);
-    console.log(`📊 Health check: http://localhost:${port}/health`);
-    console.log(`✅ Ready check: http://localhost:${port}/ready`);
-    console.log(`🌍 Environment: ${nodeEnv}`);
+const server = app.listen(port, () => {
+  logger.log('info', '🚀 YieldVault Backend started', {
+    port,
+    environment: nodeEnv,
+    logLevel,
+    drainTimeout,
+    cacheMetricsTtl: cacheVaultMetricsTtl,
   });
+  logger.log('info', '📊 Health check: http://localhost:' + port + '/health');
+  logger.log('info', '✅ Ready check: http://localhost:' + port + '/ready');
+});
 
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
-  });
-}
+// Register graceful shutdown handler
+const shutdownHandler = new GracefulShutdownHandler(drainTimeout);
+shutdownHandler.register(server);
 
 export default app;

@@ -194,7 +194,7 @@ proptest! {
         mint(&env, &token_addr, &admin, &user, deposit_amount);
 
         let deposit_result = client.try_deposit(&user, &deposit_amount);
-        
+
         if let Ok(Ok(shares)) = deposit_result {
             prop_assert!(shares > 0, "deposit minted zero shares");
 
@@ -226,13 +226,13 @@ proptest! {
         client.deposit(&user_1, &initial_deposit);
 
         mint(&env, &token_addr, &admin, &admin, yield_amount);
-        client.distribute_yield(&yield_amount);
+        client.accrue_yield(&yield_amount);
 
         mint(&env, &token_addr, &admin, &user_tiny, deposit_amount);
-        
+
         let deposit_result = client.try_deposit(&user_tiny, &deposit_amount);
         let projected_shares = client.calculate_shares(&deposit_amount);
-        
+
         if projected_shares == 0 {
             prop_assert!(
                 deposit_result.is_err(),

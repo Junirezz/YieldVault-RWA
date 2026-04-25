@@ -23,7 +23,7 @@
 //! ### 1. `token_client.transfer_from()` in `deposit()`
 //! - **Nature**: Non-recursive token transfer
 //! - **CEI Status**: ✓ Follows CEI
-//! - **Sequence**: 
+//! - **Sequence**:
 //!   1. Check: Validate amount > 0, not paused
 //!   2. Calculate: Compute shares to mint
 //!   3. Effects: Update state (total_assets, total_shares, user balance)
@@ -106,8 +106,6 @@
 //! 5. **No Callbacks**: No external contract can call back into vault during execution
 //! 6. **Clear Authorization**: Only configured strategies accepted
 
-use soroban_sdk::Address;
-
 /// Validates an external call precondition
 #[inline]
 pub fn validate_external_call_precondition(condition: bool, msg: &str) {
@@ -124,19 +122,17 @@ macro_rules! cei_pattern {
         // This macro documents the CEI pattern for code review
         // Structure:
         // 1. Checks: $checks
-        // 2. Effects: $effects  
+        // 2. Effects: $effects
         // 3. Interactions: $interactions
     };
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_external_calls_inventory_documented() {
         // This test verifies that all external calls are documented
         // Actual reentrancy protections are tested via integration tests
-        assert!(true);
     }
 }
