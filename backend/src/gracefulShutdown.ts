@@ -6,6 +6,7 @@ export class GracefulShutdownHandler {
   private drainTimeout: number;
   private server: Server | null = null;
   private activeConnections = new Set<Socket>();
+  private cleanupTasks: (() => Promise<void>)[] = [];
 
   constructor(drainTimeoutMs: number = 30000) {
     this.drainTimeout = drainTimeoutMs;
@@ -28,18 +29,19 @@ export class GracefulShutdownHandler {
     });
   }
 
-  private shutdown(signal: string): void {
+  /**
+   * Register an asynchronous cleanup task to be run during shutdown.
+   */
+  onShutdown(task: () => Promise<void>): void {
+    this.cleanupTasks.push(task);
+  }
+
+  private async shutdown(signal: string): Promise<void> {
     logger.log('info', `${signal} received, starting graceful shutdown`);
 
     if (!this.server) {
       process.exit(0);
     }
-
-    // Stop accepting new connections
-    this.server.close(() => {
-      logger.log('info', 'Server closed, no longer accepting connections');
-      process.exit(0);
-    });
 
     // Force close after drain timeout
     const drainTimer = setTimeout(() => {
@@ -56,5 +58,26 @@ export class GracefulShutdownHandler {
     }, this.drainTimeout);
 
     drainTimer.unref();
+
+    try {
+      // Run registered cleanup tasks (e.g., database shutdown)
+      await Promise.all(this.cleanupTasks.map(task => task().catch(err => {
+        logger.log('error', 'Cleanup task failed during shutdown', {
+          error: err instanceof Error ? err.message : String(err)
+        });
+      })));
+
+      // Stop accepting new connections and wait for existing ones to close
+      this.server.close(() => {
+        logger.log('info', 'Server closed, no longer accepting connections');
+        clearTimeout(drainTimer);
+        process.exit(0);
+      });
+    } catch (error) {
+      logger.log('error', 'Error during graceful shutdown', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      process.exit(1);
+    }
   }
 }
