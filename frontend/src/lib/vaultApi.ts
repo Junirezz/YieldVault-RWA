@@ -1,5 +1,106 @@
+import { Contract, SorobanRpc, TransactionBuilder, BASE_FEE } from "@stellar/stellar-sdk";
+import { networkConfig } from "../config/network";
 import { apiClient } from "./apiClient";
 import { validate, VaultHistoryQuerySchema, DepositRequestSchema, WithdrawalRequestSchema } from "./api";
+
+// ─── Share Price Error ────────────────────────────────────────────────────────
+
+export class SharePriceFetchError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "SharePriceFetchError";
+  }
+}
+
+// ─── Fixed-point decoding ─────────────────────────────────────────────────────
+
+/** 10^18 — the fixed-point divisor used by the vault contract's i128 share price. */
+export const FIXED_POINT_DIVISOR = 1_000_000_000_000_000_000n;
+
+/**
+ * Convert a raw i128 contract value to a JavaScript number.
+ *
+ * Uses BigInt integer division to preserve precision, then converts to number.
+ * The share price range (1.0 ± small yield) is well within Number.MAX_SAFE_INTEGER
+ * after dividing by 10^18.
+ */
+export function decodeSharePrice(raw: bigint): number {
+  const integerPart = raw / FIXED_POINT_DIVISOR;
+  const remainder = raw % FIXED_POINT_DIVISOR;
+  return Number(integerPart) + Number(remainder) / Number(FIXED_POINT_DIVISOR);
+}
+
+// ─── getSharePrice ────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the current share price from the vault contract via Soroban simulation.
+ *
+ * Uses `simulateTransaction` (a read-only view call) — no funded account required.
+ * A well-known placeholder address is used as the transaction source; the simulation
+ * ignores sequence numbers and fees.
+ *
+ * @throws {SharePriceFetchError} on any failure (missing config, RPC error, bad response)
+ */
+export async function getSharePrice(): Promise<number> {
+  if (!networkConfig.contractId) {
+    throw new SharePriceFetchError("Vault contract ID is not configured");
+  }
+
+  const server = new SorobanRpc.Server(networkConfig.rpcUrl);
+  const contract = new Contract(networkConfig.contractId);
+
+  // Soroban simulation does not require a funded account. We use a well-known
+  // testnet placeholder address and fall back to a minimal stub if getAccount fails.
+  const PLACEHOLDER_ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+  const sourceAccount = await server.getAccount(PLACEHOLDER_ADDRESS).catch(() => {
+    // Minimal account-like object sufficient for TransactionBuilder
+    return {
+      accountId: () => PLACEHOLDER_ADDRESS,
+      sequenceNumber: () => "0",
+      incrementSequenceNumber: () => {},
+    };
+  });
+
+  const tx = new TransactionBuilder(
+    sourceAccount as Parameters<typeof TransactionBuilder>[0],
+    {
+      fee: BASE_FEE,
+      networkPassphrase: networkConfig.networkPassphrase,
+    },
+  )
+    .addOperation(contract.call("get_share_price"))
+    .setTimeout(30)
+    .build();
+
+  let simResult: SorobanRpc.Api.SimulateTransactionResponse;
+  try {
+    simResult = await server.simulateTransaction(tx);
+  } catch (cause) {
+    throw new SharePriceFetchError(
+      `RPC call failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+  }
+
+  if (SorobanRpc.Api.isSimulationError(simResult)) {
+    throw new SharePriceFetchError(
+      `Contract simulation error: ${simResult.error}`,
+      { cause: new Error(simResult.error) },
+    );
+  }
+
+  const returnValue = simResult.result?.retval;
+  if (!returnValue) {
+    throw new SharePriceFetchError("Contract returned no value");
+  }
+
+  // The i128 XDR value is accessed via the SDK's scVal helpers.
+  // hi is the high 64 bits (signed), lo is the low 64 bits (unsigned).
+  const raw = returnValue.i128();
+  const rawBigInt = (BigInt(raw.hi) << 64n) | BigInt(raw.lo);
+
+  return decodeSharePrice(rawBigInt);
+}
 
 export interface StrategyMetadata {
   id: string;
@@ -104,4 +205,32 @@ export async function submitWithdrawal(params: unknown) {
   validate(WithdrawalRequestSchema, params, "WithdrawalRequest");
   // Simulate backend interaction
   return new Promise<void>((resolve) => setTimeout(resolve, 2000));
+}
+
+export async function getXlmPrice(): Promise<number> {
+  try {
+    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd");
+    const data = await response.json();
+    return data.stellar.usd;
+  } catch (error) {
+    console.error("Failed to fetch XLM price", error);
+    return 0.12; // Fallback price
+  }
+}
+
+export async function estimateNetworkFee(_params: {
+  walletAddress: string;
+  amount: number;
+  action: "deposit" | "withdraw";
+}): Promise<string> {
+  // In a real implementation, this would use StellarSdk.SorobanRpc.Server.simulateTransaction
+  // For this exercise, we simulate the RPC response delay and return a realistic estimate
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  
+  // Simulate variation based on action and some randomness
+  const baseFee = _params.action === "deposit" ? 0.05 : 0.07;
+  const randomFactor = 0.95 + Math.random() * 0.1;
+  const xlmAmount = baseFee * randomFactor;
+  
+  return xlmAmount.toFixed(6);
 }

@@ -21,6 +21,7 @@ import { useClientDataTable } from "../hooks/useClientDataTable";
 import { useUrlState } from "../hooks/useUrlState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
 import { useToast } from "../context/ToastContext";
+import YieldBreakdownChart from "../components/YieldBreakdownChart";
 
 interface PortfolioProps {
   walletAddress: string | null;
@@ -369,6 +370,8 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               icon={<Briefcase size={20} color="var(--text-secondary)" />}
             />
           </div>
+
+          <YieldBreakdownChart totalGain={totalGain} />
 
           <section
             className="glass-panel"

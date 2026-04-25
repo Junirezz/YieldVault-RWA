@@ -88,6 +88,7 @@ fn test_vault_with_benji_strategy() {
     // 1. Initialize
     vault.initialize(&admin, &usdc.address);
     strategy.initialize(&vault_id, &usdc.address, &benji_token.address);
+    vault.whitelist_strategy(&strategy_id, &true);
     vault.set_strategy(&strategy_id);
 
     // 2. User Deposits 100 USDC
@@ -935,7 +936,8 @@ fn test_invariant_share_asset_round_trip() {
 fn test_privileged_functions_protected() {
     // Privileged functions protected by admin.require_auth():
     // - set_strategy: admin.require_auth()
-    // - set_pause: admin.require_auth()
+    // - pause: admin.require_auth()
+    // - unpause: admin.require_auth()
     // - configure_korean_strategy: admin.require_auth()
     // - accrue_korean_debt_yield: admin.require_auth()
     // - set_dao_threshold: admin.require_auth()

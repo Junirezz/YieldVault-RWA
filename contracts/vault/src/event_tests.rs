@@ -53,7 +53,7 @@ fn test_withdraw_works() {
 }
 
 #[test]
-fn test_set_pause_works() {
+fn test_pause_unpause_works() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -65,8 +65,10 @@ fn test_set_pause_works() {
     let vault = YieldVaultClient::new(&env, &vault_id);
     vault.initialize(&admin, &usdc.address);
 
-    vault.set_pause(&true);
+    vault.pause();
     assert!(vault.is_paused());
+    vault.unpause();
+    assert!(!vault.is_paused());
 }
 
 #[test]
@@ -102,6 +104,6 @@ fn test_distribute_yield_works() {
     let vault = YieldVaultClient::new(&env, &vault_id);
     vault.initialize(&admin, &usdc.address);
 
-    vault.distribute_yield(&100);
+    vault.accrue_yield(&100);
     assert_eq!(vault.total_assets(), 100);
 }

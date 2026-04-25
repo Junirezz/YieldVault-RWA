@@ -18,6 +18,7 @@ use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
     Address, BytesN, Env, Vec,
 };
+use crate::upgrade::{get_admin, set_admin, is_initialized, set_initialized, get_pending_admin, set_pending_admin};
 
 const MAX_PAGE_SIZE: u32 = 50;
 
@@ -64,6 +65,9 @@ pub enum DataKey {
     ShareBalance(Address),
     ShipmentByStatus(ShipmentStatus),
     ShipmentStatusOf(u64),
+    UserDeposit(Address),
+    PerUserCap,
+    StrategyWhitelist(Address),
 }
 
 #[contracttype]
@@ -83,6 +87,7 @@ pub enum VaultError {
     InsufficientShares = 2,
     InvalidAmount = 3,
     ContractPaused = 4,
+    ExceedsUserCap = 5,
 }
 
 #[contractclient(name = "KoreanDebtStrategyClient")]
@@ -127,11 +132,47 @@ impl YieldVault {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
+    /// Propose a new admin.
+    /// Only the current Admin can call this.
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        set_pending_admin(&env, &Some(new_admin));
+    }
+
+    /// Accept the admin role.
+    /// Only the pending Admin can call this.
+    pub fn accept_admin(env: Env) {
+        let pending_admin = get_pending_admin(&env).expect("No pending admin");
+        pending_admin.require_auth();
+
+        set_admin(&env, &pending_admin);
+        set_pending_admin(&env, &None);
+    }
+
     /// Set or update the active strategy connector.
     pub fn set_strategy(env: Env, strategy: Address) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
+
+        // Check whitelist
+        if !Self::is_strategy_whitelisted(env.clone(), strategy.clone()) {
+            panic!("strategy not whitelisted");
+        }
+
         env.storage().instance().set(&DataKey::Strategy, &strategy);
+    }
+
+    /// Whitelist or un-whitelist a strategy address.
+    pub fn whitelist_strategy(env: Env, strategy: Address, approved: bool) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::StrategyWhitelist(strategy), &approved);
+    }
+
+    pub fn is_strategy_whitelisted(env: Env, strategy: Address) -> bool {
+        env.storage().instance().get(&DataKey::StrategyWhitelist(strategy)).unwrap_or(false)
     }
 
     /// Read the active strategy address.
@@ -139,17 +180,46 @@ impl YieldVault {
         env.storage().instance().get(&DataKey::Strategy)
     }
 
-    pub fn set_pause(env: Env, paused: bool) {
+    pub fn pause(env: Env) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 
         let mut state = Self::get_state(&env);
-        state.is_paused = paused;
+        state.is_paused = true;
+        env.storage().instance().set(&DataKey::State, &state);
+    }
+
+    pub fn unpause(env: Env) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let mut state = Self::get_state(&env);
+        state.is_paused = false;
         env.storage().instance().set(&DataKey::State, &state);
     }
 
     pub fn is_paused(env: Env) -> bool {
         Self::get_state(&env).is_paused
+    }
+
+    pub fn set_per_user_cap(env: Env, cap: i128) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::PerUserCap, &cap);
+    }
+
+    pub fn per_user_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PerUserCap)
+            .unwrap_or(i128::MAX)
+    }
+
+    pub fn user_deposit(env: Env, user: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::UserDeposit(user))
+            .unwrap_or(0)
     }
 
     fn get_state(env: &Env) -> VaultState {
@@ -186,7 +256,7 @@ impl YieldVault {
             0
         };
 
-        idle_assets + strategy_assets
+        idle_assets.checked_add(strategy_assets).expect("overflow")
     }
 
     pub fn balance(env: Env, user: Address) -> i128 {
@@ -235,7 +305,7 @@ impl YieldVault {
         }
 
         let mut state = Self::get_state(&env);
-        state.total_assets += harvested;
+        state.total_assets = state.total_assets.checked_add(harvested).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         harvested
@@ -259,7 +329,7 @@ impl YieldVault {
             .instance()
             .get(&DataKey::ProposalNonce)
             .unwrap_or(0);
-        next_nonce += 1;
+        next_nonce = next_nonce.checked_add(1).expect("overflow");
         env.storage()
             .instance()
             .set(&DataKey::ProposalNonce, &next_nonce);
@@ -305,9 +375,9 @@ impl YieldVault {
         }
 
         if support {
-            proposal.yes_votes += weight;
+            proposal.yes_votes = proposal.yes_votes.checked_add(weight).expect("overflow");
         } else {
-            proposal.no_votes += weight;
+            proposal.no_votes = proposal.no_votes.checked_add(weight).expect("overflow");
         }
 
         env.storage()
@@ -475,7 +545,11 @@ impl YieldVault {
         if state.total_assets == 0 || state.total_shares == 0 {
             assets
         } else {
-            assets * state.total_shares / state.total_assets
+            assets
+                .checked_mul(state.total_shares)
+                .expect("overflow")
+                .checked_div(state.total_assets)
+                .expect("division by zero or overflow")
         }
     }
 
@@ -484,7 +558,11 @@ impl YieldVault {
         if state.total_shares == 0 {
             0
         } else {
-            shares * state.total_assets / state.total_shares
+            shares
+                .checked_mul(state.total_assets)
+                .expect("overflow")
+                .checked_div(state.total_shares)
+                .expect("division by zero or overflow")
         }
     }
 
@@ -516,7 +594,11 @@ impl YieldVault {
         let shares_to_mint = if state.total_assets == 0 || state.total_shares == 0 {
             amount
         } else {
-            amount * state.total_shares / state.total_assets
+            amount
+                .checked_mul(state.total_shares)
+                .expect("overflow")
+                .checked_div(state.total_assets)
+                .expect("division by zero or overflow")
         };
 
         // Prevent silent loss of funds if shares round down to 0
@@ -524,7 +606,22 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        let deposit_key = DataKey::UserDeposit(user.clone());
+        let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
+        let new_deposit = current_deposit.checked_add(amount).expect("overflow");
+
+        let cap: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerUserCap)
+            .unwrap_or(i128::MAX);
+        if new_deposit > cap {
+            return Err(VaultError::ExceedsUserCap);
+        }
+
         token_client.transfer(&user, &env.current_contract_address(), &amount);
+
+        env.storage().instance().set(&deposit_key, &new_deposit);
 
         // Update idle state
         let ta = env
@@ -534,21 +631,21 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let ts = Self::total_shares(env.clone());
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(ts + shares_to_mint));
-        state.total_assets += amount;
-        state.total_shares += shares_to_mint;
+            .set(&DataKey::TotalShares, &ts.checked_add(shares_to_mint).expect("overflow"));
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
+        state.total_shares = state.total_shares.checked_add(shares_to_mint).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
         env.storage()
             .instance()
-            .set(&user_key, &(user_shares + shares_to_mint));
+            .set(&user_key, &user_shares.checked_add(shares_to_mint).expect("overflow"));
 
         env.events()
             .publish((symbol_short!("deposit"),), (amount, shares_to_mint));
@@ -583,7 +680,11 @@ impl YieldVault {
         let assets_to_return = if state.total_shares == 0 {
             0
         } else {
-            shares * state.total_assets / state.total_shares
+            shares
+                .checked_mul(state.total_assets)
+                .expect("overflow")
+                .checked_div(state.total_shares)
+                .expect("division by zero or overflow")
         };
 
         let token_addr = Self::token(env.clone());
@@ -596,7 +697,7 @@ impl YieldVault {
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
         if idle_ta < assets_to_return {
-            let needed = assets_to_return - idle_ta;
+            let needed = assets_to_return.checked_sub(idle_ta).expect("underflow");
             Self::divest(env.clone(), needed);
             idle_ta = env
                 .storage()
@@ -611,26 +712,35 @@ impl YieldVault {
         // Update state
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta - assets_to_return));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(assets_to_return).expect("underflow"));
 
         let ts = Self::total_shares(env.clone());
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(ts - shares));
+            .set(&DataKey::TotalShares, &ts.checked_sub(shares).expect("underflow"));
 
         let vault_balance = Self::balance(env.clone(), user.clone());
         env.storage().instance().set(
             &DataKey::ShareBalance(user.clone()),
-            &(vault_balance - shares),
+            &vault_balance.checked_sub(shares).expect("underflow"),
         );
 
-        state.total_assets -= assets_to_return;
-        state.total_shares -= shares;
+        state.total_assets = state.total_assets.checked_sub(assets_to_return).expect("underflow");
+        state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         env.storage()
             .instance()
-            .set(&user_key, &(user_shares - shares));
+            .set(&user_key, &user_shares.checked_sub(shares).expect("underflow"));
+
+        let deposit_key = DataKey::UserDeposit(user.clone());
+        let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
+        let new_deposit = if current_deposit > assets_to_return {
+            current_deposit.checked_sub(assets_to_return).expect("underflow")
+        } else {
+            0
+        };
+        env.storage().instance().set(&deposit_key, &new_deposit);
 
         env.events().publish(
             (symbol_short!("withdraw"), user),
@@ -671,7 +781,7 @@ impl YieldVault {
         // Update idle assets
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta - amount));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(amount).expect("underflow"));
     }
 
     /// Recall funds from the strategy.
@@ -690,7 +800,7 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta + amount));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_add(amount).expect("overflow"));
     }
 
     /// Admin function to artificially accrue yield (legacy, but updated for strategy).
@@ -710,10 +820,10 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let mut state = Self::get_state(&env);
-        state.total_assets += amount;
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
     }
 
@@ -743,10 +853,10 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let mut state = Self::get_state(&env);
-        state.total_assets += amount;
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
     }
 

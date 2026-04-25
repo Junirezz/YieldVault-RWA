@@ -94,7 +94,7 @@ describe('Backend API', () => {
       expect(results.some((r) => r.status === 429)).toBe(true);
     });
 
-    it('should return 429 with clear error message', async () => {
+    it('should return 429 with clear error message and Retry-After header', async () => {
       // Make multiple requests to trigger rate limit
       const requests = Array(35).fill(null);
       await Promise.all(
@@ -107,11 +107,25 @@ describe('Backend API', () => {
         expect(response.body).toHaveProperty('error');
         expect(response.body).toHaveProperty('status', 429);
         expect(response.body).toHaveProperty('message');
+        // Issue #251: retryAfter field in body
+        expect(response.body).toHaveProperty('retryAfter');
+        expect(typeof response.body.retryAfter).toBe('number');
+        // Issue #251: Retry-After header must be present
+        expect(response.headers).toHaveProperty('retry-after');
       }
     });
 
-    it('should support per-user rate limiting with API key', async () => {
-      // Test that API key in header is used for rate limiting
+    it('should support per-user rate limiting with wallet address header', async () => {
+      // Test that x-wallet-address header is used as the rate-limit key
+      const response = await request(app)
+        .get('/api/v1/vault/summary')
+        .set('x-wallet-address', 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567');
+
+      expect([200, 429]).toContain(response.status);
+    });
+
+    it('should support per-user rate limiting with API key (backward compat)', async () => {
+      // Test that x-api-key header is still accepted as fallback key
       const response = await request(app)
         .get('/api/vault/summary')
         .set('x-api-key', 'test-key-123');

@@ -43,3 +43,6 @@ jobs:
             git diff openapi.json
             exit 1
           fi
+
+      - name: Check for database schema drift
+        run: npm run db:check-drift

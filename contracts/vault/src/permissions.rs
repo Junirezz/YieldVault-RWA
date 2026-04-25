@@ -8,7 +8,8 @@
 //! |----------|---------------|------|
 //! | `initialize` | None (first call) | Can only be called once, sets admin |
 //! | `set_strategy` | Admin | Configure active strategy |
-//! | `set_pause` | Admin | Pause/unpause vault |
+//! | `pause` | Admin | Pause vault |
+//! | `unpause` | Admin | Unpause vault |
 //! | `configure_korean_strategy` | Admin | Configure Korean debt strategy |
 //! | `accrue_korean_debt_yield` | Admin | Harvest yield from Korean strategy |
 //! | `set_dao_threshold` | Admin | Update governance threshold |

@@ -6,6 +6,8 @@ export interface ClientTableConfig<T> {
   state: DataTableState;
   getSearchValue: (row: T) => string;
   getSortValue: (row: T, columnId: string) => string | number;
+  /** Optional extra predicate applied after text search. */
+  filterRow?: (row: T) => boolean;
 }
 
 export function useClientDataTable<T>({
@@ -13,17 +15,24 @@ export function useClientDataTable<T>({
   state,
   getSearchValue,
   getSortValue,
+  filterRow,
 }: ClientTableConfig<T>) {
   const filteredRows = useMemo(() => {
     const search = state.search.trim().toLowerCase();
-    if (!search) {
-      return rows;
+    let result = rows;
+
+    if (search) {
+      result = result.filter((row) =>
+        getSearchValue(row).toLowerCase().includes(search),
+      );
     }
 
-    return rows.filter((row) =>
-      getSearchValue(row).toLowerCase().includes(search),
-    );
-  }, [getSearchValue, rows, state.search]);
+    if (filterRow) {
+      result = result.filter(filterRow);
+    }
+
+    return result;
+  }, [filterRow, getSearchValue, rows, state.search]);
 
   const sortedRows = useMemo(() => {
     return [...filteredRows].sort((left, right) => {

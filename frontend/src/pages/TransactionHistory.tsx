@@ -102,6 +102,40 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     setSearchParams(nextParams, { replace: true });
   };
 
+  // Date range from URL
+  const dateFrom = searchParams.get("dateFrom") ?? "";
+  const dateTo = searchParams.get("dateTo") ?? "";
+
+  const setDateFrom = (value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) nextParams.set("dateFrom", value);
+    else nextParams.delete("dateFrom");
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const setDateTo = (value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) nextParams.set("dateTo", value);
+    else nextParams.delete("dateTo");
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const clearAllFilters = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("txType");
+    nextParams.delete("dateFrom");
+    nextParams.delete("dateTo");
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+    setSearchInput("");
+    setSearch("");
+  };
+
+  const hasActiveFilters =
+    txType !== "all" || Boolean(dateFrom) || Boolean(dateTo) || Boolean(state.search);
+
   useEffect(() => {
     setSearchInput(state.search);
   }, [state.search]);
@@ -175,6 +209,19 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
         default:
           return row.timestamp;
       }
+    },
+    filterRow: (row) => {
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setHours(0, 0, 0, 0);
+        if (new Date(row.timestamp) < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setHours(23, 59, 59, 999);
+        if (new Date(row.timestamp) > to) return false;
+      }
+      return true;
     },
   });
 
@@ -269,6 +316,36 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                   </div>
                 </label>
 
+                <label className="input-group" style={{ minWidth: "140px" }}>
+                  <span className="text-body-sm">From date</span>
+                  <div className="input-wrapper">
+                    <input
+                      aria-label="Filter from date"
+                      className="input-field"
+                      type="date"
+                      value={dateFrom}
+                      max={dateTo || undefined}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                    />
+                  </div>
+                </label>
+
+                <label className="input-group" style={{ minWidth: "140px" }}>
+                  <span className="text-body-sm">To date</span>
+                  <div className="input-wrapper">
+                    <input
+                      aria-label="Filter to date"
+                      className="input-field"
+                      type="date"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                    />
+                  </div>
+                </label>
+
                 <label className="input-group" style={{ minWidth: "120px" }}>
                   <span className="text-body-sm">Rows</span>
                   <div className="input-wrapper">
@@ -284,6 +361,17 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                     </select>
                   </div>
                 </label>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={clearAllFilters}
+                    style={{ alignSelf: "flex-end", height: "42px" }}
+                  >
+                    Clear Filters
+                  </button>
+                )}
               </div>
             </div>
 
