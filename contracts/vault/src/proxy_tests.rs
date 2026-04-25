@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::upgrade::{get_admin, is_initialized};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
 fn test_proxy_initialization_guard() {
@@ -39,13 +39,11 @@ fn test_proxy_upgrade_authorization() {
     let vault = YieldVaultClient::new(&env, &vault_id);
     vault.initialize(&admin, &token);
 
-    let new_wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
-
-    // Test with admin (should succeed with mock_all_auths)
-    env.as_contract(&vault_id, || {
-        // We can't easily test update_current_contract_wasm in unit tests without a real WASM hash
-        // but we can test that the auth is checked.
-    });
+    // Upload minimal WASM bytes so the hash exists in the ledger.
+    // In Soroban SDK v22, update_current_contract_wasm requires the hash to be
+    // present — a fabricated [1u8; 32] hash causes MissingValue.
+    let wasm_bytes = soroban_sdk::Bytes::new(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(wasm_bytes);
 
     vault.upgrade(&new_wasm_hash);
 }
