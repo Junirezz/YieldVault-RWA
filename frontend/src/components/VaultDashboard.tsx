@@ -12,10 +12,7 @@ import { FormField, SubmitButton } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import TransactionStatus, { type ActionStatus } from "./TransactionStatus";
 import CopyButton from "./CopyButton";
-import {
-  useDepositMutation,
-  useWithdrawMutation,
-} from "../hooks/useVaultMutations";
+import SharePriceDisplay from "./SharePriceDisplay";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -260,15 +257,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               >
                 Tokens: USDC
               </span>
-              <div
-                style={{
-                  marginTop: "8px",
-                  color: "var(--text-secondary)",
-                  fontSize: "0.82rem",
-                }}
-              >
-                1 yvUSDC = {summary.exchangeRate.toFixed(3)} USDC
-              </div>
+              <SharePriceDisplay />
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>

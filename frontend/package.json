@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "fast-check": "^3.22.0",
     "@playwright/test": "^1.58.2",
     "@sentry/react": "^10.45.0",
     "@sentry/vite-plugin": "^5.1.1",
