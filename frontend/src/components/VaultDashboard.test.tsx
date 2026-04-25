@@ -4,6 +4,7 @@ import VaultDashboard from "./VaultDashboard";
 import { VaultProvider } from "../context/VaultContext";
 import { ToastProvider } from "../context/ToastContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import * as vaultApi from "../lib/vaultApi";
 
 vi.mock("../lib/vaultApi", async (importOriginal) => {
@@ -36,20 +37,32 @@ const mockSummary = {
   },
 };
 
-function renderDashboard(walletAddress: string | null, usdcBalance = 1250.5) {
+function LocationSearchProbe() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
+
+function renderDashboard(
+  walletAddress: string | null,
+  usdcBalance = 1250.5,
+  initialEntry = "/",
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
     },
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <VaultProvider>
-          <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} />
-        </VaultProvider>
-      </ToastProvider>
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <VaultProvider>
+            <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} />
+            <LocationSearchProbe />
+          </VaultProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -204,5 +217,25 @@ describe("VaultDashboard", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
     }, { timeout: 3000 });
     expect(screen.getByRole("alert")).toHaveTextContent("Failed to load vault data");
+  });
+
+  it("prefills the deposit amount from deep links and removes params", async () => {
+    renderDashboard("GABC123", 1250.5, "/?action=deposit&amount=100&ref=partner");
+
+    const input = await screen.findByPlaceholderText("0.00");
+    await waitFor(() => {
+      expect(input).toHaveValue(100);
+    });
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?ref=partner");
+  });
+
+  it("ignores invalid deep-link amounts and removes deep-link params", async () => {
+    renderDashboard("GABC123", 1250.5, "/?action=deposit&amount=oops");
+
+    const input = await screen.findByPlaceholderText("0.00");
+    await waitFor(() => {
+      expect((input as HTMLInputElement).value).toBe("");
+    });
+    expect(screen.getByTestId("location-search")).toHaveTextContent("");
   });
 });

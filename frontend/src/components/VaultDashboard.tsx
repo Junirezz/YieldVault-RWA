@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { 
   Activity, 
   AlertCircle, 
@@ -130,6 +131,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   walletAddress,
   usdcBalance = 0,
 }) => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     formattedTvl,
     formattedApy,
@@ -141,20 +143,37 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     isCapReached,
   } = useVault();
   const toast = useToast();
-  const amountParam =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("amount")
-      : null;
-  const parsedAmount = amountParam ? Number(amountParam) : Number.NaN;
-  const initialAmount =
-    Number.isFinite(parsedAmount) && parsedAmount > 0
-      ? parsedAmount.toString()
-      : "";
 
   const [activeTab, setActiveTab] = useState<TransactionTab>("deposit");
-  const [amount, setAmount] = useState(initialAmount);
+  const [amount, setAmount] = useState("");
   const [touched, setTouched] =
     useState<Record<TransactionTab, boolean>>(INITIAL_TOUCHED_STATE);
+
+  // Handle deep link parameters
+  useEffect(() => {
+    const action = searchParams.get("action");
+    const amountParam = searchParams.get("amount");
+
+    if (action !== "deposit") {
+      return;
+    }
+
+    setActiveTab("deposit");
+    setTouched(INITIAL_TOUCHED_STATE);
+
+    const parsedAmount = amountParam === null ? Number.NaN : Number(amountParam);
+    if (Number.isFinite(parsedAmount) && parsedAmount > 0) {
+      setAmount(parsedAmount.toString());
+    } else {
+      setAmount("");
+    }
+
+    // Remove only deep-link query params while preserving any unrelated URL state.
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("action");
+    nextParams.delete("amount");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const depositMutation = useDepositMutation();
   const withdrawMutation = useWithdrawMutation();
@@ -568,7 +587,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                               onClick={async () => {
                                 const baseUrl = window.location.origin + window.location.pathname;
                                 const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
-                                  ? `${baseUrl}?amount=${amount}`
+                                  ? `${baseUrl}?action=deposit&amount=${amount}`
                                   : baseUrl;
                                 
                                 try {
