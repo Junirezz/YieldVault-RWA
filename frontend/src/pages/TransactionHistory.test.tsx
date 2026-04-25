@@ -130,6 +130,47 @@ describe("TransactionHistory", () => {
     await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
   });
 
+  it("renders an Export CSV button and downloads current transactions", async () => {
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+    const removeSpy = vi.spyOn(document.body, "removeChild");
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click");
+
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ id: "1", amount: "123.45", asset: "USDC" }),
+      makeTransaction({
+        id: "2",
+        amount: "67.89",
+        asset: "XLM",
+        type: "withdrawal",
+      }),
+    ]);
+
+    renderPage(WALLET);
+
+    const exportButton = await screen.findByRole("button", {
+      name: /Export CSV/i,
+    });
+
+    fireEvent.click(exportButton);
+
+    expect(clickSpy).toHaveBeenCalled();
+    expect(appendSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+
+    const appendedCall = appendSpy.mock.calls.find(
+      (call) => call[0] instanceof HTMLAnchorElement,
+    );
+    expect(appendedCall).toBeDefined();
+
+    const appendedLink = appendedCall?.[0] as HTMLAnchorElement;
+    expect(appendedLink.getAttribute("download")).toMatch(
+      /^transactions_\d{4}-\d{2}-\d{2}\.csv$/,
+    );
+    expect(appendedLink.getAttribute("href")).toMatch(
+      /^(blob:|data:text\/csv;charset=utf-8,)/,
+    );
+  });
+
   // Req 2.4 — shows ApiStatusBanner on fetch failure
   it("shows ApiStatusBanner on fetch failure", async () => {
     mockGetTransactions.mockRejectedValue(new TypeError("Failed to fetch"));
@@ -249,8 +290,8 @@ describe("TransactionHistory", () => {
     expect(mockGetTransactions).toHaveBeenCalledTimes(1);
     expect(screen.getByText("USDC")).toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
+    await waitFor(
+      () => expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
       { timeout: 2000 },
     );
     expect(screen.getByText("EURC")).toBeInTheDocument();

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FC } from "react";
 import { NavLink } from "react-router-dom";
+import { X, Menu } from "lucide-react";
 import WalletConnect from "./WalletConnect";
 import type { DisconnectReason } from "./WalletConnect";
 import ThemeToggle from "./ThemeToggle";

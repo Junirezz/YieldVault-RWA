@@ -18,6 +18,7 @@ import {
   type PortfolioHolding,
 } from "../lib/portfolioApi";
 import { useClientDataTable } from "../hooks/useClientDataTable";
+import HelpIcon from "../components/ui/HelpIcon";
 import { useUrlState } from "../hooks/useUrlState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
 import { useToast } from "../context/ToastContext";

@@ -4,11 +4,11 @@ import ApiStatusBanner from "../components/ApiStatusBanner";
 import Badge from "../components/Badge";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import PageHeader from "../components/PageHeader";
-import { 
-  normalizeApiError, 
-  isValidationError, 
-  type ApiError, 
-  type ValidationError 
+import {
+  normalizeApiError,
+  isValidationError,
+  type ApiError,
+  type ValidationError,
 } from "../lib/api";
 import {
   formatAmount,
@@ -34,10 +34,7 @@ const columns: DataTableColumn<Transaction>[] = [
     header: "Type",
     sortable: true,
     cell: (row) => (
-      <Badge
-        variant="status"
-        color={row.type === "deposit" ? "cyan" : "error"}
-      >
+      <Badge variant="status" color={row.type === "deposit" ? "cyan" : "error"}>
         {row.type}
       </Badge>
     ),
@@ -66,7 +63,10 @@ const columns: DataTableColumn<Transaction>[] = [
     sortable: false,
     cell: (row) => (
       <a
-        href={getStellarExplorerUrl(row.transactionHash, networkConfig.isTestnet ? "testnet" : "mainnet")}
+        href={getStellarExplorerUrl(
+          row.transactionHash,
+          networkConfig.isTestnet ? "testnet" : "mainnet",
+        )}
         target="_blank"
         rel="noopener noreferrer"
         style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
@@ -85,11 +85,13 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
 
-  const { state, setSearch, setSort, setPage, setPageSize } = useDataTableState({
-    defaultSortBy: "date",
-    defaultSortDirection: "desc",
-    defaultPageSize: 10,
-  });
+  const { state, setSearch, setSort, setPage, setPageSize } = useDataTableState(
+    {
+      defaultSortBy: "date",
+      defaultSortDirection: "desc",
+      defaultPageSize: 10,
+    },
+  );
   const [searchInput, setSearchInput] = useState(state.search);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -134,7 +136,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   };
 
   const hasActiveFilters =
-    txType !== "all" || Boolean(dateFrom) || Boolean(dateTo) || Boolean(state.search);
+    txType !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
+    Boolean(state.search);
 
   useEffect(() => {
     setSearchInput(state.search);
@@ -193,37 +198,83 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     };
   }, [walletAddress, state.pageSize, state.sortDirection, txType]);
 
-  const { rows, page, totalItems, totalPages } = useClientDataTable({
-    rows: transactions,
-    state,
-    getSearchValue: (row) =>
-      `${row.type} ${row.asset ?? ""} ${row.transactionHash}`,
-    getSortValue: (row, columnId) => {
-      switch (columnId) {
-        case "type":
-          return row.type;
-        case "amount":
-          return row.amount !== null ? parseFloat(row.amount) : 0;
-        case "date":
-          return row.timestamp;
-        default:
-          return row.timestamp;
-      }
+  const { rows, sortedRows, page, totalItems, totalPages } = useClientDataTable(
+    {
+      rows: transactions,
+      state,
+      getSearchValue: (row) =>
+        `${row.type} ${row.asset ?? ""} ${row.transactionHash}`,
+      getSortValue: (row, columnId) => {
+        switch (columnId) {
+          case "type":
+            return row.type;
+          case "amount":
+            return row.amount !== null ? parseFloat(row.amount) : 0;
+          case "date":
+            return row.timestamp;
+          default:
+            return row.timestamp;
+        }
+      },
+      filterRow: (row) => {
+        if (dateFrom) {
+          const from = new Date(dateFrom);
+          from.setHours(0, 0, 0, 0);
+          if (new Date(row.timestamp) < from) return false;
+        }
+        if (dateTo) {
+          const to = new Date(dateTo);
+          to.setHours(23, 59, 59, 999);
+          if (new Date(row.timestamp) > to) return false;
+        }
+        return true;
+      },
     },
-    filterRow: (row) => {
-      if (dateFrom) {
-        const from = new Date(dateFrom);
-        from.setHours(0, 0, 0, 0);
-        if (new Date(row.timestamp) < from) return false;
-      }
-      if (dateTo) {
-        const to = new Date(dateTo);
-        to.setHours(23, 59, 59, 999);
-        if (new Date(row.timestamp) > to) return false;
-      }
-      return true;
-    },
-  });
+  );
+
+  const buildCsvContent = (transactionsToExport: Transaction[]) => {
+    const headers = ["date", "type", "amount", "share price", "fee", "tx hash"];
+
+    const escapeCsvValue = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+    const csvRows = transactionsToExport.map((transaction) => [
+      formatTimestamp(transaction.timestamp),
+      transaction.type,
+      formatAmount(transaction.amount, transaction.asset),
+      "",
+      "",
+      transaction.transactionHash,
+    ]);
+
+    return [headers, ...csvRows]
+      .map((columns) => columns.map(escapeCsvValue).join(","))
+      .join("\r\n");
+  };
+
+  const handleExportCsv = () => {
+    const csvContent = buildCsvContent(sortedRows);
+    const fileName = `transactions_${new Date().toISOString().slice(0, 10)}.csv`;
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url =
+      typeof URL !== "undefined" && URL.createObjectURL
+        ? URL.createObjectURL(blob)
+        : `data:text/csv;charset=utf-8,${encodeURIComponent(csvContent)}`;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (
+      typeof URL !== "undefined" &&
+      URL.revokeObjectURL &&
+      url.startsWith("blob:")
+    ) {
+      URL.revokeObjectURL(url);
+    }
+  };
 
   const emptyMessage =
     txType !== "all"
@@ -239,10 +290,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           </>
         }
         description="View all your past deposits and withdrawals."
-        breadcrumbs={[
-          { label: "Home", href: "/" },
-          { label: "Transactions" },
-        ]}
+        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Transactions" }]}
         statusChips={
           walletAddress
             ? [
@@ -276,8 +324,13 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
           >
             <div className="portfolio-toolbar">
               <div>
-                <h2 id="transactions-heading" style={{ marginBottom: "6px" }}>Transactions</h2>
-                <p className="text-body-sm" style={{ color: "var(--text-secondary)" }}>
+                <h2 id="transactions-heading" style={{ marginBottom: "6px" }}>
+                  Transactions
+                </h2>
+                <p
+                  className="text-body-sm"
+                  style={{ color: "var(--text-secondary)" }}
+                >
                   Sort and filter your deposit and withdrawal history.
                 </p>
               </div>
@@ -293,7 +346,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                       placeholder="Search asset, hash, type..."
                       value={searchInput}
                       onChange={(event) => setSearchInput(event.target.value)}
-                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                      style={{
+                        fontSize: "var(--text-base)",
+                        fontFamily: "var(--font-sans)",
+                      }}
                     />
                   </div>
                 </label>
@@ -326,7 +382,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                       value={dateFrom}
                       max={dateTo || undefined}
                       onChange={(e) => setDateFrom(e.target.value)}
-                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                      style={{
+                        fontSize: "var(--text-base)",
+                        fontFamily: "var(--font-sans)",
+                      }}
                     />
                   </div>
                 </label>
@@ -341,7 +400,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                       value={dateTo}
                       min={dateFrom || undefined}
                       onChange={(e) => setDateTo(e.target.value)}
-                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                      style={{
+                        fontSize: "var(--text-base)",
+                        fontFamily: "var(--font-sans)",
+                      }}
                     />
                   </div>
                 </label>
@@ -362,6 +424,15 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                   </div>
                 </label>
 
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleExportCsv}
+                  style={{ alignSelf: "flex-end", height: "42px" }}
+                >
+                  Export CSV
+                </button>
+
                 {hasActiveFilters && (
                   <button
                     type="button"
@@ -375,7 +446,10 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
               </div>
             </div>
 
-            <div className="text-body-sm" style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>
+            <div
+              className="text-body-sm"
+              style={{ color: "var(--text-secondary)", marginBottom: "16px" }}
+            >
               {isLoading
                 ? "Loading transactions..."
                 : `${totalItems} transactions found`}

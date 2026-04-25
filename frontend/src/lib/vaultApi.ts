@@ -1,4 +1,4 @@
-import { Contract, SorobanRpc, TransactionBuilder, BASE_FEE } from "@stellar/stellar-sdk";
+import { Contract, rpc, TransactionBuilder, BASE_FEE } from "@stellar/stellar-sdk";
 import { networkConfig } from "../config/network";
 import { apiClient } from "./apiClient";
 import { validate, VaultHistoryQuerySchema, DepositRequestSchema, WithdrawalRequestSchema } from "./api";
@@ -46,7 +46,7 @@ export async function getSharePrice(): Promise<number> {
     throw new SharePriceFetchError("Vault contract ID is not configured");
   }
 
-  const server = new SorobanRpc.Server(networkConfig.rpcUrl);
+  const server = new rpc.Server(networkConfig.rpcUrl);
   const contract = new Contract(networkConfig.contractId);
 
   // Soroban simulation does not require a funded account. We use a well-known
@@ -72,7 +72,7 @@ export async function getSharePrice(): Promise<number> {
     .setTimeout(30)
     .build();
 
-  let simResult: SorobanRpc.Api.SimulateTransactionResponse;
+  let simResult: rpc.Api.SimulateTransactionResponse;
   try {
     simResult = await server.simulateTransaction(tx);
   } catch (cause) {
@@ -82,7 +82,7 @@ export async function getSharePrice(): Promise<number> {
     );
   }
 
-  if (SorobanRpc.Api.isSimulationError(simResult)) {
+  if (rpc.Api.isSimulationError(simResult)) {
     throw new SharePriceFetchError(
       `Contract simulation error: ${simResult.error}`,
       { cause: new Error(simResult.error) },

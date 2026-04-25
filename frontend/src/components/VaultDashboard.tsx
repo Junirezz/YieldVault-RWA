@@ -7,12 +7,12 @@ import {
   TrendingUp, 
   Wallet as WalletIcon, 
   Loader2, 
-  Info,
   Share2
 } from "./icons";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
+import SharePriceDisplay from "./SharePriceDisplay";
 import VaultPerformanceChart from "./VaultPerformanceChart";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
