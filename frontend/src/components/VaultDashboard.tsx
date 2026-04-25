@@ -19,6 +19,9 @@ import { FormField } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { useFeeEstimate } from "../hooks/useFeeEstimate";
+import { AlertTriangle } from "./icons";
+import HelpIcon from "./ui/HelpIcon";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -153,6 +156,12 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const depositMutation = useDepositMutation();
   const withdrawMutation = useWithdrawMutation();
+
+  const { feeXlm, feeUsd, isEstimating, isHighFee } = useFeeEstimate(
+    walletAddress,
+    amount,
+    activeTab
+  );
 
   useEffect(() => {
     const handleTrigger = () => {
@@ -611,6 +620,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
                       </span>
                     </div>
+                    <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
+                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem" }}>
+                        Estimated network fee
+                      </span>
+                      <span style={{ fontSize: "0.9rem", fontWeight: 600, display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                        {isEstimating ? (
+                          <Skeleton width="60px" height="1.1rem" />
+                        ) : (
+                          <>
+                            <span>{feeXlm.toFixed(6)} XLM</span>
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: 400 }}>
+                              ≈ ${feeUsd.toFixed(4)}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    </div>
                     <div className="flex justify-between items-center">
                       <span style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
                         {tab === "deposit" ? "Estimated net deposit" : "Estimated net withdrawal"}
@@ -619,9 +645,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         {isValidAmount ? `${estimatedNetAmount.toFixed(4)} USDC` : "0.0000 USDC"}
                       </span>
                     </div>
-                    <div style={{ marginTop: "6px", color: "var(--text-secondary)", fontSize: "0.75rem" }}>
-                      Network fee: {summary.networkFeeEstimate}
-                    </div>
+                    {isHighFee && (
+                      <div
+                        className="flex items-start gap-sm"
+                        style={{
+                          marginTop: "12px",
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          background: "rgba(255, 69, 58, 0.1)",
+                          border: "1px solid rgba(255, 69, 58, 0.2)",
+                        }}
+                      >
+                        <AlertTriangle size={16} color="var(--text-error)" style={{ marginTop: "2px" }} />
+                        <div style={{ fontSize: "0.78rem", color: "var(--text-error)", lineHeight: "1.4" }}>
+                          High fee detected: The estimated network fee exceeds 1% of your transaction value.
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button
@@ -635,7 +675,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                       gap: "8px",
                     }}
                     type="submit"
-                    disabled={isSubmitDisabled}
+                    disabled={isSubmitDisabled || isEstimating}
                   >
                     {isProcessing === tab ? (
                       <>
@@ -645,6 +685,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                           style={{ animation: "spin 0.9s linear infinite" }}
                         />
                         Waiting for confirmation...
+                      </>
+                    ) : isEstimating ? (
+                      <>
+                        <Loader2
+                          size={16}
+                          className="spin"
+                          style={{ animation: "spin 0.9s linear infinite" }}
+                        />
+                        Estimating fee...
                       </>
                     ) : tab === "deposit" ? (
                       isCapReached ? "Vault is full" : "Approve & Deposit"
