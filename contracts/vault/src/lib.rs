@@ -1,5 +1,6 @@
 #![no_std]
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod benji_strategy;
 pub mod external_calls;
 #[cfg(test)]
