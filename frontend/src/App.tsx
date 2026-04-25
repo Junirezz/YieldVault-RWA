@@ -9,11 +9,11 @@ import ShortcutHelpModal from "./components/ShortcutHelpModal";
 import { FeatureGate } from "./components/FeatureGate";
 import { FeatureFlagProvider } from "./context/FeatureFlagContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import { useTranslation } from "./i18n";
 import { useUsdcBalance } from "./hooks/useBalanceData";
 import { queryClient } from "./lib/queryClient";
 import { clearWalletSessionState } from "./lib/sessionCleanup";
 import ErrorFallback from "./components/ErrorFallback";
+import RouteLoadingFallback from "./components/RouteLoadingFallback";
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
@@ -23,32 +23,6 @@ const Analytics = lazy(() => import("./pages/Analytics"));
 const UIPreview = lazy(() => import("./pages/UIPreview"));
 const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
 const Settings = lazy(() => import("./pages/Settings"));
-const LoadingPage = () => {
-  const { t } = useTranslation();
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        height: "60vh",
-        color: "var(--accent-cyan)",
-        fontSize: "1.2rem",
-        fontWeight: 500,
-      }}
-    >
-      <div style={{ textAlign: "center" }}>
-        <div
-          className="text-gradient"
-          style={{ fontSize: "2rem", marginBottom: "16px" }}
-        >
-          {t("app.loading.title")}
-        </div>
-        <div style={{ opacity: 0.6 }}>{t("app.loading.subtitle")}</div>
-      </div>
-    </div>
-  );
-};
 
 // Removed simple fallback in favor of components/ErrorFallback
 
@@ -94,7 +68,7 @@ function AppContent() {
           onDisconnect={handleDisconnect}
         />
         <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
-          <Suspense fallback={<LoadingPage />}>
+          <Suspense fallback={<RouteLoadingFallback />}>
             <SentryRoutes>
               <Route
                 path="/"
@@ -144,7 +118,12 @@ function AppContent() {
 function App() {
   return (
     <Sentry.ErrorBoundary
-      fallback={(props) => <ErrorFallback {...props} />}
+      fallback={(props) => (
+        <ErrorFallback
+          error={(props.error instanceof Error ? props.error : new Error(String(props.error)))}
+          resetError={props.resetError}
+        />
+      )}
       showDialog
     >
       <AuthProvider>

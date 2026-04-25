@@ -8,7 +8,7 @@ import type { ApiError } from "../lib/api";
 import type { VaultSummary } from "../lib/vaultApi";
 import { networkConfig } from "../config/network";
 import { useVaultSummary, useVaultHistory } from "../hooks/useVaultData";
-import { formatCurrency, formatPercent } from "../lib/formatters";
+import { formatCurrency } from "../lib/formatters";
 
 interface VaultContextType {
   summary: VaultSummary;

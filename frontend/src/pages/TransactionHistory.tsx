@@ -20,6 +20,7 @@ import {
 import { useClientDataTable } from "../hooks/useClientDataTable";
 import { useDataTableState } from "../hooks/useDataTableState";
 import { getStellarExplorerUrl } from "../lib/security";
+import { networkConfig } from "../config/network";
 
 interface TransactionHistoryProps {
   walletAddress: string | null;
@@ -65,7 +66,7 @@ const columns: DataTableColumn<Transaction>[] = [
     sortable: false,
     cell: (row) => (
       <a
-        href={getStellarExplorerUrl(row.transactionHash, "testnet")}
+        href={getStellarExplorerUrl(row.transactionHash, networkConfig.isTestnet ? "testnet" : "mainnet")}
         target="_blank"
         rel="noopener noreferrer"
         style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
@@ -84,11 +85,12 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
 
-  const { state, setSort, setPage, setPageSize } = useDataTableState({
+  const { state, setSearch, setSort, setPage, setPageSize } = useDataTableState({
     defaultSortBy: "date",
     defaultSortDirection: "desc",
     defaultPageSize: 10,
   });
+  const [searchInput, setSearchInput] = useState(state.search);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const txType = (searchParams.get("txType") ?? "all") as TxTypeFilter;
@@ -99,6 +101,22 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     nextParams.set("page", "1");
     setSearchParams(nextParams, { replace: true });
   };
+
+  useEffect(() => {
+    setSearchInput(state.search);
+  }, [state.search]);
+
+  useEffect(() => {
+    if (searchInput === state.search) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSearch(searchInput);
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput, setSearch, state.search]);
 
   useEffect(() => {
     if (!walletAddress) {
@@ -218,6 +236,21 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
               </div>
 
               <div className="portfolio-toolbar-controls">
+                <label className="input-group" style={{ minWidth: "220px" }}>
+                  <span className="text-body-sm">Search transactions</span>
+                  <div className="input-wrapper">
+                    <input
+                      aria-label="Search transactions"
+                      className="input-field"
+                      type="search"
+                      placeholder="Search asset, hash, type..."
+                      value={searchInput}
+                      onChange={(event) => setSearchInput(event.target.value)}
+                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                    />
+                  </div>
+                </label>
+
                 <label className="input-group" style={{ minWidth: "160px" }}>
                   <span className="text-body-sm">Type</span>
                   <div className="input-wrapper">

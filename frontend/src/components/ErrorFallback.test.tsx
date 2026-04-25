@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ErrorFallback from './ErrorFallback';
+import * as ErrorNavigation from './errorNavigation';
 
 describe('ErrorFallback', () => {
   const mockError = new Error('Test error message');
@@ -14,34 +15,26 @@ describe('ErrorFallback', () => {
   });
 
   it('calls reload when reload button is clicked', () => {
-    const originalLocation = window.location;
-    // @ts-ignore
-    delete window.location;
-    window.location = { ...originalLocation, reload: vi.fn() };
+    const reloadSpy = vi.spyOn(ErrorNavigation, 'reloadPage').mockImplementation(() => undefined);
 
-    render(<ErrorFallback error={mockError} resetError={mockResetError} />);
+    render(<ErrorFallback error={mockError} resetError={mockResetError} onReload={reloadSpy} />);
     
     const reloadButton = screen.getByText('Reload Page');
     fireEvent.click(reloadButton);
     
-    expect(window.location.reload).toHaveBeenCalled();
-
-    window.location = originalLocation;
+    expect(reloadSpy).toHaveBeenCalled();
+    reloadSpy.mockRestore();
   });
 
   it('navigates to home when Go Home button is clicked', () => {
-    const originalLocation = window.location;
-    // @ts-ignore
-    delete window.location;
-    window.location = { ...originalLocation, href: '' };
+    const assignSpy = vi.spyOn(ErrorNavigation, 'goHome').mockImplementation(() => undefined);
 
-    render(<ErrorFallback error={mockError} resetError={mockResetError} />);
+    render(<ErrorFallback error={mockError} resetError={mockResetError} onGoHome={assignSpy} />);
     
     const homeButton = screen.getByText('Go Home');
     fireEvent.click(homeButton);
     
-    expect(window.location.href).toBe('/');
-
-    window.location = originalLocation;
+    expect(assignSpy).toHaveBeenCalled();
+    assignSpy.mockRestore();
   });
 });

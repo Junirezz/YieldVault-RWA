@@ -1,12 +1,19 @@
 import React from "react";
 import { RefreshCw, Home, AlertOctagon } from "lucide-react";
+import { goHome, reloadPage } from "./errorNavigation";
 
 interface ErrorFallbackProps {
   error: Error;
   resetError: () => void;
+  onReload?: () => void;
+  onGoHome?: () => void;
 }
 
-const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error }) => {
+const ErrorFallback: React.FC<ErrorFallbackProps> = ({
+  error,
+  onReload = reloadPage,
+  onGoHome = goHome,
+}) => {
   return (
     <div
       style={{
@@ -95,7 +102,7 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error }) => {
         >
           <button
             className="btn btn-primary"
-            onClick={() => window.location.reload()}
+            onClick={onReload}
             style={{ width: "100%", padding: "14px" }}
           >
             <RefreshCw size={18} />
@@ -104,7 +111,7 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error }) => {
 
           <button
             className="btn btn-outline"
-            onClick={() => (window.location.href = "/")}
+            onClick={onGoHome}
             style={{ width: "100%", padding: "14px" }}
           >
             <Home size={18} />

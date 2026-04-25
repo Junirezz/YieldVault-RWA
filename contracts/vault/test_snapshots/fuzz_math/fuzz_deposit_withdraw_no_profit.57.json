@@ -39,8 +39,8 @@
                 },
                 {
                   "i128": {
-                    "hi": 0,
-                    "lo": 578247577
+                    "hi": 8552044513876911523,
+                    "lo": 17953623246274938738
                   }
                 }
               ]
@@ -64,8 +64,8 @@
                 },
                 {
                   "i128": {
-                    "hi": 0,
-                    "lo": 578247577
+                    "hi": 8552044513876911523,
+                    "lo": 17953623246274938738
                   }
                 }
               ]
@@ -86,8 +86,8 @@
                     },
                     {
                       "i128": {
-                        "hi": 0,
-                        "lo": 578247577
+                        "hi": 8552044513876911523,
+                        "lo": 17953623246274938738
                       }
                     }
                   ]
@@ -99,31 +99,7 @@
         }
       ]
     ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "function_name": "withdraw",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 578247577
-                  }
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ]
+    []
   ],
   "ledger": {
     "protocol_version": 22,
@@ -304,8 +280,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 0,
-                            "lo": 0
+                            "hi": 8552044513876911523,
+                            "lo": 17953623246274938738
                           }
                         }
                       },
@@ -333,8 +309,8 @@
                               },
                               "val": {
                                 "i128": {
-                                  "hi": 0,
-                                  "lo": 0
+                                  "hi": 8552044513876911523,
+                                  "lo": 17953623246274938738
                                 }
                               }
                             },
@@ -344,8 +320,8 @@
                               },
                               "val": {
                                 "i128": {
-                                  "hi": 0,
-                                  "lo": 0
+                                  "hi": 8552044513876911523,
+                                  "lo": 17953623246274938738
                                 }
                               }
                             }
@@ -374,8 +350,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 0,
-                            "lo": 0
+                            "hi": 8552044513876911523,
+                            "lo": 17953623246274938738
                           }
                         }
                       },
@@ -389,8 +365,8 @@
                         },
                         "val": {
                           "i128": {
-                            "hi": 0,
-                            "lo": 0
+                            "hi": 8552044513876911523,
+                            "lo": 17953623246274938738
                           }
                         }
                       }
@@ -426,39 +402,6 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 1033654523790656264
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 4837995959683129791
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 4837995959683129791
                   }
                 },
                 "durability": "temporary",
@@ -513,8 +456,8 @@
                       },
                       "val": {
                         "i128": {
-                          "hi": 0,
-                          "lo": 0
+                          "hi": 8552044513876911523,
+                          "lo": 17953623246274938738
                         }
                       }
                     },
@@ -587,7 +530,7 @@
                       "val": {
                         "i128": {
                           "hi": 0,
-                          "lo": 578247577
+                          "lo": 0
                         }
                       }
                     },
@@ -751,74 +694,5 @@
       ]
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "transfer"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-              },
-              {
-                "string": "aaa:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEGWF"
-              }
-            ],
-            "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 578247577
-              }
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "withdraw"
-              },
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 578247577
-                  }
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 578247577
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }
