@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { 
   Activity, 
   AlertCircle, 
@@ -16,10 +15,8 @@ import ApiStatusBanner from "./ApiStatusBanner";
 import VaultPerformanceChart from "./VaultPerformanceChart";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
-import { FormField, SubmitButton } from "../forms";
-import WithdrawalConfirmationModal from "./WithdrawalConfirmationModal";
+import { FormField } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
-import TransactionStatus, { type ActionStatus } from "./TransactionStatus";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
 
@@ -139,26 +136,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     isCapReached,
   } = useVault();
   const toast = useToast();
+  const amountParam =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("amount")
+      : null;
+  const parsedAmount = amountParam ? Number(amountParam) : Number.NaN;
+  const initialAmount =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? parsedAmount.toString()
+      : "";
+
   const [activeTab, setActiveTab] = useState<TransactionTab>("deposit");
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(initialAmount);
   const [touched, setTouched] =
     useState<Record<TransactionTab, boolean>>(INITIAL_TOUCHED_STATE);
 
   const depositMutation = useDepositMutation();
   const withdrawMutation = useWithdrawMutation();
-
-  const [searchParams] = useSearchParams();
-
-  useEffect(() => {
-    const amountParam = searchParams.get("amount");
-    if (amountParam) {
-      const val = Number(amountParam);
-      if (!Number.isNaN(val) && val > 0) {
-        setAmount(val.toString());
-        setActiveTab("deposit");
-      }
-    }
-  }, [searchParams]);
 
   useEffect(() => {
     const handleTrigger = () => {
@@ -571,7 +565,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                     title: "Link copied",
                                     description: "Shareable vault link is ready to paste."
                                   });
-                                } catch (err) {
+                                } catch {
                                   toast.error({
                                     title: "Copy failed",
                                     description: "Could not copy link to clipboard."

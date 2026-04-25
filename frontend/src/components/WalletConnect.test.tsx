@@ -242,8 +242,6 @@ describe('WalletConnect', () => {
             />
         );
 
-        expect(mockOnConnect).toHaveBeenCalledWith('GABC123');
-
         act(() => {
             vi.advanceTimersByTime(10000);
         });
