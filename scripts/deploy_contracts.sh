@@ -2,13 +2,23 @@
 set -euo pipefail
 
 NETWORK="${1:-testnet}"
-IDENTITY="${SOROBAN_IDENTITY:-default}"
+IDENTITY="${SOROBAN_IDENTITY:-staging}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_FILE="$ROOT_DIR/deployments/contracts.${NETWORK}.json"
 
 if [[ "$NETWORK" != "testnet" && "$NETWORK" != "futurenet" ]]; then
   echo "Usage: $0 [testnet|futurenet]"
   exit 1
+fi
+
+# Ensure identity exists in CI
+if ! soroban config identity ls | grep -q "$IDENTITY" 2>/dev/null; then
+  if [[ -n "${SOROBAN_SECRET_KEY:-}" ]]; then
+    echo "Creating soroban identity: $IDENTITY"
+    soroban config identity add "$IDENTITY" --secret-key "$SOROBAN_SECRET_KEY"
+  else
+    echo "Using default/existing identity..."
+  fi
 fi
 
 cd "$ROOT_DIR"
