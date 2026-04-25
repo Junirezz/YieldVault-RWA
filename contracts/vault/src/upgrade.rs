@@ -56,10 +56,3 @@ pub fn set_initialized(env: &Env) {
     env.storage().instance().set(&ProxyDataKey::Initialized, &true);
 }
 
-/// A "Storage Gap" to reserve space for future storage variables in the implementation.
-/// This is used in the implementation contracts to prevent collisions if they were to use
-/// sequential IDs, although Soroban's DataKey enum is already quite safe.
-#[contracttype]
-pub struct StorageGap {
-    pub _gap: [u128; 50],
-}
