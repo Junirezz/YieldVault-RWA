@@ -25,7 +25,7 @@ test.describe('Portfolio page  authenticated', () => {
   test('loads and displays portfolio holdings after wallet connects', async ({ page }) => {
     await page.goto('/portfolio');
     await expect(page.getByText(SHORT_ADDR)).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText('Total Assets')).toBeVisible();
+    await expect(page.getByText('Total Net Value')).toBeVisible();
     await expect(page.getByRole('table', { name: 'Portfolio holdings' })).toBeVisible();
     // Highest value holding from mock data (sorted by valueUsd desc)
     await expect(page.getByText('Tokenized T-Bills')).toBeVisible();
@@ -48,7 +48,7 @@ test.describe('Portfolio page  authenticated', () => {
 
     await expect(page.getByText('USDC Treasury Pool')).toBeVisible();
     await expect(page.getByText('Tokenized T-Bills')).not.toBeVisible();
-    await expect(page.getByText('1 holdings found')).toBeVisible();
+    await expect(page.getByText('1 positions found')).toBeVisible();
   });
 
   test('clearing search restores all holdings', async ({ page }) => {
@@ -58,9 +58,9 @@ test.describe('Portfolio page  authenticated', () => {
 
     const searchInput = page.getByPlaceholder('Search asset, vault, issuer...');
     await searchInput.fill('Franklin');
-    await expect(page.getByText('1 holdings found')).toBeVisible();
+    await expect(page.getByText('1 positions found')).toBeVisible();
     await searchInput.clear();
-    await expect(page.getByText('6 holdings found')).toBeVisible();
+    await expect(page.getByText('6 positions found')).toBeVisible();
   });
 
   test('rows-per-page selector changes visible row count', async ({ page }) => {
