@@ -141,12 +141,21 @@ impl YieldVault {
         env.storage().instance().get(&DataKey::Strategy)
     }
 
-    pub fn set_pause(env: Env, paused: bool) {
+    pub fn pause(env: Env) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 
         let mut state = Self::get_state(&env);
-        state.is_paused = paused;
+        state.is_paused = true;
+        env.storage().instance().set(&DataKey::State, &state);
+    }
+
+    pub fn unpause(env: Env) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let mut state = Self::get_state(&env);
+        state.is_paused = false;
         env.storage().instance().set(&DataKey::State, &state);
     }
 

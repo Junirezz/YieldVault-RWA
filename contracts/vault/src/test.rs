@@ -932,7 +932,8 @@ fn test_invariant_share_asset_round_trip() {
 fn test_privileged_functions_protected() {
     // Privileged functions protected by admin.require_auth():
     // - set_strategy: admin.require_auth()
-    // - set_pause: admin.require_auth()
+    // - pause: admin.require_auth()
+    // - unpause: admin.require_auth()
     // - configure_korean_strategy: admin.require_auth()
     // - accrue_korean_debt_yield: admin.require_auth()
     // - set_dao_threshold: admin.require_auth()
