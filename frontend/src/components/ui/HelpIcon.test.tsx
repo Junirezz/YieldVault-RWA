@@ -1,4 +1,3 @@
-import React from "react";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { HelpIcon } from "./HelpIcon";

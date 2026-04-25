@@ -17,8 +17,8 @@ export interface UseFloatingOptions {
 }
 
 export interface UseFloatingReturn {
-  triggerRef: React.RefObject<HTMLElement>;
-  floatingRef: React.RefObject<HTMLElement>;
+  triggerRef: React.RefObject<HTMLElement | null>;
+  floatingRef: React.RefObject<HTMLElement | null>;
   floatingStyle: React.CSSProperties;
   actualPlacement: Placement;
   isHidden: boolean;
@@ -211,9 +211,11 @@ export function useFloating({
 
   // Recalculate when isOpen becomes true
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    const frame = setTimeout(() => {
       calculatePosition();
-    }
+    }, 0);
+    return () => clearTimeout(frame);
   }, [isOpen, calculatePosition]);
 
   // Attach debounced scroll/resize listeners when open

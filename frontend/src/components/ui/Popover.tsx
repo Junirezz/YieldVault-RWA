@@ -32,7 +32,6 @@ export const Popover: React.FC<PopoverProps> = ({
   const titleId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   const { triggerRef, floatingRef, floatingStyle } = useFloating({
     placement,
@@ -49,7 +48,6 @@ export const Popover: React.FC<PopoverProps> = ({
 
   const closePanel = useCallback(() => {
     setIsOpen(false);
-    // Return focus to the element that triggered the popover
     if (previousFocusRef.current) {
       previousFocusRef.current.focus();
       previousFocusRef.current = null;
@@ -65,23 +63,22 @@ export const Popover: React.FC<PopoverProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    // Use a microtask to allow the portal to render first
     const frame = requestAnimationFrame(() => {
-      const panel = panelRef.current;
+      const panel = floatingRef.current;
       if (!panel) return;
 
       const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       if (focusable.length > 0) {
         focusable[0].focus();
       } else {
-        panel.focus();
+        (panel as HTMLElement).focus();
       }
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [isOpen]);
+  }, [isOpen, floatingRef]);
 
-  // Escape key handler — active when panel is open
+  // Escape key handler
   useEffect(() => {
     if (!isOpen) return;
 
@@ -96,13 +93,13 @@ export const Popover: React.FC<PopoverProps> = ({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, closePanel]);
 
-  // Outside click handler — active when panel is open
+  // Outside click handler
   useEffect(() => {
     if (!isOpen) return;
 
     const handleMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      const panel = panelRef.current;
+      const panel = floatingRef.current;
       const trigger = triggerRef.current;
 
       if (
@@ -117,14 +114,14 @@ export const Popover: React.FC<PopoverProps> = ({
 
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [isOpen, closePanel, triggerRef]);
+  }, [isOpen, closePanel, triggerRef, floatingRef]);
 
-  // Focus trap — Tab/Shift+Tab cycle within the panel
+  // Focus trap
   const handlePanelKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key !== "Tab") return;
 
-      const panel = panelRef.current;
+      const panel = floatingRef.current;
       if (!panel) return;
 
       const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
@@ -137,7 +134,6 @@ export const Popover: React.FC<PopoverProps> = ({
       const last = focusable[focusable.length - 1];
 
       if (e.shiftKey) {
-        // Shift+Tab: if focus is on first element (or the panel itself), wrap to last
         if (
           document.activeElement === first ||
           document.activeElement === panel
@@ -146,17 +142,15 @@ export const Popover: React.FC<PopoverProps> = ({
           e.preventDefault();
         }
       } else {
-        // Tab: if focus is on last element, wrap to first
         if (document.activeElement === last) {
           first.focus();
           e.preventDefault();
         }
       }
     },
-    []
+    [floatingRef]
   );
 
-  // Trigger handlers
   const handleTriggerClick = useCallback(() => {
     if (isOpen) {
       closePanel();
@@ -179,7 +173,6 @@ export const Popover: React.FC<PopoverProps> = ({
     [isOpen, openPanel, closePanel]
   );
 
-  // If disabled, render children as-is with no handlers
   if (disabled || !React.isValidElement(children)) {
     return <>{children}</>;
   }
@@ -198,14 +191,7 @@ export const Popover: React.FC<PopoverProps> = ({
       {isOpen &&
         createPortal(
           <div
-            ref={(node) => {
-              // Assign to both panelRef and floatingRef
-              (panelRef as React.MutableRefObject<HTMLDivElement | null>).current =
-                node;
-              (
-                floatingRef as React.MutableRefObject<HTMLElement | null>
-              ).current = node;
-            }}
+            ref={floatingRef as React.RefObject<HTMLDivElement>}
             role="dialog"
             aria-modal="false"
             aria-labelledby={title ? titleId : undefined}
