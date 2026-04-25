@@ -208,7 +208,7 @@ impl YieldVault {
             0
         };
 
-        idle_assets + strategy_assets
+        idle_assets.checked_add(strategy_assets).expect("overflow")
     }
 
     pub fn balance(env: Env, user: Address) -> i128 {
@@ -257,7 +257,7 @@ impl YieldVault {
         }
 
         let mut state = Self::get_state(&env);
-        state.total_assets += harvested;
+        state.total_assets = state.total_assets.checked_add(harvested).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         harvested
@@ -281,7 +281,7 @@ impl YieldVault {
             .instance()
             .get(&DataKey::ProposalNonce)
             .unwrap_or(0);
-        next_nonce += 1;
+        next_nonce = next_nonce.checked_add(1).expect("overflow");
         env.storage()
             .instance()
             .set(&DataKey::ProposalNonce, &next_nonce);
@@ -327,9 +327,9 @@ impl YieldVault {
         }
 
         if support {
-            proposal.yes_votes += weight;
+            proposal.yes_votes = proposal.yes_votes.checked_add(weight).expect("overflow");
         } else {
-            proposal.no_votes += weight;
+            proposal.no_votes = proposal.no_votes.checked_add(weight).expect("overflow");
         }
 
         env.storage()
@@ -497,7 +497,11 @@ impl YieldVault {
         if state.total_assets == 0 || state.total_shares == 0 {
             assets
         } else {
-            assets * state.total_shares / state.total_assets
+            assets
+                .checked_mul(state.total_shares)
+                .expect("overflow")
+                .checked_div(state.total_assets)
+                .expect("division by zero or overflow")
         }
     }
 
@@ -506,7 +510,11 @@ impl YieldVault {
         if state.total_shares == 0 {
             0
         } else {
-            shares * state.total_assets / state.total_shares
+            shares
+                .checked_mul(state.total_assets)
+                .expect("overflow")
+                .checked_div(state.total_shares)
+                .expect("division by zero or overflow")
         }
     }
 
@@ -538,7 +546,11 @@ impl YieldVault {
         let shares_to_mint = if state.total_assets == 0 || state.total_shares == 0 {
             amount
         } else {
-            amount * state.total_shares / state.total_assets
+            amount
+                .checked_mul(state.total_shares)
+                .expect("overflow")
+                .checked_div(state.total_assets)
+                .expect("division by zero or overflow")
         };
 
         // Prevent silent loss of funds if shares round down to 0
@@ -548,7 +560,7 @@ impl YieldVault {
 
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
-        let new_deposit = current_deposit + amount;
+        let new_deposit = current_deposit.checked_add(amount).expect("overflow");
 
         let cap: i128 = env
             .storage()
@@ -571,21 +583,21 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let ts = Self::total_shares(env.clone());
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(ts + shares_to_mint));
-        state.total_assets += amount;
-        state.total_shares += shares_to_mint;
+            .set(&DataKey::TotalShares, &ts.checked_add(shares_to_mint).expect("overflow"));
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
+        state.total_shares = state.total_shares.checked_add(shares_to_mint).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
         env.storage()
             .instance()
-            .set(&user_key, &(user_shares + shares_to_mint));
+            .set(&user_key, &user_shares.checked_add(shares_to_mint).expect("overflow"));
 
         env.events()
             .publish((symbol_short!("deposit"),), (amount, shares_to_mint));
@@ -620,7 +632,11 @@ impl YieldVault {
         let assets_to_return = if state.total_shares == 0 {
             0
         } else {
-            shares * state.total_assets / state.total_shares
+            shares
+                .checked_mul(state.total_assets)
+                .expect("overflow")
+                .checked_div(state.total_shares)
+                .expect("division by zero or overflow")
         };
 
         let token_addr = Self::token(env.clone());
@@ -633,7 +649,7 @@ impl YieldVault {
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
         if idle_ta < assets_to_return {
-            let needed = assets_to_return - idle_ta;
+            let needed = assets_to_return.checked_sub(idle_ta).expect("underflow");
             Self::divest(env.clone(), needed);
             idle_ta = env
                 .storage()
@@ -648,31 +664,31 @@ impl YieldVault {
         // Update state
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta - assets_to_return));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(assets_to_return).expect("underflow"));
 
         let ts = Self::total_shares(env.clone());
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(ts - shares));
+            .set(&DataKey::TotalShares, &ts.checked_sub(shares).expect("underflow"));
 
         let vault_balance = Self::balance(env.clone(), user.clone());
         env.storage().instance().set(
             &DataKey::ShareBalance(user.clone()),
-            &(vault_balance - shares),
+            &vault_balance.checked_sub(shares).expect("underflow"),
         );
 
-        state.total_assets -= assets_to_return;
-        state.total_shares -= shares;
+        state.total_assets = state.total_assets.checked_sub(assets_to_return).expect("underflow");
+        state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         env.storage()
             .instance()
-            .set(&user_key, &(user_shares - shares));
+            .set(&user_key, &user_shares.checked_sub(shares).expect("underflow"));
 
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
         let new_deposit = if current_deposit > assets_to_return {
-            current_deposit - assets_to_return
+            current_deposit.checked_sub(assets_to_return).expect("underflow")
         } else {
             0
         };
@@ -717,7 +733,7 @@ impl YieldVault {
         // Update idle assets
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta - amount));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(amount).expect("underflow"));
     }
 
     /// Recall funds from the strategy.
@@ -736,7 +752,7 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(idle_ta + amount));
+            .set(&DataKey::TotalAssets, &idle_ta.checked_add(amount).expect("overflow"));
     }
 
     /// Admin function to artificially accrue yield (legacy, but updated for strategy).
@@ -756,10 +772,10 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let mut state = Self::get_state(&env);
-        state.total_assets += amount;
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
     }
 
@@ -789,10 +805,10 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(ta + amount));
+            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
 
         let mut state = Self::get_state(&env);
-        state.total_assets += amount;
+        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
     }
 
