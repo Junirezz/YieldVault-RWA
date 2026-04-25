@@ -17,7 +17,10 @@ fn test_proxy_initialization_guard() {
 
     // First initialization
     vault.initialize(&admin, &token);
-    assert!(is_initialized(&env));
+
+    env.as_contract(&vault_id, || {
+        assert!(is_initialized(&env));
+    });
 
     // Second initialization should fail
     let result = vault.try_initialize(&admin, &token);
@@ -59,8 +62,10 @@ fn test_storage_layout_integrity() {
     let vault = YieldVaultClient::new(&env, &vault_id);
     vault.initialize(&admin, &token);
 
-    assert!(get_admin(&env).is_some());
-    assert_eq!(get_admin(&env).unwrap(), admin);
+    env.as_contract(&vault_id, || {
+        assert!(get_admin(&env).is_some());
+        assert_eq!(get_admin(&env).unwrap(), admin);
+    });
 }
 
 #[test]
@@ -75,17 +80,16 @@ fn test_check_storage_layout_fingerprint() {
     let vault = YieldVaultClient::new(&env, &vault_id);
     vault.initialize(&admin, &token);
 
-    let fingerprint = generate_storage_fingerprint(&env);
-
-    assert!(fingerprint.contains("Admin"));
-    assert!(fingerprint.contains("TokenAsset"));
-    assert!(fingerprint.contains("Initialized"));
+    env.as_contract(&vault_id, || {
+        let fingerprint = generate_storage_fingerprint(&env);
+        assert!(fingerprint.contains("Admin"));
+        assert!(fingerprint.contains("TokenAsset"));
+        assert!(fingerprint.contains("Initialized"));
+    });
 }
 
 fn generate_storage_fingerprint(env: &Env) -> &'static str {
-    // Verify the expected keys are present in storage
     assert!(is_initialized(env), "Initialized key missing");
     assert!(get_admin(env).is_some(), "Admin key missing");
-
     "Admin TokenAsset Initialized"
 }
