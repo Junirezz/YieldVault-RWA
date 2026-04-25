@@ -12,6 +12,8 @@ pub enum ProxyDataKey {
     Implementation = 1,
     /// keccak256("contract.proxy.initialized") - 1
     Initialized = 2,
+    /// keccak256("contract.proxy.pending_admin") - 1
+    PendingAdmin = 3,
 }
 
 /// Constant for the implementation slot using a non-overlapping hash.
@@ -38,6 +40,18 @@ pub fn get_admin(env: &Env) -> Option<Address> {
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&ProxyDataKey::Admin, admin);
+}
+
+pub fn get_pending_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&ProxyDataKey::PendingAdmin)
+}
+
+pub fn set_pending_admin(env: &Env, admin: &Option<Address>) {
+    if let Some(addr) = admin {
+        env.storage().instance().set(&ProxyDataKey::PendingAdmin, addr);
+    } else {
+        env.storage().instance().remove(&ProxyDataKey::PendingAdmin);
+    }
 }
 
 pub fn get_implementation(env: &Env) -> Option<BytesN<32>> {

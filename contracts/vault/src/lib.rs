@@ -16,7 +16,7 @@ use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
     Address, Env, Vec, BytesN,
 };
-use crate::upgrade::{get_admin, set_admin, is_initialized, set_initialized};
+use crate::upgrade::{get_admin, set_admin, is_initialized, set_initialized, get_pending_admin, set_pending_admin};
 
 const MAX_PAGE_SIZE: u32 = 50;
 
@@ -127,6 +127,25 @@ impl YieldVault {
         admin.require_auth();
 
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Propose a new admin.
+    /// Only the current Admin can call this.
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        set_pending_admin(&env, &Some(new_admin));
+    }
+
+    /// Accept the admin role.
+    /// Only the pending Admin can call this.
+    pub fn accept_admin(env: Env) {
+        let pending_admin = get_pending_admin(&env).expect("No pending admin");
+        pending_admin.require_auth();
+
+        set_admin(&env, &pending_admin);
+        set_pending_admin(&env, &None);
     }
 
     /// Set or update the active strategy connector.
