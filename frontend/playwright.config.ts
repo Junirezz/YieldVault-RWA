@@ -23,7 +23,6 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // In CI the build step runs separately; here we only start the preview server.
     command: 'npm run preview',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,

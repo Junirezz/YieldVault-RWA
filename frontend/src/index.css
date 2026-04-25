@@ -594,6 +594,29 @@ button {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-cyan);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.2s, color 0.2s;
+  min-height: auto;
+  min-width: auto;
+}
+
+.btn-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.btn-link:active {
+  transform: scale(0.98);
+}
+
 /* Animations */
 @keyframes puiseGlow {
   0% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.1); }
@@ -1182,11 +1205,6 @@ button {
     right: 16px;
     width: auto;
   }
-
-  /* Settings page mobile overrides */
-  .settings-locale-grid {
-    grid-template-columns: 1fr !important;
-  }
 }
 
 /* ── Compact Mode ───────────────────────────────────────────────── */
@@ -1298,6 +1316,11 @@ button {
   .page-header-actions .btn {
     width: 100%;
     flex: 1 1 100%;
+  }
+
+  /* Settings page mobile overrides */
+  .settings-locale-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 .compact-mode .data-table th,
@@ -1668,3 +1691,17 @@ button {
   border-radius: 50%;
 }
 
+
+/* Wallet tooltip responsive positioning */
+.wallet-tooltip {
+  max-width: calc(100vw - 32px);
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 480px) {
+  .wallet-tooltip {
+    max-width: 150px;
+    font-size: 0.7rem;
+    padding: 6px 10px;
+  }
+}

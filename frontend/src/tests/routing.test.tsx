@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import App from '../App';
 
 // Mock the modules that are lazy loaded to test the loading state
@@ -22,8 +23,8 @@ vi.mock('../components/ShortcutHelpModal', () => ({
 
 // Mock Sentry
 vi.mock('@sentry/react', () => ({
-  withSentryReactRouterV6Routing: (comp: any) => comp,
-  ErrorBoundary: ({ children }: any) => <>{children}</>,
+  withSentryReactRouterV6Routing: <T,>(comp: T) => comp,
+  ErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
   init: vi.fn(),
 }));
 
@@ -47,9 +48,8 @@ describe('Routing and Lazy Loading', () => {
       </MemoryRouter>
     );
 
-    // Check if loading text appears
-    // The LoadingPage component uses {t("app.loading.title")}
-    expect(screen.getByText('app.loading.title')).toBeDefined();
+    // Shared route fallback renders while lazy chunks load
+    expect(screen.getByText('app.loading.subtitle')).toBeDefined();
 
     // Wait for lazy component to load
     await waitFor(() => {
@@ -64,7 +64,7 @@ describe('Routing and Lazy Loading', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText('app.loading.title')).toBeDefined();
+    expect(screen.getByText('app.loading.subtitle')).toBeDefined();
 
     await waitFor(() => {
       expect(screen.getByTestId('portfolio-page')).toBeDefined();

@@ -25,8 +25,10 @@ interface WalletConnectProps {
   walletAddress: string | null;
   usdcBalance?: number;
   onConnect: (address: string) => void;
-  onDisconnect: () => void;
+  onDisconnect: (reason?: DisconnectReason) => void;
 }
+
+export type DisconnectReason = "manual" | "session-expired" | "connection-lost";
 
 type ConnectionErrorType = "not-installed" | "not-allowed" | "no-address" | "generic" | null;
 
@@ -68,76 +70,11 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
 
         if (!mounted) return;
 
-        return () => {
-            mounted = false;
-            window.clearTimeout(immediateRecheck);
-            window.clearInterval(interval);
-        };
-    }, [onConnect, onDisconnect, toast, walletAddress]);
-    useEffect(() => {
-        const handleTrigger = () => {
-             // Only connect if not already connected and not currently connecting
-             const btn = document.querySelector('.wallet-status, [aria-busy="true"]');
-             if (!btn) { // If neither connected (.wallet-status) nor connecting (aria-busy="true")
-                 void handleConnect();
-             }
-        };
-        window.addEventListener('TRIGGER_WALLET_CONNECT', handleTrigger);
-        return () => window.removeEventListener('TRIGGER_WALLET_CONNECT', handleTrigger);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const handleConnect = async () => {
-        setIsConnecting(true);
-        setConnectionError(null);
-        try {
-            await setAllowed();
-            const allowed = await isAllowed();
-            if (allowed.isAllowed) {
-                const userInfo = await getAddress();
-                if (userInfo.address) {
-                  onConnect(userInfo.address);
-                  setConnectionError(null);
-                  toast.success({
-                    title: t('toast.walletConnected.title'),
-                    description: t('toast.walletConnected.description'),
-                  });
-                  return;
-                } else {
-                  setConnectionError('no-address');
-                  toast.error({
-                    title: t('toast.walletConnectionFailed.title'),
-                    description: t('wallet.error.noAddress'),
-                  });
-                  return;
-                }
-            } else {
-              setConnectionError('not-allowed');
-              toast.warning({
-                title: t('toast.walletPermissionRequired.title'),
-                description: t('wallet.error.notAllowed'),
-              });
-              return;
-            }
-        } catch (e: unknown) {
-          console.error(e);
-          const error = e as Error;
-          
-          // Detect specific error types
-          if (error.message?.includes('Freighter')) {
-            setConnectionError('not-installed');
-          } else {
-            setConnectionError('generic');
-          }
-          
-          toast.error({
-            title: t('toast.walletConnectionFailed.title'),
-            description: t('wallet.error.generic'),
         if (discovered) {
           clearWalletManualDisconnect();
           onConnect(discovered);
         } else if (walletAddress) {
-          onDisconnect();
+          onDisconnect("connection-lost");
           toast.info({
             title: "Wallet disconnected",
             description: "Freighter is no longer connected to this session.",
@@ -332,7 +269,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
           onClick={() => {
             setConnectionError(null);
             setWalletManualDisconnect();
-            onDisconnect();
+            onDisconnect("manual");
             toast.info({
               title: t("toast.walletDisconnected.title"),
               description: t("toast.walletDisconnected.description"),
@@ -386,6 +323,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
 
       {showTooltip && (
         <div
+          className="wallet-tooltip"
           style={{
             position: "absolute",
             bottom: "100%",
@@ -398,7 +336,9 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
             borderRadius: "4px",
             fontSize: "0.75rem",
             color: connectionError ? "var(--accent-red)" : "var(--text-secondary)",
-            whiteSpace: "nowrap",
+            whiteSpace: "normal",
+            wordWrap: "break-word",
+            maxWidth: "200px",
             zIndex: 1000,
             boxShadow: connectionError
               ? "0 0 12px rgba(255, 80, 100, 0.15)"

@@ -5,6 +5,7 @@ export interface NetworkConfig {
   rpcUrl: string;
   networkPassphrase: string;
   contractId: string;
+  isTestnet: boolean;
 }
 
 export const networkConfig: NetworkConfig = {
@@ -12,6 +13,9 @@ export const networkConfig: NetworkConfig = {
   networkPassphrase:
     import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE || TESTNET_PASSPHRASE,
   contractId: import.meta.env.VITE_VAULT_CONTRACT_ID || "",
+  isTestnet:
+    (import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE || TESTNET_PASSPHRASE) ===
+    TESTNET_PASSPHRASE,
 };
 
 export const hasCustomRpcConfig = Boolean(import.meta.env.VITE_SOROBAN_RPC_URL);
