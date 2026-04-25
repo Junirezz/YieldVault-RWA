@@ -20,7 +20,6 @@ describe("HelpIcon", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    document.body.innerHTML = "";
   });
 
   describe("aria-label", () => {

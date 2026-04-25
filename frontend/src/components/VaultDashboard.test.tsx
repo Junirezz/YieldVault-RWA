@@ -131,14 +131,14 @@ describe("VaultDashboard", () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.getByText(/Processing Transaction/i)).toBeInTheDocument();
+      expect(screen.getByText(/Waiting for confirmation/i)).toBeInTheDocument();
     });
 
     // Resolve the mocked API call
     resolveSubmit();
 
     // Loading state should be visible while mutation is pending.
-    expect(screen.getByText(/Processing Transaction/i)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for confirmation/i)).toBeInTheDocument();
   });
 
   it("fills the input with max allowable amount via MAX button", async () => {

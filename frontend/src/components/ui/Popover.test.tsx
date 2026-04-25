@@ -19,8 +19,7 @@ describe("Popover", () => {
   });
 
   afterEach(() => {
-    // Clean up any portals
-    document.body.innerHTML = "";
+    vi.clearAllMocks();
   });
 
   it("panel opens on trigger click", async () => {
