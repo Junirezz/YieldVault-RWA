@@ -65,6 +65,7 @@ pub enum DataKey {
     ShipmentStatusOf(u64),
     UserDeposit(Address),
     PerUserCap,
+    StrategyWhitelist(Address),
 }
 
 #[contracttype]
@@ -152,7 +153,24 @@ impl YieldVault {
     pub fn set_strategy(env: Env, strategy: Address) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
+
+        // Check whitelist
+        if !Self::is_strategy_whitelisted(env.clone(), strategy.clone()) {
+            panic!("strategy not whitelisted");
+        }
+
         env.storage().instance().set(&DataKey::Strategy, &strategy);
+    }
+
+    /// Whitelist or un-whitelist a strategy address.
+    pub fn whitelist_strategy(env: Env, strategy: Address, approved: bool) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::StrategyWhitelist(strategy), &approved);
+    }
+
+    pub fn is_strategy_whitelisted(env: Env, strategy: Address) -> bool {
+        env.storage().instance().get(&DataKey::StrategyWhitelist(strategy)).unwrap_or(false)
     }
 
     /// Read the active strategy address.

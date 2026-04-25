@@ -88,6 +88,7 @@ fn test_vault_with_benji_strategy() {
     // 1. Initialize
     vault.initialize(&admin, &usdc.address);
     strategy.initialize(&vault_id, &usdc.address, &benji_token.address);
+    vault.whitelist_strategy(&strategy_id, &true);
     vault.set_strategy(&strategy_id);
 
     // 2. User Deposits 100 USDC
