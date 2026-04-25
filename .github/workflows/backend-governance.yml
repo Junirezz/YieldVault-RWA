@@ -34,3 +34,12 @@ jobs:
 
       - name: Run governance checks
         run: npm run ci:governance
+
+      - name: Verify OpenAPI documentation
+        run: |
+          npm run generate:openapi
+          if [ -n "$(git status --porcelain openapi.json)" ]; then
+            echo "❌ openapi.json is out of date. Run 'npm run generate:openapi' locally and commit the changes."
+            git diff openapi.json
+            exit 1
+          fi

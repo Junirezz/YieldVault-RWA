@@ -68,4 +68,23 @@ describe('Navbar', () => {
 
         expect(screen.getByText(expectedAddress)).toBeInTheDocument();
     });
+
+    it('shows a network badge when wallet is connected', () => {
+        const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
+        render(
+            <MemoryRouter>
+                <ToastProvider>
+                    <ThemeProvider>
+                        <Navbar
+                            walletAddress={fullAddress}
+                            onConnect={mockOnConnect}
+                            onDisconnect={mockOnDisconnect}
+                        />
+                    </ThemeProvider>
+                </ToastProvider>
+            </MemoryRouter>
+        );
+
+        expect(screen.getByText(/testnet|mainnet/i)).toBeInTheDocument();
+    });
 });

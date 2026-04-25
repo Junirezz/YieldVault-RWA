@@ -1,7 +1,7 @@
 //! Permission Matrix and Access Control
 //!
 //! This module defines the authorization requirements for all vault operations.
-//! 
+//!
 //! # Permission Matrix
 //!
 //! | Function | Required Role | Note |
@@ -32,8 +32,6 @@
 //! | `shipment_ids_by_status` | Public | Query shipments by status |
 //! | `calculate_shares` | Public | Calculate shares for amount |
 //! | `calculate_assets` | Public | Calculate assets for shares |
-| `upgrade` | Admin | Upgrade contract WASM code (safety: must be paused) |
-| `version` | Public | Query current contract version |
 
 use soroban_sdk::Address;
 
@@ -61,13 +59,10 @@ pub fn require_strategy_auth(caller: &Address, expected_strategy: &Address) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use soroban_sdk::{Address, Env};
 
     #[test]
     fn test_permission_matrix_documentation_exists() {
         // This test documents that the permission matrix is defined
         // Actual enforcement is tested in lib.rs via role gating tests
-        assert!(true);
     }
 }

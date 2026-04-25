@@ -1,8 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Activity, ShieldCheck, TrendingUp, DollarSign, Percent, Briefcase } from "../components/icons";
-import { HelpIcon } from "../components/ui";
+import { Activity, TrendingUp, DollarSign, Percent, Briefcase } from "../components/icons";
 import ApiStatusBanner from "../components/ApiStatusBanner";
-import Skeleton from "../components/Skeleton";
 import {
   DataTable,
   type DataTableColumn,
@@ -134,7 +132,7 @@ const PortfolioSummaryCard: React.FC<{
     onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
   >
     <div style={{ position: "absolute", top: "-10px", right: "-10px", opacity: 0.05 }}>
-      {React.cloneElement(icon as React.ReactElement, { size: 80 })}
+      {React.cloneElement(icon as React.ReactElement<Record<string, unknown>>, { size: 80 })}
     </div>
     <div className="flex items-center gap-sm" style={{ color: "var(--text-secondary)", marginBottom: "12px" }}>
       {icon}
@@ -273,6 +271,25 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     return holdings.reduce((sum, h) => sum + (h.apy * h.valueUsd), 0) / totalValue;
   }, [holdings, totalValue]);
 
+  // Compute trend values
+  const totalNetValueTrend = useMemo(() => {
+    if (totalValue === 0) return "N/A";
+    // Calculate 7-day trend (simplified: using current value as proxy)
+    // In a real app, this would compare with historical data
+    const trendPercent = ((totalGain / (totalValue - totalGain)) * 100).toFixed(1);
+    return isFinite(Number(trendPercent)) ? `${trendPercent}% gain` : "N/A";
+  }, [totalValue, totalGain]);
+
+  const cumulativeYieldTrend = useMemo(() => {
+    if (totalGain === 0) return "--";
+    return `${formatCurrency(totalGain)} realized`;
+  }, [totalGain]);
+
+  const weightedApyTrend = useMemo(() => {
+    if (holdings.length === 0) return "N/A";
+    return `${holdings.length} position${holdings.length !== 1 ? 's' : ''}`;
+  }, [holdings.length]);
+
   return (
     <div className="glass-panel" style={{ padding: "32px" }}>
       <PageHeader
@@ -325,14 +342,14 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               label="Total Net Value" 
               value={formatCurrency(totalValue)} 
               icon={<DollarSign size={20} color="var(--accent-cyan)" />}
-              trend="+4.2% since last week"
-              trendPositive={true}
+              trend={totalNetValueTrend}
+              trendPositive={totalGain >= 0}
             />
             <PortfolioSummaryCard 
               label="Cumulative Yield" 
-              value={`+${formatCurrency(totalGain)}`} 
+              value={`${totalGain >= 0 ? '+' : ''}${formatCurrency(totalGain)}`} 
               icon={<TrendingUp size={20} color="var(--accent-purple)" />}
-              trend="All-time unrealized"
+              trend={cumulativeYieldTrend}
               trendPositive={totalGain >= 0}
             />
             <PortfolioSummaryCard 
@@ -347,7 +364,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               }
               value={`${weightedApy.toFixed(2)}%`} 
               icon={<Percent size={20} color="var(--accent-cyan)" />}
-              trend="Current performance"
+              trend={weightedApyTrend}
               trendPositive={true}
             />
             <PortfolioSummaryCard 

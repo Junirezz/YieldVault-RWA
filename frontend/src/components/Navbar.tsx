@@ -1,10 +1,11 @@
-import type { FC } from "react";
+import { useEffect, useState, type FC } from "react";
 import { NavLink } from "react-router-dom";
 import WalletConnect from "./WalletConnect";
 import type { DisconnectReason } from "./WalletConnect";
 import ThemeToggle from "./ThemeToggle";
 import { Layers } from "./icons";
 import { useTranslation } from "../i18n";
+import { networkConfig } from "../config/network";
 
 interface NavbarProps {
   currentPath?: "/" | "/analytics" | "/portfolio";
@@ -22,6 +23,42 @@ const Navbar: FC<NavbarProps> = ({
   onDisconnect,
 }) => {
   const { t } = useTranslation();
+  const [networkLabel, setNetworkLabel] = useState(
+    networkConfig.isTestnet ? "Testnet" : "Mainnet",
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const resolveNetworkLabel = async () => {
+      if (!walletAddress) return;
+      try {
+        const freighterApi = await import("@stellar/freighter-api");
+        if (typeof freighterApi.getNetworkDetails !== "function") return;
+
+        const details = await freighterApi.getNetworkDetails();
+        if (!active || !details) return;
+
+        const isMainnet = details.networkPassphrase
+          ?.toLowerCase()
+          .includes("public");
+        setNetworkLabel(isMainnet ? "Mainnet" : "Testnet");
+      } catch {
+        // Keep fallback config-derived label when wallet network cannot be queried.
+      }
+    };
+
+    void resolveNetworkLabel();
+    const interval = window.setInterval(() => {
+      void resolveNetworkLabel();
+    }, 10_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [walletAddress]);
+
   return (
     <nav
       aria-label="Primary"
@@ -117,6 +154,34 @@ const Navbar: FC<NavbarProps> = ({
         </div>
 
         <div className="flex items-center gap-md">
+          {walletAddress ? (
+            <span
+              aria-label="Network badge"
+              title={`Connected network: ${networkLabel}`}
+              style={{
+                padding: "6px 10px",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+                fontWeight: "var(--font-semibold)",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                border:
+                  networkLabel === "Mainnet"
+                    ? "1px solid rgba(34, 197, 94, 0.45)"
+                    : "1px solid rgba(56, 189, 248, 0.45)",
+                color:
+                  networkLabel === "Mainnet"
+                    ? "rgb(34, 197, 94)"
+                    : "var(--accent-cyan)",
+                background:
+                  networkLabel === "Mainnet"
+                    ? "rgba(34, 197, 94, 0.08)"
+                    : "rgba(0, 240, 255, 0.08)",
+              }}
+            >
+              {networkLabel}
+            </span>
+          ) : null}
           <ThemeToggle />
           <WalletConnect
             walletAddress={walletAddress}

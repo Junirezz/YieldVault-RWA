@@ -1,0 +1,508 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "YieldVault Stellar RWA API",
+    "version": "1.0.0",
+    "description": "API documentation for the YieldVault Stellar RWA backend.",
+    "license": {
+      "name": "MIT",
+      "url": "https://spdx.org/licenses/MIT.html"
+    },
+    "contact": {
+      "name": "YieldVault Team",
+      "url": "https://yieldvault.finance"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "IdempotencyKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-idempotency-key",
+        "description": "Required for mutation requests to ensure idempotency."
+      }
+    },
+    "schemas": {
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "prevCursor": {
+            "type": "string"
+          },
+          "currentPage": {
+            "type": "integer"
+          },
+          "totalPages": {
+            "type": "integer"
+          },
+          "hasNextPage": {
+            "type": "boolean"
+          },
+          "hasPrevPage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "DepositRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "asset",
+          "walletAddress"
+        ],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "minimum": 1e-7,
+            "description": "Amount to deposit"
+          },
+          "asset": {
+            "type": "string",
+            "description": "Asset code (e.g., USDC, XLM)"
+          },
+          "walletAddress": {
+            "type": "string",
+            "description": "Stellar wallet address"
+          }
+        }
+      },
+      "Transaction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "withdrawal"
+            ]
+          },
+          "amount": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "transactionHash": {
+            "type": "string"
+          },
+          "walletAddress": {
+            "type": "string"
+          }
+        }
+      },
+      "PortfolioHolding": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string"
+          },
+          "vaultName": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "shares": {
+            "type": "number"
+          },
+          "apy": {
+            "type": "number"
+          },
+          "valueUsd": {
+            "type": "number"
+          },
+          "unrealizedGainUsd": {
+            "type": "number"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "pending"
+            ]
+          },
+          "walletAddress": {
+            "type": "string"
+          }
+        }
+      },
+      "VaultHistoryPoint": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "value": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Get service health status",
+        "description": "Returns immediately with service health status, including critical dependencies.",
+        "tags": [
+          "Monitoring"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "healthy"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "uptime": {
+                      "type": "number"
+                    },
+                    "environment": {
+                      "type": "string"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "api": {
+                          "type": "string"
+                        },
+                        "cache": {
+                          "type": "string"
+                        },
+                        "stellarRpc": {
+                          "type": "string"
+                        },
+                        "jobs": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or dependencies are unhealthy"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Get service readiness status",
+        "description": "Returns 200 if the service is ready for traffic, checking all critical dependencies.",
+        "tags": [
+          "Monitoring"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service is ready"
+          },
+          "503": {
+            "description": "Service is not ready"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/summary": {
+      "get": {
+        "summary": "Get vault performance summary",
+        "description": "Returns high-level metrics for the vault including TVL and APY.",
+        "tags": [
+          "Vault"
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault summary data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalAssets": {
+                      "type": "number"
+                    },
+                    "totalShares": {
+                      "type": "number"
+                    },
+                    "apy": {
+                      "type": "number"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vault/deposits": {
+      "post": {
+        "summary": "Create a new deposit request",
+        "description": "Submits a deposit request to be processed by the vault.",
+        "tags": [
+          "Vault"
+        ],
+        "security": [
+          {
+            "IdempotencyKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepositRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deposit request accepted"
+          },
+          "400": {
+            "description": "Invalid request or missing idempotency key"
+          },
+          "409": {
+            "description": "Idempotency conflict"
+          },
+          "413": {
+            "description": "Payload too large"
+          }
+        }
+      }
+    },
+    "/api/v1/ops/job-metrics": {
+      "get": {
+        "summary": "Get background job metrics",
+        "description": "Returns performance and health metrics for background governance jobs.",
+        "tags": [
+          "Operations"
+        ],
+        "responses": {
+          "200": {
+            "description": "Job metrics data"
+          }
+        }
+      }
+    },
+    "/api/v1/transactions": {
+      "get": {
+        "summary": "List transactions",
+        "description": "Returns a paginated list of transactions with optional filtering.",
+        "tags": [
+          "Transactions"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "deposit",
+                "withdrawal",
+                "all"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "walletAddress",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of transactions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Transaction"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolio/holdings": {
+      "get": {
+        "summary": "List portfolio holdings",
+        "description": "Returns a paginated list of user holdings.",
+        "tags": [
+          "Portfolio"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "pending",
+                "all"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "walletAddress",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of holdings"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/history": {
+      "get": {
+        "summary": "List vault history",
+        "description": "Returns historical data points for vault performance.",
+        "tags": [
+          "Vault"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault history points"
+          }
+        }
+      }
+    }
+  },
+  "tags": []
+}

@@ -22,6 +22,21 @@ const router = Router();
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     Transaction:
+ *       type: object
+ *       properties:
+ *         id: { type: string }
+ *         type: { type: string, enum: [deposit, withdrawal] }
+ *         amount: { type: string }
+ *         asset: { type: string }
+ *         timestamp: { type: string, format: "date-time" }
+ *         transactionHash: { type: string }
+ *         walletAddress: { type: string }
+ */
 interface Transaction {
   id: string;
   type: 'deposit' | 'withdrawal';
@@ -33,6 +48,25 @@ interface Transaction {
   [key: string]: unknown;
 }
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     PortfolioHolding:
+ *       type: object
+ *       properties:
+ *         id: { type: string }
+ *         asset: { type: string }
+ *         vaultName: { type: string }
+ *         symbol: { type: string }
+ *         shares: { type: number }
+ *         apy: { type: number }
+ *         valueUsd: { type: number }
+ *         unrealizedGainUsd: { type: number }
+ *         issuer: { type: string }
+ *         status: { type: string, enum: [active, pending] }
+ *         walletAddress: { type: string }
+ */
 interface PortfolioHolding {
   id: string;
   asset: string;
@@ -48,6 +82,16 @@ interface PortfolioHolding {
   [key: string]: unknown;
 }
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     VaultHistoryPoint:
+ *       type: object
+ *       properties:
+ *         date: { type: string, format: "date" }
+ *         value: { type: number }
+ */
 interface VaultHistoryPoint {
   date: string;
   value: number;
@@ -167,34 +211,42 @@ function filterVaultHistory(
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 /**
- * GET /transactions
- * 
- * List transactions with pagination and filtering.
- * 
- * Query Parameters:
- * - limit: Number of items per page (1-100, default: 20)
- * - cursor: Cursor for next page (opaque string)
- * - page: Page number for offset-based pagination (1-based)
- * - sortBy: Field to sort by (default: timestamp)
- * - sortOrder: Sort direction - 'asc' or 'desc' (default: desc)
- * - type: Filter by transaction type - 'deposit', 'withdrawal', or 'all'
- * - walletAddress: Filter by wallet address
- * 
- * Response:
- * {
- *   data: Transaction[],
- *   pagination: {
- *     count: number,
- *     total?: number,
- *     nextCursor?: string,
- *     prevCursor?: string,
- *     currentPage?: number,
- *     totalPages?: number,
- *     hasNextPage: boolean,
- *     hasPrevPage: boolean
- *   },
- *   timestamp: string
- * }
+ * @openapi
+ * /api/v1/transactions:
+ *   get:
+ *     summary: List transactions
+ *     description: Returns a paginated list of transactions with optional filtering.
+ *     tags: [Transactions]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: cursor
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [deposit, withdrawal, all] }
+ *       - in: query
+ *         name: walletAddress
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: List of transactions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Transaction'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/PaginationMeta'
  */
 router.get('/transactions', (req: Request, res: Response) => {
   try {
@@ -231,34 +283,25 @@ router.get('/transactions', (req: Request, res: Response) => {
 });
 
 /**
- * GET /portfolio/holdings
- * 
- * List portfolio holdings with pagination and filtering.
- * 
- * Query Parameters:
- * - limit: Number of items per page (1-100, default: 20)
- * - cursor: Cursor for next page (opaque string)
- * - page: Page number for offset-based pagination (1-based)
- * - sortBy: Field to sort by (default: valueUsd)
- * - sortOrder: Sort direction - 'asc' or 'desc' (default: desc)
- * - status: Filter by status - 'active', 'pending', or 'all'
- * - walletAddress: Filter by wallet address
- * 
- * Response:
- * {
- *   data: PortfolioHolding[],
- *   pagination: {
- *     count: number,
- *     total?: number,
- *     nextCursor?: string,
- *     prevCursor?: string,
- *     currentPage?: number,
- *     totalPages?: number,
- *     hasNextPage: boolean,
- *     hasPrevPage: boolean
- *   },
- *   timestamp: string
- * }
+ * @openapi
+ * /api/v1/portfolio/holdings:
+ *   get:
+ *     summary: List portfolio holdings
+ *     description: Returns a paginated list of user holdings.
+ *     tags: [Portfolio]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, pending, all] }
+ *       - in: query
+ *         name: walletAddress
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: List of holdings
  */
 router.get('/portfolio/holdings', (req: Request, res: Response) => {
   try {
@@ -295,34 +338,25 @@ router.get('/portfolio/holdings', (req: Request, res: Response) => {
 });
 
 /**
- * GET /vault/history
- * 
- * List vault history points with pagination and filtering.
- * 
- * Query Parameters:
- * - limit: Number of items per page (1-365, default: 30)
- * - cursor: Cursor for next page (opaque string)
- * - page: Page number for offset-based pagination (1-based)
- * - sortBy: Field to sort by (default: date)
- * - sortOrder: Sort direction - 'asc' or 'desc' (default: desc)
- * - from: Start date (YYYY-MM-DD format)
- * - to: End date (YYYY-MM-DD format)
- * 
- * Response:
- * {
- *   data: VaultHistoryPoint[],
- *   pagination: {
- *     count: number,
- *     total?: number,
- *     nextCursor?: string,
- *     prevCursor?: string,
- *     currentPage?: number,
- *     totalPages?: number,
- *     hasNextPage: boolean,
- *     hasPrevPage: boolean
- *   },
- *   timestamp: string
- * }
+ * @openapi
+ * /api/v1/vault/history:
+ *   get:
+ *     summary: List vault history
+ *     description: Returns historical data points for vault performance.
+ *     tags: [Vault]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 30 }
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date }
+ *     responses:
+ *       200:
+ *         description: Vault history points
  */
 router.get('/vault/history', (req: Request, res: Response) => {
   try {
