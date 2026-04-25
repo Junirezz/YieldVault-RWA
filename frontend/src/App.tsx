@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import * as Sentry from "@sentry/react";
 import Navbar from "./components/Navbar";
 import SessionExpiredModal from "./components/SessionExpiredModal";
+import SessionExpiryWarning from "./components/SessionExpiryWarning";
 import type { DisconnectReason } from "./components/WalletConnect";
 import { KeyboardShortcutProvider } from "./context/KeyboardShortcutContext";
 import ShortcutHelpModal from "./components/ShortcutHelpModal";
@@ -30,7 +31,7 @@ function AppContent() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionState, intendedPath, setSessionExpired, clearSessionExpired } = useAuth();
+  const { sessionState, intendedPath, setSessionExpired, clearSessionExpired, dismissSessionWarning } = useAuth();
   const { data: usdcBalance = 0 } = useUsdcBalance(walletAddress);
 
   const handleConnect = useCallback((address: string) => {
@@ -54,6 +55,10 @@ function AppContent() {
     clearSessionExpired();
     window.dispatchEvent(new Event("TRIGGER_WALLET_CONNECT"));
   }, [clearSessionExpired]);
+
+  const handleDismissWarning = useCallback(() => {
+    dismissSessionWarning();
+  }, [dismissSessionWarning]);
 
   return (
     <KeyboardShortcutProvider>
@@ -103,6 +108,12 @@ function AppContent() {
           </Suspense>
         </main>
         <ShortcutHelpModal />
+        {sessionState === "warning" && walletAddress && (
+          <SessionExpiryWarning
+            onReconnect={handleReconnect}
+            onDismiss={handleDismissWarning}
+          />
+        )}
         {sessionState === "expired" && (
           <SessionExpiredModal
             intendedPath={intendedPath}

@@ -108,4 +108,14 @@ export const en = {
     today: "Today",
     yesterday: "Yesterday",
   },
+  session: {
+    warning: {
+      title: "Session Expiring Soon",
+      message: "Your wallet session will expire in {{minutes}} minutes. Reconnect to continue without interruption.",
+      reconnect: "Reconnect",
+    },
+  },
+  common: {
+    dismiss: "Dismiss",
+  },
 } as const;
