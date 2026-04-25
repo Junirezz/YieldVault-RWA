@@ -3,7 +3,7 @@
  */
 import { test, expect, interceptApiRoutes, stubFreighterConnected } from './fixtures';
 
-const MOCK_ADDRESS = 'GABC1TEST2STELLAR3ADDRESS4FAKE5XYZ6ABCDEFGHIJKLMNOPQRSTU';
+const MOCK_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 const SHORT_ADDR = `${MOCK_ADDRESS.substring(0, 5)}...${MOCK_ADDRESS.substring(MOCK_ADDRESS.length - 4)}`;
 
 test.describe('Portfolio page  unauthenticated', () => {

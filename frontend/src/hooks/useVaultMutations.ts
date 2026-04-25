@@ -58,7 +58,11 @@ export function useDepositMutation() {
 
   return useMutation({
     mutationFn: async ({ walletAddress, amount }: MutationParams) => {
-      await submitDeposit({ walletAddress, amount });
+      await submitDeposit({
+        walletAddress,
+        amount: amount.toString(),
+        asset: "USDC",
+      });
       return { walletAddress, amount };
     },
     onMutate: async ({ walletAddress, amount }) => {
@@ -144,7 +148,12 @@ export function useWithdrawMutation() {
 
   return useMutation({
     mutationFn: async ({ walletAddress, amount }: MutationParams) => {
-      await submitWithdrawal({ walletAddress, amount });
+      const shares = Math.max(1, Math.round(amount));
+      await submitWithdrawal({
+        walletAddress,
+        shares,
+        asset: "USDC",
+      });
       return { walletAddress, amount };
     },
     onMutate: async ({ walletAddress, amount }) => {
@@ -167,7 +176,9 @@ export function useWithdrawMutation() {
         transactions: queryClient.getQueryData<Transaction[]>(txKey),
       };
 
-      queryClient.setQueryData<number>(balanceKey, (current = 0) => current + amount);
+      queryClient.setQueryData<number>(balanceKey, (current = 0) =>
+        Math.max(current - amount, 0),
+      );
       queryClient.setQueryData<PortfolioHolding[] | undefined>(
         holdingsKey,
         (current) => updateHoldings(current, -amount),

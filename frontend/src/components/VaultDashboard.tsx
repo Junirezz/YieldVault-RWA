@@ -1,7 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { Activity, AlertCircle, ShieldCheck, TrendingUp, Wallet as WalletIcon, Loader2, AlertTriangle } from "./icons";
-import { HelpIcon } from "./ui";
-import { hasCustomRpcConfig, networkConfig } from "../config/network";
+import { useSearchParams } from "react-router-dom";
+import { 
+  Activity, 
+  AlertCircle, 
+  ShieldCheck, 
+  TrendingUp, 
+  Wallet as WalletIcon, 
+  Loader2, 
+  Info,
+  Share2
+} from "./icons";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
@@ -9,13 +17,11 @@ import VaultPerformanceChart from "./VaultPerformanceChart";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField, SubmitButton } from "../forms";
+import WithdrawalConfirmationModal from "./WithdrawalConfirmationModal";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import TransactionStatus, { type ActionStatus } from "./TransactionStatus";
 import CopyButton from "./CopyButton";
-import {
-  useDepositMutation,
-  useWithdrawMutation,
-} from "../hooks/useVaultMutations";
+import { copyTextToClipboard } from "../lib/clipboard";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -141,6 +147,19 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   const depositMutation = useDepositMutation();
   const withdrawMutation = useWithdrawMutation();
 
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const amountParam = searchParams.get("amount");
+    if (amountParam) {
+      const val = Number(amountParam);
+      if (!Number.isNaN(val) && val > 0) {
+        setAmount(val.toString());
+        setActiveTab("deposit");
+      }
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     const handleTrigger = () => {
       setActiveTab("deposit");
@@ -230,7 +249,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     } catch (err: unknown) {
       toast.error({
         title: "Transaction Failed",
-        description: err instanceof Error ? err.message : "An error occurred during the transaction.",
         description:
           err instanceof Error
             ? err.message
@@ -434,7 +452,25 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       </div>
 
       <div className="vault-dashboard-actions">
-        <div className="glass-panel" style={{ padding: "32px", position: "relative", overflow: "hidden" }}>
+        <div
+          className="glass-panel"
+          style={{ padding: "32px", position: "relative", overflow: "hidden" }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: "-50px",
+              right: "-50px",
+              width: "150px",
+              height: "150px",
+              background: "var(--accent-purple)",
+              filter: "blur(80px)",
+              opacity: 0.2,
+              borderRadius: "50%",
+              pointerEvents: "none",
+            }}
+          />
+
           {!walletAddress && (
             <div
               className="wallet-overlay"
@@ -460,11 +496,14 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
             </div>
           )}
 
-          <Tabs value={activeTab} defaultValue="deposit" onValueChange={(v) => setActiveTab(v as "deposit" | "withdraw")}>
           <Tabs
             value={activeTab}
             defaultValue="deposit"
-            onValueChange={(value) => setActiveTab(value as TransactionTab)}
+            onValueChange={(value) => {
+              setActiveTab(value as TransactionTab);
+              setAmount("");
+              setTouched(INITIAL_TOUCHED_STATE);
+            }}
           >
             <TabsList style={{ marginBottom: "24px" }}>
               <TabsTrigger value="deposit">Deposit</TabsTrigger>
@@ -512,7 +551,41 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                     />
 
                     <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
+                      <div className="flex items-center gap-sm">
+                        <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
+                        {tab === "deposit" && (
+                          <>
+                            <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
+                            <button
+                              type="button"
+                              className="btn-link flex items-center gap-xs"
+                              style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
+                              onClick={async () => {
+                                const baseUrl = window.location.origin + window.location.pathname;
+                                const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
+                                  ? `${baseUrl}?amount=${amount}`
+                                  : baseUrl;
+                                
+                                try {
+                                  await copyTextToClipboard(shareUrl);
+                                  toast.success({
+                                    title: "Link copied",
+                                    description: "Shareable vault link is ready to paste."
+                                  });
+                                } catch (err) {
+                                  toast.error({
+                                    title: "Copy failed",
+                                    description: "Could not copy link to clipboard."
+                                  });
+                                }
+                              }}
+                            >
+                              <Share2 size={12} />
+                              Share Link
+                            </button>
+                          </>
+                        )}
+                      </div>
                       <button
                         type="button"
                         className="btn-max"

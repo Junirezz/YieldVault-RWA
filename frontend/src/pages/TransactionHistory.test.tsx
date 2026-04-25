@@ -1,9 +1,21 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import TransactionHistory from "./TransactionHistory";
 import * as transactionApi from "../lib/transactionApi";
 import type { Transaction } from "../lib/transactionApi";
+
+// Hoisted so it can be referenced inside vi.mock factories
+const mockNetworkConfig = vi.hoisted(() => ({
+  isTestnet: true,
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractId: "",
+}));
+
+vi.mock("../config/network", () => ({
+  networkConfig: mockNetworkConfig,
+}));
 
 // Mock the transactionApi module
 vi.mock("../lib/transactionApi", async (importOriginal) => {
@@ -53,9 +65,11 @@ describe("TransactionHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockNetworkConfig.isTestnet = true;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -210,6 +224,57 @@ describe("TransactionHistory", () => {
     expect(options).toContain("Withdrawal");
   });
 
+  it("filters transactions with a debounced client-side search input", async () => {
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ id: "1", asset: "USDC", type: "deposit" }),
+      makeTransaction({
+        id: "2",
+        asset: "EURC",
+        type: "withdrawal",
+        transactionHash: "eurcdef1234567890abcdef1234567890abcdef12",
+      }),
+    ]);
+
+    renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByText("USDC")).toBeInTheDocument());
+    vi.useFakeTimers();
+
+    const searchInput = screen.getByRole("searchbox", {
+      name: /Search transactions/i,
+    });
+    expect(searchInput).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: "EURC" } });
+
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("USDC")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("EURC")).toBeInTheDocument();
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(searchInput, { target: { value: "" } });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => expect(screen.getByText("USDC")).toBeInTheDocument());
+    expect(screen.getByText("EURC")).toBeInTheDocument();
+    expect(mockGetTransactions).toHaveBeenCalledTimes(1);
+  });
+
   // Req 5.3 — applying filter resets page to 1
   it("resets page to 1 when filter is applied", async () => {
     // 15 transactions so we have 2 pages
@@ -298,5 +363,65 @@ describe("TransactionHistory", () => {
         screen.getByText("No transactions matched the current filter."),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stellar Explorer link — network-aware URL (issue #294)
+// ---------------------------------------------------------------------------
+
+const VALID_HASH = "a".repeat(64);
+
+describe("TransactionHistory — Stellar Explorer link network", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockNetworkConfig.isTestnet = true;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("generates a testnet explorer URL when networkConfig.isTestnet is true", async () => {
+    mockNetworkConfig.isTestnet = true;
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/testnet/tx/${VALID_HASH}`,
+    );
+  });
+
+  it("generates a mainnet explorer URL when networkConfig.isTestnet is false", async () => {
+    mockNetworkConfig.isTestnet = false;
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/public/tx/${VALID_HASH}`,
+    );
+  });
+
+  it("renders the explorer link with correct security attributes", async () => {
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 });

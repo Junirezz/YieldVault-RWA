@@ -32,8 +32,8 @@
 //! | `shipment_ids_by_status` | Public | Query shipments by status |
 //! | `calculate_shares` | Public | Calculate shares for amount |
 //! | `calculate_assets` | Public | Calculate assets for shares |
-| `upgrade` | Admin | Upgrade contract WASM code (safety: must be paused) |
-| `version` | Public | Query current contract version |
+//! | `upgrade` | Admin | Upgrade contract WASM code (safety: must be paused) |
+//! | `version` | Public | Query current contract version |
 
 use soroban_sdk::Address;
 

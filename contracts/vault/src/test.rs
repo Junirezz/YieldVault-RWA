@@ -858,3 +858,82 @@ fn test_upgrade_contract() {
     // Version should increment
     assert_eq!(vault.version(), 2);
 }
+
+// ─── Invariant Tests (Issue #258) ───────────────────────────────────────────────
+
+#[test]
+fn test_invariant_pool_conservation_and_monotonic_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    usdc_sa.mint(&user1, &1_000_000_000);
+    usdc_sa.mint(&user2, &1_000_000_000);
+    usdc_sa.mint(&user3, &1_000_000_000);
+    usdc_sa.mint(&admin, &500_000_000);
+    
+    let assert_pool_conservation = |v: &YieldVaultClient| {
+        let shares = v.total_shares();
+        let assets = v.total_assets();
+        let price = v.get_share_price();
+        
+        if shares == 0 {
+            assert_eq!(assets, 0);
+        } else {
+            let reconstructed_assets = (shares.checked_mul(price).unwrap()) / SCALE;
+            let diff = (assets - reconstructed_assets).abs();
+            assert!(diff <= 1, "Pool conservation invariant failed. Expected: {}, Got: {}", assets, reconstructed_assets);
+        }
+    };
+
+    // 1. Zero deposits edge case
+    assert_pool_conservation(&vault);
+    let mut last_price = vault.get_share_price();
+    assert_eq!(last_price, SCALE);
+    
+    // 2. Initial deposits
+    vault.deposit(&user1, &100_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    vault.deposit(&user2, &200_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    // 3. Yield Accrual (Monotonically non-decreasing price)
+    vault.accrue_yield(&50_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    // 4. Partial withdrawal
+    vault.withdraw(&user1, &50_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    // 5. Another yield accrual
+    vault.accrue_yield(&20_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    // 6. Max deposit cap / large deposit
+    vault.deposit(&user3, &500_000_000);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+    last_price = vault.get_share_price();
+    
+    // 7. Full withdrawals
+    let user2_balance = vault.balance(&user2);
+    vault.withdraw(&user2, &user2_balance);
+    assert_pool_conservation(&vault);
+    assert!(vault.get_share_price() >= last_price, "Price decreased");
+}

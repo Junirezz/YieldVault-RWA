@@ -9,6 +9,8 @@ import {
   IdempotencyConflictError,
 } from './idempotency';
 import { getJobHealthStatus, getJobMetrics } from './jobGovernance';
+import { sanitizationMiddleware } from './sanitization';
+import { setupSwagger } from './swagger';
 
 dotenv.config();
 
@@ -21,7 +23,11 @@ const cache = new NodeCache({ stdTTL: 30 });
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
-app.use(express.json());
+app.use(express.json({ limit: '100kb' })); // Restrict payload size
+app.use(sanitizationMiddleware); // Sanitize globally
+
+// Setup Swagger Documentation (Issue #257)
+setupSwagger(app);
 
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/v1')) {
@@ -61,11 +67,33 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── Health Check Endpoints (Issue #148) ────────────────────────────────────
 
 /**
- * GET /health
- * Returns immediately with service health status
- * Includes critical dependencies health (Stellar RPC, database, cache)
- * 
- * Response: 200 OK or 503 Service Unavailable
+ * @openapi
+ * /health:
+ *   get:
+ *     summary: Get service health status
+ *     description: Returns immediately with service health status, including critical dependencies.
+ *     tags: [Monitoring]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status: { type: string, example: "healthy" }
+ *                 timestamp: { type: string, format: "date-time" }
+ *                 uptime: { type: number }
+ *                 environment: { type: string }
+ *                 checks:
+ *                   type: object
+ *                   properties:
+ *                     api: { type: string }
+ *                     cache: { type: string }
+ *                     stellarRpc: { type: string }
+ *                     jobs: { type: string }
+ *       503:
+ *         description: Service or dependencies are unhealthy
  */
 app.get('/health', (_req: Request, res: Response) => {
   const health = {
@@ -88,11 +116,17 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * GET /ready
- * Returns readiness status - should only return 200 if service is ready for traffic
- * Checks all critical dependencies before reporting readiness
- * 
- * Response: 200 OK if ready, 503 Service Unavailable if not ready
+ * @openapi
+ * /ready:
+ *   get:
+ *     summary: Get service readiness status
+ *     description: Returns 200 if the service is ready for traffic, checking all critical dependencies.
+ *     tags: [Monitoring]
+ *     responses:
+ *       200:
+ *         description: Service is ready
+ *       503:
+ *         description: Service is not ready
  */
 app.get('/ready', (_req: Request, res: Response) => {
   const readiness = {
@@ -117,8 +151,24 @@ app.get('/ready', (_req: Request, res: Response) => {
 // ─── API Routes (with strict rate limiting) ────────────────────────────────
 
 /**
- * Example protected API endpoint
- * Demonstrates rate limiting per API key
+ * @openapi
+ * /api/v1/vault/summary:
+ *   get:
+ *     summary: Get vault performance summary
+ *     description: Returns high-level metrics for the vault including TVL and APY.
+ *     tags: [Vault]
+ *     responses:
+ *       200:
+ *         description: Vault summary data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalAssets: { type: number }
+ *                 totalShares: { type: number }
+ *                 apy: { type: number }
+ *                 timestamp: { type: string, format: "date-time" }
  */
 app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
   // This would typically fetch data from Stellar RPC or database
@@ -130,7 +180,31 @@ app.get('/api/v1/vault/summary', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/v1/vault/deposits', async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * @openapi
+ * /api/v1/vault/deposits:
+ *   post:
+ *     summary: Create a new deposit request
+ *     description: Submits a deposit request to be processed by the vault.
+ *     tags: [Vault]
+ *     security:
+ *       - IdempotencyKey: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/DepositRequest'
+ *     responses:
+ *       201:
+ *         description: Deposit request accepted
+ *       400:
+ *         description: Invalid request or missing idempotency key
+ *       409:
+ *         description: Idempotency conflict
+ *       413:
+ *         description: Payload too large
+ */
   try {
     const idempotencyKey = getIdempotencyKey(req);
     if (!idempotencyKey) {
@@ -184,7 +258,17 @@ app.post('/api/v1/vault/deposits', async (req: Request, res: Response, next: Nex
   }
 });
 
-app.get('/api/v1/ops/job-metrics', (_req: Request, res: Response) => {
+/**
+ * @openapi
+ * /api/v1/ops/job-metrics:
+ *   get:
+ *     summary: Get background job metrics
+ *     description: Returns performance and health metrics for background governance jobs.
+ *     tags: [Operations]
+ *     responses:
+ *       200:
+ *         description: Job metrics data
+ */
   res.json({
     timestamp: new Date().toISOString(),
     ...getJobMetrics(),
@@ -238,6 +322,28 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     DepositRequest:
+ *       type: object
+ *       required:
+ *         - amount
+ *         - asset
+ *         - walletAddress
+ *       properties:
+ *         amount:
+ *           type: number
+ *           minimum: 0.0000001
+ *           description: Amount to deposit
+ *         asset:
+ *           type: string
+ *           description: Asset code (e.g., USDC, XLM)
+ *         walletAddress:
+ *           type: string
+ *           description: Stellar wallet address
+ */
 interface DepositRequest {
   amount: number;
   asset: string;
@@ -287,6 +393,25 @@ function normalizeDepositRequest(body: unknown):
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (err.type === 'entity.too.large') {
+    res.status(413).json({
+      error: 'Payload Too Large',
+      status: 413,
+      message: 'Request payload exceeds the allowed limit',
+    });
+    return;
+  }
+
+  // Catch malformed JSON errors from express.json()
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'Malformed JSON payload',
+    });
+    return;
+  }
+
   console.error('Unhandled error:', err);
   res.status(500).json({
     error: 'Internal Server Error',

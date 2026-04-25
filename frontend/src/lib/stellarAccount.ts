@@ -34,6 +34,24 @@ export async function discoverConnectedAddress(): Promise<string | null> {
   }
 }
 
+export async function discoverConnectedAddressWithRetry(
+  retries = 5,
+  delayMs = 250,
+): Promise<string | null> {
+  for (let index = 0; index < retries; index += 1) {
+    const address = await discoverConnectedAddress();
+    if (address) {
+      return address;
+    }
+
+    if (index < retries - 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+
+  return null;
+}
+
 export async function fetchUsdcBalance(
   walletAddress: string,
   rpcUrl = import.meta.env.VITE_SOROBAN_RPC_URL || `https://${TESTNET_SOROBAN_RPC}`,
