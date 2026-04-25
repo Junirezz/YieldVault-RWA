@@ -1,5 +1,6 @@
 #![no_std]
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mock_oracle;
 
 use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
