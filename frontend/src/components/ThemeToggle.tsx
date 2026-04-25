@@ -1,11 +1,16 @@
 import React from 'react';
 import { Sun, Moon } from './icons';
-import { useTheme } from '../context/ThemeContext';
+import { usePreferencesContext } from "../context/PreferencesContext";
 import { useTranslation } from '../i18n';
 
 const ThemeToggle: React.FC = () => {
-    const { theme, toggleTheme } = useTheme();
+    const { resolvedTheme, setTheme } = usePreferencesContext();
     const { t } = useTranslation();
+
+    const isLight = resolvedTheme === "light";
+    const toggleTheme = () => {
+        setTheme(isLight ? "dark" : "light");
+    };
 
     return (
         <button
@@ -26,7 +31,7 @@ const ThemeToggle: React.FC = () => {
                 boxShadow: 'var(--shadow-glass)'
             }}
             aria-label={
-                theme === "light"
+                isLight
                     ? t("theme.toggleToDark")
                     : t("theme.toggleToLight")
             }
@@ -36,8 +41,8 @@ const ThemeToggle: React.FC = () => {
                     position: 'absolute',
                     top: 0,
                     left: 0,
-                    transform: theme === 'light' ? 'rotate(0deg) scale(1)' : 'rotate(90deg) scale(0)',
-                    opacity: theme === 'light' ? 1 : 0,
+                    transform: isLight ? 'rotate(0deg) scale(1)' : 'rotate(90deg) scale(0)',
+                    opacity: isLight ? 1 : 0,
                     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                 }}>
                     <Sun size={20} />
@@ -46,8 +51,8 @@ const ThemeToggle: React.FC = () => {
                     position: 'absolute',
                     top: 0,
                     left: 0,
-                    transform: theme === 'dark' ? 'rotate(0deg) scale(1)' : 'rotate(-90deg) scale(0)',
-                    opacity: theme === 'dark' ? 1 : 0,
+                    transform: !isLight ? 'rotate(0deg) scale(1)' : 'rotate(-90deg) scale(0)',
+                    opacity: !isLight ? 1 : 0,
                     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                 }}>
                     <Moon size={20} />

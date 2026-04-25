@@ -27,6 +27,33 @@ interface TransactionHistoryProps {
 }
 
 type TxTypeFilter = "all" | "deposit" | "withdrawal";
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
+function getPageSizeStorageKey(walletAddress: string | null): string {
+  return `yieldvault:transactions:page-size:${walletAddress ?? "guest"}`;
+}
+
+function loadPreferredPageSize(walletAddress: string | null): number {
+  try {
+    const raw = localStorage.getItem(getPageSizeStorageKey(walletAddress));
+    const parsed = raw ? Number(raw) : Number.NaN;
+    if (PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number])) {
+      return parsed;
+    }
+  } catch {
+    // localStorage unavailable; fall back to defaults
+  }
+  return DEFAULT_PAGE_SIZE;
+}
+
+function persistPreferredPageSize(walletAddress: string | null, pageSize: number): void {
+  try {
+    localStorage.setItem(getPageSizeStorageKey(walletAddress), String(pageSize));
+  } catch {
+    // localStorage unavailable; silently ignore
+  }
+}
 
 const columns: DataTableColumn<Transaction>[] = [
   {
@@ -84,12 +111,16 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
+  const preferredPageSize = React.useMemo(
+    () => loadPreferredPageSize(walletAddress),
+    [walletAddress],
+  );
 
   const { state, setSearch, setSort, setPage, setPageSize } = useDataTableState(
     {
       defaultSortBy: "date",
       defaultSortDirection: "desc",
-      defaultPageSize: 10,
+      defaultPageSize: preferredPageSize,
     },
   );
   const [searchInput, setSearchInput] = useState(state.search);
@@ -414,7 +445,11 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                     <select
                       aria-label="Rows per page"
                       value={state.pageSize}
-                      onChange={(e) => setPageSize(Number(e.target.value))}
+                      onChange={(e) => {
+                        const nextSize = Number(e.target.value);
+                        persistPreferredPageSize(walletAddress, nextSize);
+                        setPageSize(nextSize);
+                      }}
                       className="portfolio-select"
                     >
                       <option value={10}>10</option>

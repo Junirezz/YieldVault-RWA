@@ -29,6 +29,7 @@ vi.mock("../lib/transactionApi", async (importOriginal) => {
 const mockGetTransactions = vi.mocked(transactionApi.getTransactions);
 
 const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const SECOND_WALLET = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
 function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
@@ -66,6 +67,7 @@ describe("TransactionHistory", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     mockNetworkConfig.isTestnet = true;
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -243,6 +245,39 @@ describe("TransactionHistory", () => {
 
     const rowsSelect = screen.getByRole("combobox", { name: /Rows per page/i });
     expect(rowsSelect).toHaveValue("10");
+  });
+
+  it("restores stored page size preference for the current wallet", async () => {
+    localStorage.setItem(`yieldvault:transactions:page-size:${WALLET}`, "25");
+    mockGetTransactions.mockResolvedValue([]);
+
+    renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    const rowsSelect = screen.getByRole("combobox", { name: /Rows per page/i });
+    expect(rowsSelect).toHaveValue("25");
+  });
+
+  it("stores page size preference per wallet without cross-wallet leakage", async () => {
+    mockGetTransactions.mockResolvedValue([]);
+    const { unmount } = renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Rows per page/i }), {
+      target: { value: "50" },
+    });
+    expect(localStorage.getItem(`yieldvault:transactions:page-size:${WALLET}`)).toBe("50");
+
+    unmount();
+    renderPage(SECOND_WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: /Rows per page/i })).toHaveValue("10");
+    expect(
+      localStorage.getItem(`yieldvault:transactions:page-size:${SECOND_WALLET}`),
+    ).toBeNull();
   });
 
   // Req 5.1 — filter control renders All / Deposit / Withdrawal options
