@@ -7,9 +7,9 @@ import {
   TrendingUp, 
   Wallet as WalletIcon, 
   Loader2, 
-  Info,
   Share2
 } from "./icons";
+import HelpIcon from "./ui/HelpIcon";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
@@ -172,6 +172,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     amount,
     activeTab
   );
+
+  const { data: holdings = [] } = usePortfolioHoldings(walletAddress);
+  const totalShares = holdings.reduce((sum, h) => sum + h.shares, 0);
+  const hasNoPositions = holdings.length === 0 || totalShares === 0;
 
   useEffect(() => {
     const handleTrigger = () => {
@@ -521,94 +525,106 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                   <VaultCapWarning utilization={utilization} isReached={isCapReached} />
                 )}
 
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void handleTransaction(tab);
-                  }}
-                >
-                  <div style={{ marginBottom: "24px" }}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
-                      <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                        {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
-                      </div>
-                      <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-                        Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
-                      </div>
-                    </div>
-
-                    <FormField
-                      label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
-                      name={`${tab}-amount`}
-                      type="number"
-                      step="any"
-                      placeholder="0.00"
-                      value={amount}
-                      onChange={(event) => {
-                        setAmount(event.target.value);
-                        setTouched((previous) => ({ ...previous, [tab]: true }));
-                      }}
-                      onBlur={() =>
-                        setTouched((previous) => ({ ...previous, [tab]: true }))
-                      }
-                      disabled={isBusy || (tab === "deposit" && isCapReached)}
-                      error={showInlineError ? activeAmountError ?? undefined : undefined}
+                {tab === "withdraw" && hasNoPositions ? (
+                  <div style={{ padding: "24px 0" }}>
+                    <EmptyState
+                      variant="minimal"
+                      title="No positions to withdraw"
+                      description="You haven't deposited any assets into this vault yet. Deposit USDC to start earning yield."
+                      icon={<Share2 size={32} color="var(--accent-cyan)" />}
+                      actionLabel="Go to Deposit"
+                      onAction={() => setActiveTab("deposit")}
                     />
-
-                    <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
-                      <div className="flex items-center gap-sm">
-                        <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
-                        {tab === "deposit" && (
-                          <>
-                            <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
-                            <button
-                              type="button"
-                              className="btn-link flex items-center gap-xs"
-                              style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
-                              onClick={async () => {
-                                const baseUrl = window.location.origin + window.location.pathname;
-                                const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
-                                  ? `${baseUrl}?amount=${amount}`
-                                  : baseUrl;
-                                
-                                try {
-                                  await copyTextToClipboard(shareUrl);
-                                  toast.success({
-                                    title: "Link copied",
-                                    description: "Shareable vault link is ready to paste."
-                                  });
-                                } catch {
-                                  toast.error({
-                                    title: "Copy failed",
-                                    description: "Could not copy link to clipboard."
-                                  });
-                                }
-                              }}
-                            >
-                              <Share2 size={12} />
-                              Share Link
-                            </button>
-                          </>
-                        )}
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleTransaction(tab);
+                    }}
+                  >
+                    <div style={{ marginBottom: "24px" }}>
+                      <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
+                        <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                          {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
+                        </div>
+                        <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+                          Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        className="btn-max"
-                        onClick={() => {
-                          setAmount(availableBalance.toFixed(2));
+
+                      <FormField
+                        label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
+                        name={`${tab}-amount`}
+                        type="number"
+                        step="any"
+                        placeholder="0.00"
+                        value={amount}
+                        onChange={(event) => {
+                          setAmount(event.target.value);
                           setTouched((previous) => ({ ...previous, [tab]: true }));
                         }}
-                        disabled={
-                          !walletAddress ||
-                          availableBalance <= 0 ||
-                          isBusy ||
-                          (tab === "deposit" && isCapReached)
+                        onBlur={() =>
+                          setTouched((previous) => ({ ...previous, [tab]: true }))
                         }
-                      >
-                        MAX
-                      </button>
+                        disabled={isBusy || (tab === "deposit" && isCapReached)}
+                        error={showInlineError ? activeAmountError ?? undefined : undefined}
+                      />
+
+                      <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
+                        <div className="flex items-center gap-sm">
+                          <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
+                          {tab === "deposit" && (
+                            <>
+                              <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
+                              <button
+                                type="button"
+                                className="btn-link flex items-center gap-xs"
+                                style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
+                                onClick={async () => {
+                                  const baseUrl = window.location.origin + window.location.pathname;
+                                  const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
+                                    ? `${baseUrl}?amount=${amount}`
+                                    : baseUrl;
+                                  
+                                  try {
+                                    await copyTextToClipboard(shareUrl);
+                                    toast.success({
+                                      title: "Link copied",
+                                      description: "Shareable vault link is ready to paste."
+                                    });
+                                  } catch {
+                                    toast.error({
+                                      title: "Copy failed",
+                                      description: "Could not copy link to clipboard."
+                                    });
+                                  }
+                                }}
+                              >
+                                <Share2 size={12} />
+                                Share Link
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-max"
+                          onClick={() => {
+                            setAmount(availableBalance.toFixed(2));
+                            setTouched((previous) => ({ ...previous, [tab]: true }));
+                          }}
+                          disabled={
+                            !walletAddress ||
+                            availableBalance <= 0 ||
+                            isBusy ||
+                            (tab === "deposit" && isCapReached)
+                          }
+                        >
+                          MAX
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
                   <div
                     className="glass-panel"

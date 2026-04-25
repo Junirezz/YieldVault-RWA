@@ -24,7 +24,7 @@ function mockRect(
 
 // Helper to set up trigger and floating refs with mock getBoundingClientRect
 function setupRefs(
-  result: ReturnType<typeof renderHook<ReturnType<typeof useFloating>, unknown>>,
+  result: { current: UseFloatingReturn },
   triggerRect: DOMRect,
   panelWidth = 100,
   panelHeight = 40

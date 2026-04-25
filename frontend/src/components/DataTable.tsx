@@ -27,7 +27,7 @@ interface DataTableProps<T> {
   rows: T[];
   rowKey: (row: T) => string;
   caption: string;
-  emptyMessage: string;
+  emptyMessage: ReactNode;
   sortBy?: string;
   sortDirection?: TableSortDirection;
   onSortChange?: (columnId: string) => void;

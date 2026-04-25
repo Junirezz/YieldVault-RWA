@@ -17,8 +17,8 @@ export interface UseFloatingOptions {
 }
 
 export interface UseFloatingReturn {
-  triggerRef: React.RefObject<HTMLElement>;
-  floatingRef: React.RefObject<HTMLElement>;
+  triggerRef: React.RefObject<HTMLElement | null>;
+  floatingRef: React.RefObject<HTMLElement | null>;
   floatingStyle: React.CSSProperties;
   actualPlacement: Placement;
   isHidden: boolean;

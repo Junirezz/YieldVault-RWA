@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Activity, TrendingUp, DollarSign, Percent, Briefcase } from "../components/icons";
+import HelpIcon from "../components/ui/HelpIcon";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import {
   DataTable,
@@ -161,6 +162,7 @@ const PortfolioSummaryCard: React.FC<{
 
 const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   const toast = useToast();
+  const navigate = useNavigate();
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -262,6 +264,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   });
 
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
+  const totalShares = holdings.reduce((sum, h) => sum + h.shares, 0);
   const totalGain = holdings.reduce(
     (sum, holding) => sum + holding.unrealizedGainUsd,
     0,
@@ -390,87 +393,91 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                 </p>
               </div>
 
-              <div className="portfolio-toolbar-controls">
-                <label className="input-group" style={{ minWidth: "180px" }}>
-                  <span className="text-body-sm">Status Filter</span>
-                  <div className="input-wrapper">
-                    <select
-                      className="portfolio-select"
-                      value={urlState.filters.status || "all"}
-                      onChange={(e) => setFilters({ status: e.target.value })}
-                      aria-label="Filter by status"
+                <div className="portfolio-toolbar-controls">
+                  <label className="input-group" style={{ minWidth: "180px" }}>
+                    <span className="text-body-sm">Status Filter</span>
+                    <div className="input-wrapper">
+                      <select
+                        className="portfolio-select"
+                        value={urlState.filters.status || "all"}
+                        onChange={(e) => setFilters({ status: e.target.value })}
+                        aria-label="Filter by status"
+                      >
+                        <option value="all">All Statuses</option>
+                        <option value="active">Active</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </div>
+                  </label>
+
+                  <label className="input-group" style={{ minWidth: "220px" }}>
+                    <span className="text-body-sm">Search positions</span>
+                    <div className="input-wrapper">
+                      <input
+                        className="input-field"
+                        type="search"
+                        placeholder="Search asset, vault, issuer..."
+                        value={urlState.filters.search || ""}
+                        onChange={(event) => setSearch(event.target.value)}
+                        style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
+                      />
+                    </div>
+                  </label>
+
+                  {(urlState.filters.search || (urlState.filters.status && urlState.filters.status !== "all")) && (
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={reset}
+                      style={{ alignSelf: "flex-end", height: "42px" }}
                     >
-                      <option value="all">All Statuses</option>
-                      <option value="active">Active</option>
-                      <option value="pending">Pending</option>
-                    </select>
-                  </div>
-                </label>
-
-                <label className="input-group" style={{ minWidth: "220px" }}>
-                  <span className="text-body-sm">Search positions</span>
-                  <div className="input-wrapper">
-                    <input
-                      className="input-field"
-                      type="search"
-                      placeholder="Search asset, vault, issuer..."
-                      value={urlState.filters.search || ""}
-                      onChange={(event) => setSearch(event.target.value)}
-                      style={{ fontSize: "var(--text-base)", fontFamily: "var(--font-sans)" }}
-                    />
-                  </div>
-                </label>
-
-                {(urlState.filters.search || (urlState.filters.status && urlState.filters.status !== "all")) && (
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    onClick={reset}
-                    style={{ alignSelf: "flex-end", height: "42px" }}
-                  >
-                    Reset Filters
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="text-body-sm" style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>
-              {isLoading ? "Loading positions..." : `${totalItems} positions found`}
-            </div>
-
-            <DataTable
-              caption="Portfolio holdings"
-              columns={columns}
-              rows={rows}
-              rowKey={(row) => row.id}
-              emptyMessage={
-                isLoading
-                  ? "Loading positions..."
-                  : "No positions matched the current filters."
-              }
-              isLoading={isLoading}
-              skeletonRows={state.pageSize}
-              sortBy={state.sortBy}
-              sortDirection={state.sortDirection}
-              onSortChange={setSort}
-              pagination={{
-                page,
-                pageSize: state.pageSize,
-                totalItems,
-                totalPages,
-              }}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-              renderRowDetails={(row) => (
-                <div className="portfolio-row-meta">
-                  <span className={`tag ${row.status === "active" ? "cyan" : ""}`}>
-                    {row.status}
-                  </span>
-                  <span>{row.symbol}</span>
+                      Reset Filters
+                    </button>
+                  )}
                 </div>
-              )}
-            />
-          </section>
+              </div>
+
+              <div className="text-body-sm" style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>
+                {isLoading ? "Loading positions..." : `${totalItems} positions found`}
+              </div>
+
+              <DataTable
+                caption="Portfolio holdings"
+                columns={columns}
+                rows={rows}
+                rowKey={(row) => row.id}
+                emptyMessage={
+                  <EmptyState
+                    variant="minimal"
+                    title="No Results Found"
+                    description="Try adjusting your filters or search terms to find what you're looking for."
+                    icon={<Activity size={24} />}
+                  />
+                }
+                isLoading={isLoading}
+                skeletonRows={state.pageSize}
+                sortBy={state.sortBy}
+                sortDirection={state.sortDirection}
+                onSortChange={setSort}
+                pagination={{
+                  page,
+                  pageSize: state.pageSize,
+                  totalItems,
+                  totalPages,
+                }}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                renderRowDetails={(row) => (
+                  <div className="portfolio-row-meta">
+                    <span className={`tag ${row.status === "active" ? "cyan" : ""}`}>
+                      {row.status}
+                    </span>
+                    <span>{row.symbol}</span>
+                  </div>
+                )}
+              />
+            </section>
+          )}
         </div>
       )}
     </div>
