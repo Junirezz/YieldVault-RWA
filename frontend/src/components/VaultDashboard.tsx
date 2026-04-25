@@ -281,15 +281,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               >
                 Tokens: USDC
               </span>
-              <div
-                style={{
-                  marginTop: "8px",
-                  color: "var(--text-secondary)",
-                  fontSize: "0.82rem",
-                }}
-              >
-                1 yvUSDC = {summary.exchangeRate.toFixed(3)} USDC
-              </div>
+              <SharePriceDisplay />
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
