@@ -1,3 +1,8 @@
+// Tracing must be initialised before any other imports so auto-instrumentation
+// can patch http/express/prisma before they are first required.
+import { initTracing, shutdownTracing, getCurrentTraceId } from './tracing';
+initTracing();
+
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import NodeCache from 'node-cache';
@@ -18,6 +23,7 @@ import {
   activeConnections,
   updateVaultMetrics,
 } from './metrics';
+import { sorobanCircuitBreaker } from './circuitBreaker';
 
 declare global {
   namespace Express {
@@ -158,6 +164,7 @@ app.get('/metrics', async (_req: Request, res: Response) => {
  */
 app.get('/health', async (_req: Request, res: Response) => {
   const dbHealth = await getDatabaseHealth();
+  const circuitSnapshot = sorobanCircuitBreaker.toHealthSnapshot();
   const health = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -170,6 +177,7 @@ app.get('/health', async (_req: Request, res: Response) => {
       databasePrimary: dbHealth.primary,
       databaseReplica: dbHealth.replica,
     },
+    sorobanCircuitBreaker: circuitSnapshot,
   };
 
   // Check if all dependencies are healthy
@@ -409,6 +417,7 @@ const errorHandler: ErrorRequestHandler = (
 ) => {
   logger.log('error', 'Unhandled error', {
     correlationId: req.correlationId,
+    traceId: getCurrentTraceId(),
     error: err.message,
     stack: nodeEnv === 'development' ? err.stack : undefined,
   });
@@ -458,6 +467,11 @@ shutdownHandler.register(server);
 // Register database shutdown task
 shutdownHandler.onShutdown(async () => {
   await db.shutdown();
+});
+
+// Flush and shut down the OTel SDK on process exit
+shutdownHandler.onShutdown(async () => {
+  await shutdownTracing();
 });
 
 export default app;
