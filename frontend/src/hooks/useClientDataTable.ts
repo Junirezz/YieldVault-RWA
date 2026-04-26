@@ -55,12 +55,16 @@ export function useClientDataTable<T>({
   const totalPages = Math.max(1, Math.ceil(totalItems / state.pageSize));
   const safePage = Math.min(state.page, totalPages);
   const startIndex = (safePage - 1) * state.pageSize;
-  const paginatedRows = sortedRows.slice(startIndex, startIndex + state.pageSize);
+  const paginatedRows = sortedRows.slice(
+    startIndex,
+    startIndex + state.pageSize,
+  );
 
   return {
     rows: paginatedRows,
     totalItems,
     totalPages,
     page: safePage,
+    sortedRows,
   };
 }

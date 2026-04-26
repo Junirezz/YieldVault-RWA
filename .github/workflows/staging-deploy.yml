@@ -1,0 +1,97 @@
+name: Staging Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.event.head_commit.author.name != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install --locked soroban-cli
+
+      - name: Deploy Contracts to Testnet
+        id: deploy_contracts
+        env:
+          SOROBAN_SECRET_KEY: ${{ secrets.STAGING_SOROBAN_SECRET_KEY }}
+          SOROBAN_NETWORK: testnet
+        run: |
+          ./scripts/deploy_contracts.sh testnet
+          VAULT_ID=$(jq -r '.contracts.vault' deployments/contracts.testnet.json)
+          STRATEGY_ID=$(jq -r '.contracts.mock_korean_strategy' deployments/contracts.testnet.json)
+          echo "vault_id=$VAULT_ID" >> $GITHUB_OUTPUT
+          echo "strategy_id=$STRATEGY_ID" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Deploy Backend
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          VAULT_CONTRACT_ID: ${{ steps.deploy_contracts.outputs.vault_id }}
+        run: |
+          npm ci
+          npx prisma migrate deploy
+          # Replace with your actual backend deployment command (e.g., Vercel, Railway, Render)
+          # Example: npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
+          echo "Backend deployment simulated"
+          echo "BACKEND_URL=https://yieldvault-backend-staging.vercel.app" >> $GITHUB_ENV
+
+      - name: Deploy Frontend
+        working-directory: frontend
+        env:
+          VITE_VAULT_CONTRACT_ID: ${{ steps.deploy_contracts.outputs.vault_id }}
+          VITE_API_URL: ${{ env.BACKEND_URL }}
+        run: |
+          npm ci
+          npm run build
+          # Replace with your actual frontend deployment command
+          # Example: npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
+          echo "Frontend deployment simulated"
+          echo "STAGING_URL=https://yieldvault-staging.vercel.app" >> $GITHUB_ENV
+
+      - name: Post Staging URL to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.sha;
+            
+            // Find PRs associated with this commit
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: sha,
+            });
+            
+            if (prs.data.length > 0) {
+              const prNumber = prs.data[0].number;
+              const body = `🚀 **Staging Environment Updated!**\n\n- **Frontend:** [${process.env.STAGING_URL}](${process.env.STAGING_URL})\n- **Backend API:** [${process.env.BACKEND_URL}](${process.env.BACKEND_URL})\n- **Vault Contract ID:** \`${{ steps.deploy_contracts.outputs.vault_id }}\`\n\n_This environment was automatically deployed to reflect the latest state of the \`main\` branch._`;
+              
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

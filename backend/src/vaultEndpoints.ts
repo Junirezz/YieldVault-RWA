@@ -2,24 +2,43 @@ import { Router, Request, Response } from 'express';
 import { emailService } from './emailService';
 import { logger } from './middleware/structuredLogging';
 import { idempotencyStore, IdempotencyConflictError } from './idempotency';
+import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
+import { withSpan, getCurrentTraceId } from './tracing';
+import { requireFlag } from './featureFlags';
 import crypto from 'crypto';
 
 const router = Router();
 
-/**
- * Helper to generate a fingerprint for the request body.
- */
 function generateFingerprint(body: any): string {
   return crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
 
 /**
- * POST /api/v1/vault/deposits
- * Submit a deposit request and send confirmation email upon "confirmation".
- * Supports idempotency via x-idempotency-key header.
+ * Simulates a Soroban RPC call wrapped in the circuit breaker and a trace span.
+ * Replace the body with the real stellar-sdk / soroban-client call.
  */
-router.post('/deposits', async (req: Request, res: Response) => {
-  const idempotencyKey = req.headers['x-idempotency-key'] as string;
+async function submitSorobanTx(type: string, payload: Record<string, unknown>): Promise<string> {
+  return sorobanCircuitBreaker.execute(() =>
+    withSpan('soroban.rpc.submit', async (span) => {
+      span.setAttributes({ 'rpc.type': type, 'rpc.wallet': String(payload.walletAddress ?? '') });
+      // Simulate network call – replace with real Soroban RPC invocation
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return `0x${crypto.randomBytes(4).toString('hex')}${crypto.randomBytes(4).toString('hex')}`;
+    }),
+  );
+}
+
+/** Shared handler logic for deposit / withdrawal to avoid duplication. */
+async function handleVaultOperation(
+  req: Request,
+  res: Response,
+  type: 'deposit' | 'withdrawal',
+): Promise<Response> {
+  // Task 3: read Idempotency-Key header (spec-compliant name)
+  const idempotencyKey =
+    (req.headers['idempotency-key'] as string | undefined) ||
+    (req.headers['x-idempotency-key'] as string | undefined);
+
   const { amount, asset, walletAddress, email } = req.body;
 
   if (!amount || !asset || !walletAddress) {
@@ -31,173 +50,151 @@ router.post('/deposits', async (req: Request, res: Response) => {
   }
 
   const operation = async () => {
-    // 1. Simulate on-chain transaction submission
-    const txHash = `0x${crypto.randomBytes(4).toString('hex')}${crypto.randomBytes(4).toString('hex')}`;
-    
-    const body = {
-      id: `tx-${crypto.randomBytes(4).toString('hex')}`,
-      type: 'deposit',
-      amount,
-      asset,
-      walletAddress,
-      transactionHash: txHash,
-      status: 'pending',
-      timestamp: new Date().toISOString(),
-    };
+    return withSpan(`vault.${type}`, async (span) => {
+      span.setAttributes({
+        'vault.amount': String(amount),
+        'vault.asset': String(asset),
+        'vault.wallet': String(walletAddress),
+      });
 
-    // 2. Simulate on-chain confirmation and send email (async)
-    // We trigger this after returning the response
-    setTimeout(async () => {
+      let txHash: string;
       try {
-        // Simulate on-chain confirmation delay
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        logger.log('info', 'Deposit confirmed on-chain', { txHash, walletAddress });
+        txHash = await submitSorobanTx(type, { amount, asset, walletAddress });
+      } catch (err) {
+        if (err instanceof CircuitOpenError) {
+          // Bubble up so the route handler can return 503
+          throw err;
+        }
+        throw err;
+      }
 
-        if (email) {
-          await emailService.sendDepositConfirmation(email, {
-            amount: String(amount),
-            asset,
-            date: new Date().toISOString(),
+      const body = {
+        id: `tx-${crypto.randomBytes(4).toString('hex')}`,
+        type,
+        amount,
+        asset,
+        walletAddress,
+        transactionHash: txHash,
+        status: 'pending',
+        timestamp: new Date().toISOString(),
+      };
+
+      span.setAttributes({ 'vault.txHash': txHash });
+
+      // Post-confirmation email (fire-and-forget)
+      setTimeout(async () => {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          logger.log('info', `${type} confirmed on-chain`, {
             txHash,
             walletAddress,
+            traceId: getCurrentTraceId(),
+          });
+          if (email) {
+            const sendFn =
+              type === 'deposit'
+                ? emailService.sendDepositConfirmation.bind(emailService)
+                : emailService.sendWithdrawalConfirmation.bind(emailService);
+            await sendFn(email, {
+              amount: String(amount),
+              asset,
+              date: new Date().toISOString(),
+              txHash,
+              walletAddress,
+            });
+          }
+        } catch (error) {
+          logger.log('error', 'Error in post-confirmation email logic', {
+            error: error instanceof Error ? error.message : String(error),
+            txHash,
+            traceId: getCurrentTraceId(),
           });
         }
-      } catch (error) {
-        logger.log('error', 'Error in post-confirmation email logic', {
-          error: error instanceof Error ? error.message : String(error),
-          txHash,
-        });
-      }
-    }, 100);
+      }, 100);
 
-    return {
-      statusCode: 201,
-      body,
-    };
+      return { statusCode: 201, body };
+    });
   };
 
   try {
     if (idempotencyKey) {
       const fingerprint = generateFingerprint(req.body);
-      const { result, replayed } = await idempotencyStore.execute(idempotencyKey, fingerprint, operation);
-      
-      if (replayed) {
-        res.setHeader('idempotency-status', 'replayed');
-      }
-      
+      const { result, replayed } = await idempotencyStore.execute(
+        idempotencyKey,
+        fingerprint,
+        operation,
+      );
+      if (replayed) res.setHeader('idempotency-status', 'replayed');
       return res.status(result.statusCode).json(result.body);
     }
 
     const result = await operation();
     return res.status(result.statusCode).json(result.body);
-  } catch (error) {
-    if (error instanceof IdempotencyConflictError) {
-      return res.status(409).json({
-        error: 'Conflict',
-        status: 409,
-        message: error.message,
+  } catch (err) {
+    if (err instanceof IdempotencyConflictError) {
+      return res.status(422).json({
+        error: 'Unprocessable Entity',
+        status: 422,
+        message: err.message,
       });
     }
-    
-    logger.log('error', 'Deposit operation failed', {
-      error: error instanceof Error ? error.message : String(error),
+
+    if (err instanceof CircuitOpenError) {
+      const retryAfterSec = Math.ceil(err.retryAfterMs / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        status: 503,
+        message: 'Soroban RPC is temporarily unavailable. Please retry later.',
+        retryAfterMs: err.retryAfterMs,
+      });
+    }
+
+    logger.log('error', `${type} operation failed`, {
+      error: err instanceof Error ? err.message : String(err),
+      traceId: getCurrentTraceId(),
     });
-    
     return res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
-      message: 'Failed to process deposit',
+      message: `Failed to process ${type}`,
     });
   }
-});
+}
+
+/**
+ * POST /api/v1/vault/deposits
+ * Accepts optional Idempotency-Key header for deduplication.
+ */
+router.post('/deposits', (req: Request, res: Response) =>
+  handleVaultOperation(req, res, 'deposit'),
+);
 
 /**
  * POST /api/v1/vault/withdrawals
- * Submit a withdrawal request and send confirmation email upon "confirmation".
+ * Accepts optional Idempotency-Key header for deduplication.
  */
-router.post('/withdrawals', async (req: Request, res: Response) => {
-  const idempotencyKey = req.headers['x-idempotency-key'] as string;
-  const { amount, asset, walletAddress, email } = req.body;
+router.post('/withdrawals', (req: Request, res: Response) =>
+  handleVaultOperation(req, res, 'withdrawal'),
+);
 
-  if (!amount || !asset || !walletAddress) {
-    return res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'Missing required fields: amount, asset, and walletAddress are required',
-    });
-  }
+// ─── Feature-flagged v2 endpoints ────────────────────────────────────────────
 
-  const operation = async () => {
-    const txHash = `0x${crypto.randomBytes(4).toString('hex')}${crypto.randomBytes(4).toString('hex')}`;
-    
-    const body = {
-      id: `tx-${crypto.randomBytes(4).toString('hex')}`,
-      type: 'withdrawal',
-      amount,
-      asset,
-      walletAddress,
-      transactionHash: txHash,
-      status: 'pending',
-      timestamp: new Date().toISOString(),
-    };
+/**
+ * POST /api/v1/vault/deposits/v2
+ * Gated behind the "deposit-v2" feature flag.
+ * Supports per-wallet targeting via x-wallet-address header or body.walletAddress.
+ */
+router.post('/deposits/v2', requireFlag('deposit-v2'), (req: Request, res: Response) =>
+  handleVaultOperation(req, res, 'deposit'),
+);
 
-    setTimeout(async () => {
-      try {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        logger.log('info', 'Withdrawal confirmed on-chain', { txHash, walletAddress });
-
-        if (email) {
-          await emailService.sendWithdrawalConfirmation(email, {
-            amount: String(amount),
-            asset,
-            date: new Date().toISOString(),
-            txHash,
-            walletAddress,
-          });
-        }
-      } catch (error) {
-        logger.log('error', 'Error in post-confirmation email logic', {
-          error: error instanceof Error ? error.message : String(error),
-          txHash,
-        });
-      }
-    }, 100);
-
-    return {
-      statusCode: 201,
-      body,
-    };
-  };
-
-  try {
-    if (idempotencyKey) {
-      const fingerprint = generateFingerprint(req.body);
-      const { result, replayed } = await idempotencyStore.execute(idempotencyKey, fingerprint, operation);
-      
-      if (replayed) {
-        res.setHeader('idempotency-status', 'replayed');
-      }
-      
-      return res.status(result.statusCode).json(result.body);
-    }
-
-    const result = await operation();
-    return res.status(result.statusCode).json(result.body);
-  } catch (error) {
-    if (error instanceof IdempotencyConflictError) {
-      return res.status(409).json({
-        error: 'Conflict',
-        status: 409,
-        message: error.message,
-      });
-    }
-    
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      status: 500,
-      message: 'Failed to process withdrawal',
-    });
-  }
+/**
+ * POST /api/v1/vault/strategy
+ * Gated behind the "strategy-selection" feature flag.
+ */
+router.post('/strategy', requireFlag('strategy-selection'), (_req: Request, res: Response) => {
+  res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
 });
 
 export default router;

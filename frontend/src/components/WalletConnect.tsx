@@ -110,6 +110,8 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
       if (allowed.isAllowed) {
         const userInfo = await getAddress();
         if (userInfo.address) {
+          // Set session start time for expiry tracking
+          localStorage.setItem("wallet_session_start", Date.now().toString());
           clearWalletManualDisconnect();
           onConnect(userInfo.address);
           setConnectionError(null);

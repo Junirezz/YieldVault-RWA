@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import * as Sentry from "@sentry/react";
 import Navbar from "./components/Navbar";
 import SessionExpiredModal from "./components/SessionExpiredModal";
+import SessionExpiryWarning from "./components/SessionExpiryWarning";
 import type { DisconnectReason } from "./components/WalletConnect";
 import { KeyboardShortcutProvider } from "./context/KeyboardShortcutContext";
 import ShortcutHelpModal from "./components/ShortcutHelpModal";
@@ -14,6 +15,7 @@ import { queryClient } from "./lib/queryClient";
 import { clearWalletSessionState } from "./lib/sessionCleanup";
 import ErrorFallback from "./components/ErrorFallback";
 import RouteLoadingFallback from "./components/RouteLoadingFallback";
+import { PreferencesProvider } from "./context/PreferencesContext";
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
@@ -30,7 +32,7 @@ function AppContent() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionState, intendedPath, setSessionExpired, clearSessionExpired } = useAuth();
+  const { sessionState, intendedPath, setSessionExpired, clearSessionExpired, dismissSessionWarning } = useAuth();
   const { data: usdcBalance = 0 } = useUsdcBalance(walletAddress);
 
   const handleConnect = useCallback((address: string) => {
@@ -55,63 +57,75 @@ function AppContent() {
     window.dispatchEvent(new Event("TRIGGER_WALLET_CONNECT"));
   }, [clearSessionExpired]);
 
+  const handleDismissWarning = useCallback(() => {
+    dismissSessionWarning();
+  }, [dismissSessionWarning]);
+
   return (
-    <KeyboardShortcutProvider>
-      <a className="skip-link" href="#main-content">
-        Skip to main content
-      </a>
-      <div className="app-container">
-        <Navbar
-          walletAddress={walletAddress}
-          usdcBalance={usdcBalance}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-        />
-        <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
-          <Suspense fallback={<RouteLoadingFallback />}>
-            <SentryRoutes>
-              <Route
-                path="/"
-                element={
-                  <Home
-                    walletAddress={walletAddress}
-                    usdcBalance={usdcBalance}
-                  />
-                }
-              />
-              <Route
-                path="/portfolio"
-                element={
-                  <Portfolio
-                    walletAddress={walletAddress}
-                  />
-                }
-              />
-              <Route
-                path="/analytics"
-                element={
-                  <FeatureGate flag="ANALYTICS_PAGE">
-                    <Analytics />
-                  </FeatureGate>
-                }
-              />
-              <Route path="/transactions" element={<TransactionHistory walletAddress={walletAddress} />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/ui-kit" element={<UIPreview />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </SentryRoutes>
-          </Suspense>
-        </main>
-        <ShortcutHelpModal />
-        {sessionState === "expired" && (
-          <SessionExpiredModal
-            intendedPath={intendedPath}
-            onReconnect={handleReconnect}
-            onDismiss={() => handleDisconnect("manual")}
+    <PreferencesProvider walletAddress={walletAddress}>
+      <KeyboardShortcutProvider>
+        <a className="skip-link" href="#main-content">
+          Skip to main content
+        </a>
+        <div className="app-container">
+          <Navbar
+            walletAddress={walletAddress}
+            usdcBalance={usdcBalance}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
           />
-        )}
-      </div>
-    </KeyboardShortcutProvider>
+          <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <SentryRoutes>
+                <Route
+                  path="/"
+                  element={
+                    <Home
+                      walletAddress={walletAddress}
+                      usdcBalance={usdcBalance}
+                    />
+                  }
+                />
+                <Route
+                  path="/portfolio"
+                  element={
+                    <Portfolio
+                      walletAddress={walletAddress}
+                    />
+                  }
+                />
+                <Route
+                  path="/analytics"
+                  element={
+                    <FeatureGate flag="ANALYTICS_PAGE">
+                      <Analytics />
+                    </FeatureGate>
+                  }
+                />
+                <Route path="/transactions" element={<TransactionHistory walletAddress={walletAddress} />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/ui-kit" element={<UIPreview />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </SentryRoutes>
+            </Suspense>
+          </main>
+          <ShortcutHelpModal />
+          {sessionState === "warning" && walletAddress && (
+            <SessionExpiryWarning
+              onReconnect={handleReconnect}
+              onDismiss={handleDismissWarning}
+            />
+          )}
+          {sessionState === "expired" && (
+            <SessionExpiredModal
+              intendedPath={intendedPath}
+              onReconnect={handleReconnect}
+              onDismiss={() => handleDisconnect("manual")}
+            />
+          )}
+        </div>
+      </KeyboardShortcutProvider>
+    </PreferencesProvider>
   );
 }
 

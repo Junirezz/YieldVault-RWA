@@ -29,6 +29,7 @@ vi.mock("../lib/transactionApi", async (importOriginal) => {
 const mockGetTransactions = vi.mocked(transactionApi.getTransactions);
 
 const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const SECOND_WALLET = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
 function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
@@ -66,6 +67,7 @@ describe("TransactionHistory", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     mockNetworkConfig.isTestnet = true;
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -128,6 +130,47 @@ describe("TransactionHistory", () => {
     renderPage(WALLET);
 
     await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+  });
+
+  it("renders an Export CSV button and downloads current transactions", async () => {
+    const appendSpy = vi.spyOn(document.body, "appendChild");
+    const removeSpy = vi.spyOn(document.body, "removeChild");
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click");
+
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ id: "1", amount: "123.45", asset: "USDC" }),
+      makeTransaction({
+        id: "2",
+        amount: "67.89",
+        asset: "XLM",
+        type: "withdrawal",
+      }),
+    ]);
+
+    renderPage(WALLET);
+
+    const exportButton = await screen.findByRole("button", {
+      name: /Export CSV/i,
+    });
+
+    fireEvent.click(exportButton);
+
+    expect(clickSpy).toHaveBeenCalled();
+    expect(appendSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+
+    const appendedCall = appendSpy.mock.calls.find(
+      (call) => call[0] instanceof HTMLAnchorElement,
+    );
+    expect(appendedCall).toBeDefined();
+
+    const appendedLink = appendedCall?.[0] as HTMLAnchorElement;
+    expect(appendedLink.getAttribute("download")).toMatch(
+      /^transactions_\d{4}-\d{2}-\d{2}\.csv$/,
+    );
+    expect(appendedLink.getAttribute("href")).toMatch(
+      /^(blob:|data:text\/csv;charset=utf-8,)/,
+    );
   });
 
   // Req 2.4 — shows ApiStatusBanner on fetch failure
@@ -204,6 +247,39 @@ describe("TransactionHistory", () => {
     expect(rowsSelect).toHaveValue("10");
   });
 
+  it("restores stored page size preference for the current wallet", async () => {
+    localStorage.setItem(`yieldvault:transactions:page-size:${WALLET}`, "25");
+    mockGetTransactions.mockResolvedValue([]);
+
+    renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    const rowsSelect = screen.getByRole("combobox", { name: /Rows per page/i });
+    expect(rowsSelect).toHaveValue("25");
+  });
+
+  it("stores page size preference per wallet without cross-wallet leakage", async () => {
+    mockGetTransactions.mockResolvedValue([]);
+    const { unmount } = renderPage(WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Rows per page/i }), {
+      target: { value: "50" },
+    });
+    expect(localStorage.getItem(`yieldvault:transactions:page-size:${WALLET}`)).toBe("50");
+
+    unmount();
+    renderPage(SECOND_WALLET);
+
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: /Rows per page/i })).toHaveValue("10");
+    expect(
+      localStorage.getItem(`yieldvault:transactions:page-size:${SECOND_WALLET}`),
+    ).toBeNull();
+  });
+
   // Req 5.1 — filter control renders All / Deposit / Withdrawal options
   it("renders filter control with All, Deposit, and Withdrawal options", async () => {
     mockGetTransactions.mockResolvedValue([]);
@@ -249,8 +325,8 @@ describe("TransactionHistory", () => {
     expect(mockGetTransactions).toHaveBeenCalledTimes(1);
     expect(screen.getByText("USDC")).toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
+    await waitFor(
+      () => expect(screen.queryByText("USDC")).not.toBeInTheDocument(),
       { timeout: 2000 },
     );
     expect(screen.getByText("EURC")).toBeInTheDocument();
