@@ -17,3 +17,4 @@ GEMINI.md
 .claude/
 skills-lock.json
 issue.md
+contracts/vault/test_snapshots

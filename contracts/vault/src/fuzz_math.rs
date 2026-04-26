@@ -271,4 +271,112 @@ proptest! {
             deposit_b
         );
     }
+
+    // ── Goal 4: deposit → immediate full-withdraw symmetry (with fees) ────────
+
+}
+
+// ── Goal 4: deposit → immediate full-withdraw symmetry (10,000 iterations) ───
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        cases: 10_000,
+        ..proptest::test_runner::Config::default()
+    })]
+
+    /// With zero fee: deposit then full-withdraw returns exactly the deposited amount
+    /// (modulo integer rounding, which can only round down, never up).
+    /// Runs 10,000 iterations in CI via the proptest_config above.
+    #[test]
+    fn fuzz_deposit_withdraw_symmetry_no_fee(
+        deposit_amount in 1i128..=1_000_000_000i128,
+    ) {
+        let (env, client, admin, token_addr) = setup();
+        let user = Address::generate(&env);
+
+        mint(&env, &token_addr, &admin, &user, deposit_amount);
+
+        let shares = match client.try_deposit(&user, &deposit_amount) {
+            Ok(Ok(s)) => s,
+            _ => return Ok(()), // skip if deposit fails (e.g. shares round to 0)
+        };
+
+        prop_assert!(shares > 0, "minted zero shares");
+
+        let returned = client.withdraw(&user, &shares);
+
+        prop_assert!(
+            returned <= deposit_amount,
+            "withdraw returned more than deposited: {} > {}",
+            returned,
+            deposit_amount
+        );
+        // With no yield and no fee, rounding loss must be at most 1 stroop
+        prop_assert!(
+            deposit_amount - returned <= 1,
+            "rounding loss exceeds 1 stroop: deposited={} returned={}",
+            deposit_amount,
+            returned
+        );
+    }
+
+    /// With a non-zero fee: deposit then full-withdraw returns at most
+    /// `deposit_amount` and at least `deposit_amount - 2` (fee only applies to
+    /// yield, not principal; -2 absorbs integer rounding).
+    ///
+    /// Runs 10,000 iterations in CI.
+    #[test]
+    fn fuzz_deposit_withdraw_symmetry_with_fee(
+        deposit_amount in 1i128..=1_000_000_000i128,
+        fee_bps       in 0i128..=10_000i128,
+    ) {
+        let (env, client, admin, token_addr) = setup();
+        let user = Address::generate(&env);
+
+        // Configure fee rate
+        client.set_fee_bps(&fee_bps);
+
+        // Accrue a small amount of yield so the fee path is exercised.
+        let yield_amount = 1_000i128;
+        mint(&env, &token_addr, &admin, &admin, yield_amount);
+        client.accrue_yield(&yield_amount);
+
+        // Now deposit
+        mint(&env, &token_addr, &admin, &user, deposit_amount);
+        let shares = match client.try_deposit(&user, &deposit_amount) {
+            Ok(Ok(s)) => s,
+            _ => return Ok(()), // skip if shares round to 0
+        };
+
+        prop_assert!(shares > 0);
+
+        // Snapshot total_assets and total_shares at deposit time to compute
+        // the exact expected redemption value (shares * total_assets / total_shares).
+        let total_assets_after = client.total_assets();
+        let total_shares_after = client.total_shares();
+
+        let returned = client.withdraw(&user, &shares);
+
+        // The expected return is the proportional share of total_assets.
+        // Due to integer division it can only be <= the exact value.
+        let expected = shares
+            .checked_mul(total_assets_after)
+            .unwrap()
+            / total_shares_after;
+
+        prop_assert!(
+            returned <= expected,
+            "withdraw returned more than share proportion: {} > {}",
+            returned,
+            expected
+        );
+        // Rounding loss must be at most 1 stroop
+        prop_assert!(
+            expected - returned <= 1,
+            "rounding loss exceeds 1 stroop: expected={} returned={} fee_bps={}",
+            expected,
+            returned,
+            fee_bps
+        );
+    }
 }

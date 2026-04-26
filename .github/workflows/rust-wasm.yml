@@ -51,6 +51,8 @@ jobs:
       - name: Run tests
         run: cargo test --all-features --workspace --locked --quiet
         working-directory: ./contracts
+        env:
+          PROPTEST_CASES: "10000"
 
   wasm-build:
     name: Build WASM artifacts

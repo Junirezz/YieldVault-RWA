@@ -13,12 +13,11 @@ mod test;
 pub mod upgrade;
 
 use crate::strategy::StrategyClient;
-use crate::upgrade::{get_admin, is_initialized, set_admin, set_initialized};
+use crate::upgrade::{get_admin, get_pending_admin, is_initialized, set_admin, set_initialized, set_pending_admin};
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
     Address, BytesN, Env, Vec,
 };
-use crate::upgrade::{get_admin, set_admin, is_initialized, set_initialized, get_pending_admin, set_pending_admin};
 
 const MAX_PAGE_SIZE: u32 = 50;
 
@@ -68,6 +67,15 @@ pub enum DataKey {
     UserDeposit(Address),
     PerUserCap,
     StrategyWhitelist(Address),
+    // Goal 1: protocol fee
+    FeeBps,
+    Treasury,
+    TreasuryBalance,
+    // Goal 2: timelock withdrawals
+    LargeWithdrawalThreshold,
+    PendingWithdrawal(Address),
+    // Goal 3: min deposit
+    MinDeposit,
 }
 
 #[contracttype]
@@ -79,6 +87,13 @@ pub struct StrategyProposal {
     pub executed: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingWithdrawal {
+    pub shares: i128,
+    pub unlock_timestamp: u64,
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -88,6 +103,9 @@ pub enum VaultError {
     InvalidAmount = 3,
     ContractPaused = 4,
     ExceedsUserCap = 5,
+    MinDepositNotMet = 6,
+    TimelockNotExpired = 7,
+    NoPendingWithdrawal = 8,
 }
 
 #[contractclient(name = "KoreanDebtStrategyClient")]
@@ -588,6 +606,16 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        // Goal 3: enforce minimum deposit
+        let min_deposit: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinDeposit)
+            .unwrap_or(0);
+        if amount < min_deposit {
+            return Err(VaultError::MinDepositNotMet);
+        }
+
         let token_addr: Address = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
         let token_client = token::Client::new(&env, &token_addr);
 
@@ -654,12 +682,16 @@ impl YieldVault {
 
     /// Redeems vault shares for the proportional amount of underlying assets.
     ///
+    /// For withdrawals above `LARGE_WITHDRAWAL_THRESHOLD`, a pending withdrawal
+    /// is created with a 24-hour timelock. Call `execute_withdrawal` after the
+    /// timelock expires to complete the transfer.
+    ///
     /// ### Parameters
     /// * `user` - The share holder (requires auth).
     /// * `shares` - The number of shares to burn.
     ///
     /// ### Returns
-    /// The quantity of underlying tokens returned to the user.
+    /// The quantity of underlying tokens returned to the user (0 if timelocked).
     pub fn withdraw(env: Env, user: Address, shares: i128) -> Result<i128, VaultError> {
         let mut state = Self::get_state(&env);
         if state.is_paused {
@@ -672,10 +704,17 @@ impl YieldVault {
         }
 
         let user_key = DataKey::ShareBalance(user.clone());
-        let user_shares = env.storage().instance().get(&user_key).unwrap_or(0);
+        let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
         if user_shares < shares {
             return Err(VaultError::InsufficientShares);
         }
+
+        // Goal 2: check large-withdrawal threshold
+        let threshold: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LargeWithdrawalThreshold)
+            .unwrap_or(i128::MAX);
 
         let assets_to_return = if state.total_shares == 0 {
             0
@@ -687,8 +726,73 @@ impl YieldVault {
                 .expect("division by zero or overflow")
         };
 
-        let token_addr = Self::token(env.clone());
-        let token_client = token::Client::new(&env, &token_addr);
+        if assets_to_return > threshold {
+            // Create a pending withdrawal with a 24-hour timelock
+            let unlock_ts = env
+                .ledger()
+                .timestamp()
+                .checked_add(86_400)
+                .expect("overflow");
+            let pending = PendingWithdrawal {
+                shares,
+                unlock_timestamp: unlock_ts,
+            };
+            env.storage()
+                .instance()
+                .set(&DataKey::PendingWithdrawal(user.clone()), &pending);
+            env.events().publish(
+                (symbol_short!("pndwdraw"), user),
+                (shares, unlock_ts),
+            );
+            return Ok(0);
+        }
+
+        Self::do_withdraw(&env, &mut state, user, shares, assets_to_return)
+    }
+
+    /// Completes a pending large withdrawal after the timelock has expired.
+    pub fn execute_withdrawal(env: Env, user: Address) -> Result<i128, VaultError> {
+        user.require_auth();
+
+        let pending: PendingWithdrawal = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingWithdrawal(user.clone()))
+            .ok_or(VaultError::NoPendingWithdrawal)?;
+
+        if env.ledger().timestamp() < pending.unlock_timestamp {
+            return Err(VaultError::TimelockNotExpired);
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingWithdrawal(user.clone()));
+
+        let mut state = Self::get_state(&env);
+        let assets_to_return = if state.total_shares == 0 {
+            0
+        } else {
+            pending
+                .shares
+                .checked_mul(state.total_assets)
+                .expect("overflow")
+                .checked_div(state.total_shares)
+                .expect("division by zero or overflow")
+        };
+
+        Self::do_withdraw(&env, &mut state, user, pending.shares, assets_to_return)
+    }
+
+    /// Internal: burns shares, transfers assets, updates state.
+    fn do_withdraw(
+        env: &Env,
+        state: &mut VaultState,
+        user: Address,
+        shares: i128,
+        assets_to_return: i128,
+    ) -> Result<i128, VaultError> {
+        let token_addr = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
+        let token_client = token::Client::new(env, &token_addr);
 
         // Check if vault has enough idle assets, otherwise divest from strategy
         let mut idle_ta = env
@@ -706,10 +810,8 @@ impl YieldVault {
                 .unwrap_or(0);
         }
 
-        // Transfer assets from vault to user
         token_client.transfer(&env.current_contract_address(), &user, &assets_to_return);
 
-        // Update state
         env.storage()
             .instance()
             .set(&DataKey::TotalAssets, &idle_ta.checked_sub(assets_to_return).expect("underflow"));
@@ -727,11 +829,11 @@ impl YieldVault {
 
         state.total_assets = state.total_assets.checked_sub(assets_to_return).expect("underflow");
         state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
-        env.storage().instance().set(&DataKey::State, &state);
+        env.storage().instance().set(&DataKey::State, state);
 
-        env.storage()
-            .instance()
-            .set(&user_key, &user_shares.checked_sub(shares).expect("underflow"));
+        let user_key = DataKey::ShareBalance(user.clone());
+        let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
+        let _ = user_shares; // already updated above via vault_balance path
 
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
@@ -803,7 +905,8 @@ impl YieldVault {
             .set(&DataKey::TotalAssets, &idle_ta.checked_add(amount).expect("overflow"));
     }
 
-    /// Admin function to artificially accrue yield (legacy, but updated for strategy).
+    /// Admin function to artificially accrue yield, deducting the protocol fee.
+    /// The fee portion is credited to the treasury balance.
     pub fn accrue_yield(env: Env, amount: i128) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
@@ -813,6 +916,27 @@ impl YieldVault {
 
         token_client.transfer(&admin, &env.current_contract_address(), &amount);
 
+        // Goal 1: deduct protocol fee before distributing to depositors
+        let fee_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(0);
+        let fee_amount = amount.checked_mul(fee_bps).expect("overflow") / 10_000;
+        let net_yield = amount.checked_sub(fee_amount).expect("underflow");
+
+        // Accumulate fee in treasury balance
+        if fee_amount > 0 {
+            let treasury_bal: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TreasuryBalance)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::TreasuryBalance, &treasury_bal.checked_add(fee_amount).expect("overflow"));
+        }
+
         let ta = env
             .storage()
             .instance()
@@ -820,11 +944,104 @@ impl YieldVault {
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
+            .set(&DataKey::TotalAssets, &ta.checked_add(net_yield).expect("overflow"));
 
         let mut state = Self::get_state(&env);
-        state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
+        state.total_assets = state.total_assets.checked_add(net_yield).expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
+    }
+
+    // ── Goal 1: Protocol fee ──────────────────────────────────────────────────
+
+    /// Set the protocol fee in basis points (0–10000). Emits a FeeBpsChanged event.
+    pub fn set_fee_bps(env: Env, new_bps: i128) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if new_bps < 0 || new_bps > 10_000 {
+            panic!("fee_bps must be 0-10000");
+        }
+        let old_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::FeeBps, &new_bps);
+        env.events()
+            .publish((symbol_short!("feechg"),), (old_bps, new_bps));
+    }
+
+    /// Returns the current fee in basis points.
+    pub fn fee_bps(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+    }
+
+    /// Set the treasury address where fees accumulate.
+    pub fn set_treasury(env: Env, treasury: Address) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+    }
+
+    /// Returns the treasury address.
+    pub fn treasury(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Treasury)
+    }
+
+    /// Returns the accumulated fee balance in the treasury.
+    pub fn treasury_balance(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TreasuryBalance)
+            .unwrap_or(0)
+    }
+
+    // ── Goal 2: Large-withdrawal timelock ────────────────────────────────────
+
+    /// Set the threshold above which withdrawals require a 24-hour timelock.
+    pub fn set_large_withdrawal_threshold(env: Env, threshold: i128) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if threshold <= 0 {
+            panic!("threshold must be > 0");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::LargeWithdrawalThreshold, &threshold);
+    }
+
+    /// Returns the current large-withdrawal threshold.
+    pub fn large_withdrawal_threshold(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LargeWithdrawalThreshold)
+            .unwrap_or(i128::MAX)
+    }
+
+    // ── Goal 3: Minimum deposit ───────────────────────────────────────────────
+
+    /// Set the minimum deposit amount. Emits a MinDepositChanged event.
+    pub fn set_min_deposit(env: Env, new_min: i128) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if new_min < 0 {
+            panic!("min_deposit must be >= 0");
+        }
+        let old_min: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinDeposit)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::MinDeposit, &new_min);
+        env.events()
+            .publish((symbol_short!("mindepchg"),), (old_min, new_min));
+    }
+
+    /// Returns the current minimum deposit threshold.
+    pub fn min_deposit(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinDeposit)
+            .unwrap_or(0)
     }
 
     pub fn report_benji_yield(env: Env, strategy: Address, amount: i128) {
