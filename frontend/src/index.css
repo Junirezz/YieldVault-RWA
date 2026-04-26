@@ -11,8 +11,11 @@
   --accent-purple: #7000ff;
   
   --text-primary: #ffffff;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
+  --text-secondary: #a8b8cc;
+  --text-tertiary: #8494a7;
+
+  --text-warning: #f59e0b;
+  --accent-green: #22c55e;
 
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-display: "Avenir Next", "Inter", "Segoe UI", system-ui, sans-serif;
@@ -91,8 +94,11 @@
   --accent-purple: #7e22ce;
   
   --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-tertiary: #64748b;
+  --text-secondary: #40505f;
+  --text-tertiary: #5a6a7d;
+
+  --text-warning: #b45309;
+  --accent-green: #16a34a;
 
   --shadow-glow: 0 0 20px rgba(2, 132, 199, 0.1);
   --shadow-glass: 0 8px 32px 0 rgba(15, 23, 42, 0.1);
@@ -650,6 +656,22 @@ button {
 
 .animate-glow {
   animation: puiseGlow 3s infinite;
+}
+
+/* ── Respect reduced motion preference (WCAG 2.3.3) ────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-glow {
+    animation: none;
+  }
 }
 
 /* Form Elements */

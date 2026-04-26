@@ -220,14 +220,16 @@ const Navbar: FC<NavbarProps> = ({
             className="nav-mobile-toggle"
             style={{ display: "none" }}
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="mobile-slide-menu"
           >
             {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
       </div>
 
-      <div className={`nav-mobile-menu ${isMobileMenuOpen ? "is-open" : ""}`}>
+      <div id="mobile-slide-menu" className={`nav-mobile-menu ${isMobileMenuOpen ? "is-open" : ""}`} role="navigation" aria-label="Mobile navigation">
         <NavLink
           to="/"
           className={({ isActive }) => `nav-mobile-link ${isActive ? "active" : ""}`}

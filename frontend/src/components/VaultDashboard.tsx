@@ -48,6 +48,7 @@ const VaultCapWarning: React.FC<{ utilization: number; isReached: boolean }> = (
 
   return (
     <div
+      role="alert"
       className="glass-panel"
       style={{
         padding: "16px",
@@ -291,7 +292,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   };
 
   return (
-    <div className="vault-dashboard gap-lg">
+    <div className="vault-dashboard gap-lg" role="region" aria-label="Vault dashboard">
       <div className="vault-dashboard-stats">
         <div className="glass-panel vault-stats-panel">
           {error && (
