@@ -7,6 +7,7 @@ import SessionExpiryWarning from "./components/SessionExpiryWarning";
 import type { DisconnectReason } from "./components/WalletConnect";
 import { KeyboardShortcutProvider } from "./context/KeyboardShortcutContext";
 import ShortcutHelpModal from "./components/ShortcutHelpModal";
+import OnboardingWalkthrough from "./components/OnboardingWalkthrough";
 import { FeatureGate } from "./components/FeatureGate";
 import { FeatureFlagProvider } from "./context/FeatureFlagContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -109,6 +110,7 @@ function AppContent() {
               </SentryRoutes>
             </Suspense>
           </main>
+          <OnboardingWalkthrough />
           <ShortcutHelpModal />
           {sessionState === "warning" && walletAddress && (
             <SessionExpiryWarning
