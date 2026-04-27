@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
 import { corsMiddleware } from './middleware/cors';
+import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
 import { validateApiKey, registerApiKey } from './middleware/apiKeyAuth';
 import { GracefulShutdownHandler } from './gracefulShutdown';
@@ -154,6 +155,9 @@ app.use(globalLimiter);
 
 // Capture immutable admin audit records for every /admin request.
 app.use('/admin', createAdminAuditMiddleware());
+// ─── Geofencing (Issue #379) ─────────────────────────────────────────────────
+// Applied after rate-limiting so bots from blocked countries are still rate-limited.
+app.use(geofencingMiddleware);
 
 // ─── Health Check Endpoints (Issue #148) ────────────────────────────────────
 
