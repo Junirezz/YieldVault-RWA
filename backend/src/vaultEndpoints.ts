@@ -5,7 +5,7 @@ import { idempotencyStore, IdempotencyConflictError } from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
 import { requireFlag } from './featureFlags';
-import { emitTransactionEvent, TransactionEventType } from './webhookDelivery';
+import { allowlistMiddleware } from './middleware/allowlist';
 import crypto from 'crypto';
 
 const router = Router();
@@ -192,16 +192,18 @@ async function handleVaultOperation(
 /**
  * POST /api/v1/vault/deposits
  * Accepts optional Idempotency-Key header for deduplication.
+ * Requires wallet address to be on the private beta allowlist (Issue #375).
  */
-router.post('/deposits', (req: Request, res: Response) =>
+router.post('/deposits', allowlistMiddleware, (req: Request, res: Response) =>
   handleVaultOperation(req, res, 'deposit'),
 );
 
 /**
  * POST /api/v1/vault/withdrawals
  * Accepts optional Idempotency-Key header for deduplication.
+ * Requires wallet address to be on the private beta allowlist (Issue #375).
  */
-router.post('/withdrawals', (req: Request, res: Response) =>
+router.post('/withdrawals', allowlistMiddleware, (req: Request, res: Response) =>
   handleVaultOperation(req, res, 'withdrawal'),
 );
 

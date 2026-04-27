@@ -13,6 +13,12 @@ import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
 import { validateApiKey, registerApiKey } from './middleware/apiKeyAuth';
+import {
+  addAddress,
+  removeAddress,
+  listAddresses,
+  allowlistSize,
+} from './middleware/allowlist';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
@@ -333,6 +339,65 @@ app.get('/admin/cache/stats', validateApiKey, (_req: Request, res: Response) => 
   res.json({
     cache: getCacheStats(),
     timestamp: new Date().toISOString(),
+  });
+});
+
+// ─── Allowlist Admin Endpoints (Issue #375) ──────────────────────────────────
+
+/**
+ * POST /admin/allowlist/add
+ * Adds a wallet address to the private beta allowlist.
+ * Requires API key authentication.
+ * Body: { "walletAddress": "G..." }
+ */
+app.post('/admin/allowlist/add', validateApiKey, (req: Request, res: Response) => {
+  const { walletAddress } = req.body;
+  if (!walletAddress || typeof walletAddress !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
+    return;
+  }
+  const added = addAddress(walletAddress);
+  res.status(added ? 201 : 200).json({
+    message: added ? 'Wallet added to allowlist' : 'Wallet already in allowlist',
+    walletAddress: walletAddress.trim().toUpperCase(),
+    count: allowlistSize(),
+  });
+});
+
+/**
+ * DELETE /admin/allowlist/remove
+ * Removes a wallet address from the private beta allowlist.
+ * Requires API key authentication.
+ * Body: { "walletAddress": "G..." }
+ */
+app.delete('/admin/allowlist/remove', validateApiKey, (req: Request, res: Response) => {
+  const { walletAddress } = req.body;
+  if (!walletAddress || typeof walletAddress !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
+    return;
+  }
+  const removed = removeAddress(walletAddress);
+  if (!removed) {
+    res.status(404).json({ error: 'Wallet address not found in allowlist' });
+    return;
+  }
+  res.json({
+    message: 'Wallet removed from allowlist',
+    walletAddress: walletAddress.trim().toUpperCase(),
+    count: allowlistSize(),
+  });
+});
+
+/**
+ * GET /admin/allowlist
+ * Lists all wallet addresses on the allowlist.
+ * Requires API key authentication.
+ */
+app.get('/admin/allowlist', validateApiKey, (_req: Request, res: Response) => {
+  res.json({
+    addresses: listAddresses(),
+    count: allowlistSize(),
+    enabled: process.env.ALLOWLIST_ENABLED !== 'false',
   });
 });
 
