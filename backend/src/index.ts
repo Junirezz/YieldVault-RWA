@@ -35,9 +35,7 @@ import {
   activeConnections,
   updateVaultMetrics,
 } from './metrics';
-import { sorobanCircuitBreaker } from './circuitBreaker';
-import { listAdminAuditLogs, recordAdminAuditLog } from './adminAudit';
-import { getPrismaRuntimeConfig, prisma } from './prisma';
+import { latencyMonitoringService } from './latencyMonitoring';
 
 declare global {
   namespace Express {
@@ -136,6 +134,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     activeConnections.dec();
     const duration = process.hrtime(start);
     const durationSeconds = duration[0] + duration[1] / 1e9;
+    const durationMs = durationSeconds * 1000; // Convert to milliseconds for SLO monitoring
 
     // Use the path pattern (e.g., /api/vault/:id) instead of the actual path if available
     const route = req.route ? req.route.path : req.path;
@@ -147,6 +146,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+
+    // Record latency for SLO monitoring (only track successful requests)
+    if (res.statusCode < 400) {
+      latencyMonitoringService.recordLatency(route, durationMs);
+    }
   });
 
   next();
@@ -173,6 +177,22 @@ app.get('/metrics', async (_req: Request, res: Response) => {
   } catch (err) {
     res.status(500).end(err);
   }
+});
+
+/**
+ * GET /admin/latency-status
+ * Returns latency monitoring status and metrics (admin endpoint)
+ * Requires API key authentication
+ */
+app.get('/admin/latency-status', validateApiKey, (_req: Request, res: Response) => {
+  const status = latencyMonitoringService.getStatus();
+  const detailedMetrics = latencyMonitoringService.getDetailedMetrics();
+  
+  res.json({
+    status,
+    metrics: detailedMetrics,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 /**
@@ -704,6 +724,9 @@ const metricsInterval =
 if (process.env.NODE_ENV !== 'test') {
   pollVaultMetrics(); // Initial call
 }
+
+// Start latency monitoring
+latencyMonitoringService.startMonitoring();
 
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
