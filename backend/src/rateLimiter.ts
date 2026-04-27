@@ -188,11 +188,17 @@ export function buildRedisKey(routePrefix: string, identifier: string): string {
  */
 export function createLimiter(config: EndpointLimiterConfig): RequestHandler {
   const client = redisClientManager.getClient();
-  const usingRedis = client !== null;
+  const redisConfigured = client !== null;
+  const hasRedisClient =
+    redisConfigured && typeof (client as unknown as { call?: unknown }).call === 'function';
+  const usingRedis = hasRedisClient;
 
   const store = usingRedis
     ? new RedisStore({
-        sendCommand: (...args: string[]) => client.call(...args) as Promise<unknown>,
+        sendCommand: (...args: string[]) => {
+          const [command, ...commandArgs] = args;
+          return client.call(command, ...commandArgs) as unknown as Promise<any>;
+        },
         prefix: `rl:${config.routePrefix}:`,
       })
     : undefined;
@@ -205,7 +211,7 @@ export function createLimiter(config: EndpointLimiterConfig): RequestHandler {
     keyGenerator: (req: Request) => extractRateLimitKey(req),
     skip: (_req: Request) => {
       // Fail-open: bypass enforcement when Redis was configured but is unavailable
-      if (usingRedis && !redisClientManager.isReady()) {
+      if (redisConfigured && !redisClientManager.isReady()) {
         return true;
       }
       return false;

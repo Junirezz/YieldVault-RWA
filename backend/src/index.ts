@@ -16,6 +16,16 @@ import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
 import listRouter from './listEndpoints';
+import { createAdminAuditMiddleware, getAuditLogMetrics, getAuditLogs } from './auditLog';
+import {
+  getWebhookDeliveryMetrics,
+  listWebhookDeliveries,
+  listWebhookEndpoints,
+  registerWebhookEndpoint,
+  updateWebhookEndpoint,
+} from './webhookDelivery';
+import { getPrismaConfig, getPrismaHealth } from './prismaClient';
+import { getJobHealthStatus, getJobMetrics } from './jobGovernance';
 import {
   register,
   httpRequestCount,
@@ -70,11 +80,12 @@ const globalLimiter = rateLimit({
     return req.path === '/health' || req.path === '/ready';
   },
   handler: (req: Request, res: Response) => {
+    const retryAfter = req.rateLimit?.resetTime ? Number(req.rateLimit.resetTime) : undefined;
     res.status(429).json({
       error: 'Too many requests',
       status: 429,
       message: 'Rate limit exceeded. Please try again later.',
-      retryAfter: req.rateLimit?.resetTime,
+      retryAfter,
     });
   },
 });
@@ -91,11 +102,12 @@ const apiLimiter = rateLimit({
     return req.headers['x-api-key'] as string || req.ip || 'unknown';
   },
   handler: (req: Request, res: Response) => {
+    const retryAfter = req.rateLimit?.resetTime ? Number(req.rateLimit.resetTime) : undefined;
     res.status(429).json({
       error: 'API rate limit exceeded',
       status: 429,
       message: 'Too many API requests. Please try again later.',
-      retryAfter: req.rateLimit?.resetTime,
+      retryAfter,
     });
   },
 });
@@ -140,6 +152,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.use(globalLimiter);
 
+// Capture immutable admin audit records for every /admin request.
+app.use('/admin', createAdminAuditMiddleware());
+
 // ─── Health Check Endpoints (Issue #148) ────────────────────────────────────
 
 /**
@@ -164,6 +179,7 @@ app.get('/metrics', async (_req: Request, res: Response) => {
  */
 app.get('/health', async (_req: Request, res: Response) => {
   const dbHealth = await getDatabaseHealth();
+  const prismaHealth = await getPrismaHealth();
   const circuitSnapshot = sorobanCircuitBreaker.toHealthSnapshot();
   const health = {
     status: 'healthy',
@@ -176,6 +192,8 @@ app.get('/health', async (_req: Request, res: Response) => {
       stellarRpc: getStellarRpcHealth(),
       databasePrimary: dbHealth.primary,
       databaseReplica: dbHealth.replica,
+      prisma: prismaHealth,
+      jobs: getJobHealthStatus(),
     },
     sorobanCircuitBreaker: circuitSnapshot,
   };
@@ -195,6 +213,7 @@ app.get('/health', async (_req: Request, res: Response) => {
  */
 app.get('/ready', async (_req: Request, res: Response) => {
   const dbHealth = await getDatabaseHealth();
+  const prismaHealth = await getPrismaHealth();
   const readiness = {
     ready: true,
     timestamp: new Date().toISOString(),
@@ -202,6 +221,7 @@ app.get('/ready', async (_req: Request, res: Response) => {
       cache: checkCacheDependency(),
       stellarRpc: checkStellarRpcDependency(),
       database: dbHealth.primary === 'up',
+      prisma: prismaHealth === 'up',
     },
   };
 
@@ -209,7 +229,8 @@ app.get('/ready', async (_req: Request, res: Response) => {
   const isReady =
     readiness.dependencies.cache &&
     readiness.dependencies.stellarRpc &&
-    readiness.dependencies.database;
+    readiness.dependencies.database &&
+    readiness.dependencies.prisma;
 
   readiness.ready = isReady;
 
@@ -230,6 +251,9 @@ app.get('/api/vault/summary', (req: Request, res: Response) => {
 const apiV1 = express.Router();
 app.use('/api/v1', apiV1);
 
+// Backward-compatible unversioned list endpoints used by existing clients/tests.
+app.use('/api', listRouter);
+
 // Mount routers to v1
 apiV1.use('/vault', vaultRouter);
 apiV1.use('/', listRouter);
@@ -239,7 +263,7 @@ apiV1.use('/', listRouter);
  * Demonstrates rate limiting per API key and response caching
  */
 app.get(
-  '/api/vault/summary',
+  '/api/v1/vault/summary',
   apiLimiter,
   cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
   (_req: Request, res: Response) => {
@@ -327,6 +351,178 @@ app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Respons
   });
 });
 
+/**
+ * POST /admin/webhooks - register webhook endpoint for transaction events
+ */
+app.post('/admin/webhooks', validateApiKey, (req: Request, res: Response) => {
+  try {
+    const { url, eventTypes, enabled, secret } = req.body;
+    if (!url || typeof url !== 'string') {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: 'url is required and must be a string',
+      });
+      return;
+    }
+
+    const endpoint = registerWebhookEndpoint({
+      url,
+      eventTypes,
+      enabled,
+      secret,
+    });
+
+    res.status(201).json({
+      message: 'Webhook endpoint registered',
+      endpoint,
+    });
+  } catch (error) {
+    res.status(422).json({
+      error: 'Unprocessable Entity',
+      status: 422,
+      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
+    });
+  }
+});
+
+/**
+ * PATCH /admin/webhooks/:id - update webhook endpoint
+ */
+app.patch('/admin/webhooks/:id', validateApiKey, (req: Request, res: Response) => {
+  try {
+    const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
+    if (!endpoint) {
+      res.status(404).json({
+        error: 'Not Found',
+        status: 404,
+        message: 'Webhook endpoint not found',
+      });
+      return;
+    }
+
+    res.status(200).json({
+      message: 'Webhook endpoint updated',
+      endpoint,
+    });
+  } catch (error) {
+    res.status(422).json({
+      error: 'Unprocessable Entity',
+      status: 422,
+      message: error instanceof Error ? error.message : 'Failed to update webhook endpoint',
+    });
+  }
+});
+
+/**
+ * GET /admin/webhooks - list webhook endpoints
+ */
+app.get('/admin/webhooks', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    endpoints: listWebhookEndpoints(),
+    metrics: getWebhookDeliveryMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/webhooks/deliveries - list recent webhook delivery attempts
+ */
+app.get('/admin/webhooks/deliveries', validateApiKey, (req: Request, res: Response) => {
+  const limit = parseInt(String(req.query.limit || '100'), 10);
+  res.status(200).json({
+    deliveries: listWebhookDeliveries(limit),
+    metrics: getWebhookDeliveryMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/audit/logs - list admin activity logs
+ */
+app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
+  const statusCode = req.query.statusCode ? parseInt(String(req.query.statusCode), 10) : undefined;
+  const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+
+  const logs = getAuditLogs({
+    actor: req.query.actor ? String(req.query.actor) : undefined,
+    action: req.query.action ? String(req.query.action) : undefined,
+    path: req.query.path ? String(req.query.path) : undefined,
+    statusCode,
+    limit,
+  });
+
+  res.status(200).json({
+    logs,
+    metrics: getAuditLogMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/prisma/config - operational prisma runtime settings
+ */
+app.get('/admin/prisma/config', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    config: getPrismaConfig(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/jobs/monitor - structured JSON for background jobs/webhook workers
+ */
+app.get('/admin/jobs/monitor', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    jobHealth: getJobHealthStatus(),
+    jobs: getJobMetrics(),
+    webhooks: getWebhookDeliveryMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/jobs/dashboard - lightweight HTML dashboard for operators
+ */
+app.get('/admin/jobs/dashboard', validateApiKey, (_req: Request, res: Response) => {
+  const jobMetrics = getJobMetrics();
+  const webhookMetrics = getWebhookDeliveryMetrics();
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>YieldVault Job Dashboard</title>
+        <style>
+          body { font-family: 'Segoe UI', sans-serif; margin: 2rem; background: #f6f8fa; color: #0f172a; }
+          h1 { margin-bottom: 1rem; }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+          .card { background: #ffffff; border: 1px solid #dbe3ec; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 10px rgba(15,23,42,0.05); }
+          .label { color: #64748b; font-size: 0.9rem; margin-bottom: 0.25rem; }
+          .value { font-size: 1.4rem; font-weight: 600; }
+          pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow: auto; }
+        </style>
+      </head>
+      <body>
+        <h1>Background Job Monitoring</h1>
+        <div class="grid">
+          <div class="card"><div class="label">Job Health</div><div class="value">${getJobHealthStatus()}</div></div>
+          <div class="card"><div class="label">Dead Letters</div><div class="value">${jobMetrics.totalDeadLetters}</div></div>
+          <div class="card"><div class="label">Webhook Endpoints</div><div class="value">${webhookMetrics.totalEndpoints}</div></div>
+          <div class="card"><div class="label">Webhook Failures</div><div class="value">${webhookMetrics.failed}</div></div>
+        </div>
+        <h2>Job Metrics</h2>
+        <pre>${JSON.stringify(jobMetrics, null, 2)}</pre>
+        <h2>Webhook Metrics</h2>
+        <pre>${JSON.stringify(webhookMetrics, null, 2)}</pre>
+      </body>
+    </html>
+  `);
+});
+
 // ─── Vault Metrics Poll Cycle ────────────────────────────────────────────────
 
 /**
@@ -348,8 +544,14 @@ const pollVaultMetrics = () => {
 
 // Start poll cycle every 60 seconds (configurable)
 const METRICS_POLL_INTERVAL = parseInt(process.env.METRICS_POLL_INTERVAL_MS || '60000', 10);
-const metricsInterval = setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
-pollVaultMetrics(); // Initial call
+const metricsInterval =
+  process.env.NODE_ENV === 'test'
+    ? null
+    : setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
+
+if (process.env.NODE_ENV !== 'test') {
+  pollVaultMetrics(); // Initial call
+}
 
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
@@ -448,30 +650,38 @@ app.use((req: Request, res: Response) => {
 
 // ─── Server Start ───────────────────────────────────────────────────────────
 
-const server = app.listen(port, () => {
-  logger.log('info', '🚀 YieldVault Backend started', {
-    port,
-    environment: nodeEnv,
-    logLevel,
-    drainTimeout,
-    cacheMetricsTtl: cacheVaultMetricsTtl,
+if (process.env.NODE_ENV !== 'test') {
+  const server = app.listen(port, () => {
+    logger.log('info', '🚀 YieldVault Backend started', {
+      port,
+      environment: nodeEnv,
+      logLevel,
+      drainTimeout,
+      cacheMetricsTtl: cacheVaultMetricsTtl,
+    });
+    logger.log('info', '📊 Health check: http://localhost:' + port + '/health');
+    logger.log('info', '✅ Ready check: http://localhost:' + port + '/ready');
   });
-  logger.log('info', '📊 Health check: http://localhost:' + port + '/health');
-  logger.log('info', '✅ Ready check: http://localhost:' + port + '/ready');
-});
 
-// Register graceful shutdown handler
-const shutdownHandler = new GracefulShutdownHandler(drainTimeout);
-shutdownHandler.register(server);
+  // Register graceful shutdown handler
+  const shutdownHandler = new GracefulShutdownHandler(drainTimeout);
+  shutdownHandler.register(server);
 
-// Register database shutdown task
-shutdownHandler.onShutdown(async () => {
-  await db.shutdown();
-});
+  if (metricsInterval) {
+    shutdownHandler.onShutdown(async () => {
+      clearInterval(metricsInterval);
+    });
+  }
 
-// Flush and shut down the OTel SDK on process exit
-shutdownHandler.onShutdown(async () => {
-  await shutdownTracing();
-});
+  // Register database shutdown task
+  shutdownHandler.onShutdown(async () => {
+    await db.shutdown();
+  });
+
+  // Flush and shut down the OTel SDK on process exit
+  shutdownHandler.onShutdown(async () => {
+    await shutdownTracing();
+  });
+}
 
 export default app;

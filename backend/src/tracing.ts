@@ -42,10 +42,7 @@ export function initTracing(): void {
     }),
     traceExporter: exporter,
     instrumentations: [
-      new HttpInstrumentation({
-        // Propagate W3C trace context on all outbound HTTP (covers Soroban RPC)
-        headersToPropagate: ['traceparent', 'tracestate'],
-      }),
+      new HttpInstrumentation(),
       new ExpressInstrumentation(),
       new PrismaInstrumentation(),
     ],

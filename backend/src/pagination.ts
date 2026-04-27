@@ -123,6 +123,8 @@ export function parsePaginationQuery(
     const page = parseInt(req.query.page as string, 10);
     if (!isNaN(page) && page > 0) {
       query.page = page;
+    } else {
+      query.page = 1;
     }
   }
 
@@ -160,15 +162,28 @@ export function paginateWithCursor<T>(
   query: PaginationQuery,
   getCursor: (item: T) => string
 ): { data: T[]; pagination: PaginationMeta } {
+  if (query.page !== undefined) {
+    return paginateWithOffset(items, query);
+  }
+
   const limit = query.limit || DEFAULT_PAGINATION_CONFIG.defaultLimit;
   let startIndex = 0;
 
   // Find starting position based on cursor
   if (query.cursor) {
     const cursorIndex = items.findIndex((item) => getCursor(item) === query.cursor);
-    if (cursorIndex !== -1) {
-      startIndex = cursorIndex + 1;
+    if (cursorIndex === -1) {
+      return {
+        data: [],
+        pagination: {
+          count: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
     }
+
+    startIndex = cursorIndex + 1;
   }
 
   // Extract page items

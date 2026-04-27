@@ -75,7 +75,7 @@ describe('Backend API', () => {
 
   describe('Rate Limiting - API Endpoints', () => {
     it('should include rate limit headers in response', async () => {
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       expect(response.status).toBe(200);
       expect(response.headers).toHaveProperty('ratelimit-limit');
@@ -88,7 +88,7 @@ describe('Backend API', () => {
       // It attempts to exceed the API rate limit
       const requests = Array(35).fill(null); // More than configured limit
       const results = await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() => request(app).get('/api/v1/vault/summary'))
       );
 
       expect(results.some((r) => r.status === 429)).toBe(true);
@@ -98,10 +98,10 @@ describe('Backend API', () => {
       // Make multiple requests to trigger rate limit
       const requests = Array(35).fill(null);
       await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() => request(app).get('/api/v1/vault/summary'))
       );
 
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       if (response.status === 429) {
         expect(response.body).toHaveProperty('error');
@@ -127,7 +127,7 @@ describe('Backend API', () => {
     it('should support per-user rate limiting with API key (backward compat)', async () => {
       // Test that x-api-key header is still accepted as fallback key
       const response = await request(app)
-        .get('/api/vault/summary')
+        .get('/api/v1/vault/summary')
         .set('x-api-key', 'test-key-123');
 
       expect([200, 429]).toContain(response.status);
@@ -166,7 +166,7 @@ describe('Backend API', () => {
     });
 
     it('should not expose sensitive info in error responses', async () => {
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       // Ensure no stack traces in error responses in production-like environment
       if (response.status >= 500) {

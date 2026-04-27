@@ -5,6 +5,7 @@ import { idempotencyStore, IdempotencyConflictError } from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
 import { requireFlag } from './featureFlags';
+import { emitTransactionEvent, TransactionEventType } from './webhookDelivery';
 import crypto from 'crypto';
 
 const router = Router();
@@ -79,12 +80,38 @@ async function handleVaultOperation(
         timestamp: new Date().toISOString(),
       };
 
+      // Fire webhook delivery in background so transaction API latency is not blocked.
+      const eventType: TransactionEventType =
+        type === 'deposit' ? 'transaction.deposit.created' : 'transaction.withdrawal.created';
+      void emitTransactionEvent(eventType, {
+        transactionId: body.id,
+        amount: String(body.amount),
+        asset: String(body.asset),
+        walletAddress: String(body.walletAddress),
+        transactionHash: String(body.transactionHash),
+        status: String(body.status),
+        timestamp: String(body.timestamp),
+      });
+
       span.setAttributes({ 'vault.txHash': txHash });
 
       // Post-confirmation email (fire-and-forget)
-      setTimeout(async () => {
+      const schedulePostConfirmation = process.env.NODE_ENV === 'test'
+        ? (fn: () => Promise<void>) => {
+            void fn();
+          }
+        : (fn: () => Promise<void>) => {
+            setTimeout(() => {
+              void fn();
+            }, 100);
+          };
+
+      schedulePostConfirmation(async () => {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          const confirmationDelayMs = process.env.NODE_ENV === 'test' ? 0 : 5000;
+          if (confirmationDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, confirmationDelayMs));
+          }
           logger.log('info', `${type} confirmed on-chain`, {
             txHash,
             walletAddress,
@@ -110,7 +137,7 @@ async function handleVaultOperation(
             traceId: getCurrentTraceId(),
           });
         }
-      }, 100);
+      });
 
       return { statusCode: 201, body };
     });
@@ -132,9 +159,9 @@ async function handleVaultOperation(
     return res.status(result.statusCode).json(result.body);
   } catch (err) {
     if (err instanceof IdempotencyConflictError) {
-      return res.status(422).json({
-        error: 'Unprocessable Entity',
-        status: 422,
+      return res.status(409).json({
+        error: 'Conflict',
+        status: 409,
         message: err.message,
       });
     }

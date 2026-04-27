@@ -8,3 +8,5 @@ dotenv.config({
 
 // Set test environment
 process.env.NODE_ENV = 'test';
+process.env.OTEL_ENABLED = 'false';
+process.env.STELLAR_RPC_URL = process.env.STELLAR_RPC_URL || 'http://localhost:8000/rpc';
