@@ -831,9 +831,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                     }}
                     type="submit"
                     disabled={
-                      isSubmitDisabled ||
-                      isEstimating ||
-                      (tab === "deposit" && isValidAmount && needsApproval(enteredAmount) && approvalStatus !== "confirmed")
+                      isSubmitDisabled || isEstimating
                     }
                   >
                     {isProcessing === tab ? (
