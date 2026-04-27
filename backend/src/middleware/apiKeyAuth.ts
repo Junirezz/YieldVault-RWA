@@ -1,6 +1,14 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
+declare global {
+  namespace Express {
+    interface Request {
+      authApiKeyHash?: string;
+    }
+  }
+}
+
 interface ApiKeyMetadata {
   createdAt: Date;
   rotatedAt?: Date;
@@ -34,6 +42,8 @@ export function validateApiKey(
     });
     return;
   }
+
+  req.authApiKeyHash = hash;
 
   next();
 }

@@ -162,12 +162,12 @@ export function paginateWithCursor<T>(
   query: PaginationQuery,
   getCursor: (item: T) => string
 ): { data: T[]; pagination: PaginationMeta } {
-  if (query.page !== undefined) {
-    return paginateWithOffset(items, query);
-  }
-
   const limit = query.limit || DEFAULT_PAGINATION_CONFIG.defaultLimit;
   let startIndex = 0;
+
+  if (query.page && query.page > 0) {
+    startIndex = (query.page - 1) * limit;
+  }
 
   // Find starting position based on cursor
   if (query.cursor) {
@@ -179,10 +179,16 @@ export function paginateWithCursor<T>(
           count: 0,
           hasNextPage: false,
           hasPrevPage: false,
+          ...(query.page
+            ? {
+                currentPage: Math.max(1, query.page),
+                total: items.length,
+                totalPages: Math.max(1, Math.ceil(items.length / limit)),
+              }
+            : {}),
         },
       };
     }
-
     startIndex = cursorIndex + 1;
   }
 
@@ -196,6 +202,13 @@ export function paginateWithCursor<T>(
     count: data.length,
     hasNextPage: hasMore,
     hasPrevPage: startIndex > 0,
+    ...(query.page
+      ? {
+          currentPage: query.page,
+          total: items.length,
+          totalPages: Math.max(1, Math.ceil(items.length / limit)),
+        }
+      : {}),
   };
 
   if (hasMore && data.length > 0) {
