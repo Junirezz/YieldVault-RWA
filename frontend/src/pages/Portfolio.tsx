@@ -23,13 +23,11 @@ import { useUrlState } from "../hooks/useUrlState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
 import { useToast } from "../context/ToastContext";
 import YieldBreakdownChart from "../components/YieldBreakdownChart";
+import { formatCurrency, formatNumber } from "../lib/formatters";
 
 interface PortfolioProps {
   walletAddress: string | null;
 }
-
-import { formatCurrency, formatNumber } from "../lib/formatters";
-import HelpIcon from "../components/ui/HelpIcon";
 
 const columns: DataTableColumn<PortfolioHolding>[] = [
   {
