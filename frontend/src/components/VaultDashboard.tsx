@@ -855,7 +855,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         Estimating fee...
                       </>
                     ) : tab === "deposit" ? (
-                      isCapReached ? "Vault is full" : "Deposit"
+                      isCapReached ? "Vault is full" : "Approve & Deposit"
                     ) : (
                       "Withdraw Funds"
                     )}
