@@ -65,12 +65,14 @@ export const corsOptions: CorsOptions = {
 export const corsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   cors(corsOptions)(req, res, (err) => {
     if (err) {
-      return res.status(403).json({
+      res.status(403).json({
         error: 'Forbidden',
         status: 403,
         message: 'CORS policy: This origin is not allowed access.',
       });
+      return;
     }
     next();
+    return;
   });
 };

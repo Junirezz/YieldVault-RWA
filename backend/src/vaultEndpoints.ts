@@ -5,6 +5,8 @@ import { idempotencyStore, IdempotencyConflictError } from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
 import { requireFlag } from './featureFlags';
+import { referralService } from './referralService';
+import { getPrismaClient } from './prismaClient';
 import crypto from 'crypto';
 
 const router = Router();
@@ -39,7 +41,7 @@ async function handleVaultOperation(
     (req.headers['idempotency-key'] as string | undefined) ||
     (req.headers['x-idempotency-key'] as string | undefined);
 
-  const { amount, asset, walletAddress, email } = req.body;
+  const { amount, asset, walletAddress, email, referralCode } = req.body;
 
   if (!amount || !asset || !walletAddress) {
     return res.status(400).json({
@@ -66,6 +68,22 @@ async function handleVaultOperation(
           throw err;
         }
         throw err;
+      }
+
+      // Persist transaction to DB
+      const prisma = getPrismaClient();
+      await prisma.transaction.create({
+        data: {
+          user: walletAddress,
+          amount: String(amount),
+          type,
+          referralCode,
+        },
+      });
+
+      // Handle referral recording on deposit
+      if (type === 'deposit') {
+        await referralService.recordDeposit(walletAddress, referralCode);
       }
 
       const body = {
