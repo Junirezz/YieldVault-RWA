@@ -5,7 +5,7 @@ import SessionExpiryWarning from "./SessionExpiryWarning";
 // Mock the useTranslation hook
 vi.mock("../i18n", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: any) => {
+    t: (key: string, options?: { minutes?: number }) => {
       if (key === "session.warning.title") return "Session Expiring Soon";
       if (key === "session.warning.message") return `Your wallet session will expire in ${options?.minutes || 5} minutes. Reconnect to continue without interruption.`;
       if (key === "session.warning.reconnect") return "Reconnect";

@@ -61,8 +61,14 @@ export async function getSharePrice(): Promise<number> {
     };
   });
 
+  type TxSourceAccount = {
+    accountId: () => string;
+    sequenceNumber: () => string;
+    incrementSequenceNumber: () => void;
+  };
+
   const tx = new TransactionBuilder(
-    sourceAccount as any,
+    sourceAccount as TxSourceAccount,
     {
       fee: BASE_FEE,
       networkPassphrase: networkConfig.networkPassphrase,
