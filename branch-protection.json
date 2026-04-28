@@ -9,5 +9,6 @@
     "require_code_owner_reviews": false,
     "required_approving_review_count": 1
   },
-  "restrictions": null
+  "restrictions": null,
+  "allow_auto_merge": true
 }
