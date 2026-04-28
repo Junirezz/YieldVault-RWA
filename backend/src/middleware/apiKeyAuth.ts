@@ -5,13 +5,17 @@ declare global {
   namespace Express {
     interface Request {
       authApiKeyHash?: string;
+      authApiKeyRole?: ApiKeyRole;
     }
   }
 }
 
+export type ApiKeyRole = 'admin' | 'super-admin';
+
 interface ApiKeyMetadata {
   createdAt: Date;
   rotatedAt?: Date;
+  role: ApiKeyRole;
 }
 
 const API_KEYS = new Map<string, ApiKeyMetadata>(); // hash -> key metadata
@@ -34,8 +38,9 @@ export function validateApiKey(
 
   const providedKey = match[1];
   const hash = hashApiKey(providedKey);
+  const metadata = API_KEYS.get(hash);
 
-  if (!API_KEYS.has(hash)) {
+  if (!metadata) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid API key',
@@ -44,6 +49,7 @@ export function validateApiKey(
   }
 
   req.authApiKeyHash = hash;
+  req.authApiKeyRole = metadata.role;
 
   next();
 }
@@ -52,9 +58,15 @@ export function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
-export function registerApiKey(key: string): string {
+export function registerApiKey(
+  key: string,
+  options: { role?: ApiKeyRole } = {},
+): string {
   const hash = hashApiKey(key);
-  API_KEYS.set(hash, { createdAt: new Date() });
+  API_KEYS.set(hash, {
+    createdAt: new Date(),
+    role: options.role || 'admin',
+  });
   return hash;
 }
 
@@ -74,7 +86,28 @@ export function rotateApiKey(oldHash: string, newKey: string): string | null {
   API_KEYS.set(newHash, {
     createdAt: metadata.createdAt,
     rotatedAt: new Date(),
+    role: metadata.role,
   });
 
   return newHash;
+}
+
+export function hasRequiredApiKeyRole(
+  req: Request,
+  requiredRole: ApiKeyRole,
+): boolean {
+  const role = req.authApiKeyRole || 'admin';
+  if (requiredRole === 'admin') {
+    return true;
+  }
+
+  return role === 'super-admin';
+}
+
+export function normalizeApiKeyRole(raw: unknown): ApiKeyRole | null {
+  if (raw === 'admin' || raw === 'super-admin') {
+    return raw;
+  }
+
+  return null;
 }

@@ -1,6 +1,16 @@
 import type { NextFunction, Request, Response } from 'express';
 import crypto from 'crypto';
 
+declare global {
+  namespace Express {
+    interface Request {
+      adminAuditAction?: string;
+      adminAuditActor?: string;
+      adminAuditMetadata?: Record<string, unknown>;
+    }
+  }
+}
+
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -12,6 +22,7 @@ export interface AuditLogEntry {
   durationMs: number;
   ip: string;
   correlationId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface AuditLogFilters {
@@ -38,11 +49,12 @@ export function createAdminAuditMiddleware() {
         actor,
         method: req.method,
         path: req.originalUrl || req.path,
-        action: buildAction(req.method, req.path),
+        action: buildAction(req),
         statusCode: res.statusCode,
         durationMs: Date.now() - startedAt,
         ip: req.ip || 'unknown',
         correlationId: req.header('x-correlation-id') || undefined,
+        metadata: req.adminAuditMetadata,
       };
 
       entries.unshift(entry);
@@ -97,11 +109,32 @@ export function resetAuditLogs() {
   entries.length = 0;
 }
 
-function buildAction(method: string, path: string): string {
-  return `${method.toUpperCase()} ${path}`;
+function buildAction(req: Request): string {
+  if (req.adminAuditAction) {
+    return req.adminAuditAction;
+  }
+
+  return `${req.method.toUpperCase()} ${req.path}`;
 }
 
 function resolveActor(req: Request): string {
+  if (req.adminAuditActor) {
+    return req.adminAuditActor;
+  }
+
+  const explicitActor =
+    req.header('x-admin-address') ||
+    req.header('x-admin-id') ||
+    req.header('x-wallet-address');
+  if (explicitActor) {
+    return explicitActor;
+  }
+
+  const actionOverride = req.adminAuditAction;
+  if (actionOverride) {
+    return req.adminAuditActor || 'unknown';
+  }
+
   const authHeader = req.header('authorization');
 
   if (!authHeader) {
