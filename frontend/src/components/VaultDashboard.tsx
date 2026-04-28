@@ -21,12 +21,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import { useTokenAllowance } from "../hooks/useTokenAllowance";
+import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { AlertTriangle } from "./icons";
-import HelpIcon from "./ui/HelpIcon";
 import { EarningsCalculator } from "./EarningsCalculator/EarningsCalculator";
+
+type TransactionTab = "deposit" | "withdraw";
+type TransactionStep = "amount" | "review" | "result";
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -200,14 +203,12 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount]);
 
-  const { feeXlm, isEstimating, isHighFee } = useFeeEstimate(
+  const { isEstimating } = useFeeEstimate(
     walletAddress,
     amount,
     activeTab
   );
 
-  const { data: holdings = [] } = usePortfolioHoldings(walletAddress);
-  const totalShares = holdings.reduce((sum, h) => sum + h.shares, 0);
   const hasNoPositions = holdings.length === 0 || totalShares === 0;
 
   useEffect(() => {

@@ -6,11 +6,11 @@ import { ToastProvider } from "../context/ToastContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import * as vaultApi from "../lib/vaultApi";
-import { VaultSummary } from "../lib/vaultApi";
+import type { VaultSummary } from "../lib/vaultApi";
 import * as portfolioHooks from "../hooks/usePortfolioData";
 import * as vaultDataHooks from "../hooks/useVaultData";
-import { UseQueryResult } from "@tanstack/react-query";
-import { PortfolioHolding } from "../lib/portfolioApi";
+import type { UseQueryResult } from "@tanstack/react-query";
+import type { PortfolioHolding } from "../lib/portfolioApi";
 
 vi.mock("../lib/vaultApi", async (importOriginal) => {
   const actual = await importOriginal<typeof vaultApi>();
