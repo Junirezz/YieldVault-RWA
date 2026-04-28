@@ -7,10 +7,9 @@ import {
   ShieldCheck, 
   TrendingUp, 
   Wallet as WalletIcon, 
-  Loader2, 
+  Loader2,
   Share2
 } from "./icons";
-import HelpIcon from "./ui/HelpIcon";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
@@ -21,15 +20,64 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import { useTokenAllowance } from "../hooks/useTokenAllowance";
-import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { AlertTriangle } from "./icons";
-import { EarningsCalculator } from "./EarningsCalculator/EarningsCalculator";
+import HelpIcon from "./ui/HelpIcon";
 
+/**
+ * Valid transaction tabs in the vault dashboard.
+ */
 type TransactionTab = "deposit" | "withdraw";
+
+/**
+ * Current step in the transaction wizard flow.
+ */
 type TransactionStep = "amount" | "review" | "result";
+
+/**
+ * Visual indicator for the 3-step transaction wizard.
+ * Shows progress through Amount, Review, and Result stages.
+ */
+const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep }) => {
+  const steps = [
+    { id: "amount", label: "Amount" },
+    { id: "review", label: "Review" },
+    { id: "result", label: "Result" },
+  ];
+
+  const getStepStatus = (stepId: TransactionStep) => {
+    const stepOrder: TransactionStep[] = ["amount", "review", "result"];
+    const currentIndex = stepOrder.indexOf(currentStep);
+    const stepIndex = stepOrder.indexOf(stepId);
+
+    if (stepIndex < currentIndex) return "completed";
+    if (stepIndex === currentIndex) return "active";
+    return "pending";
+  };
+
+  return (
+    <div className="step-indicator-container">
+      {steps.map((step, index) => {
+        const status = getStepStatus(step.id as TransactionStep);
+        return (
+          <React.Fragment key={step.id}>
+            <div className={`step-item ${status}`}>
+              <div className="step-number">
+                {status === "completed" ? <Check size={12} /> : index + 1}
+              </div>
+              <span className="step-label">{step.label}</span>
+            </div>
+            {index < steps.length - 1 && (
+              <div className={`step-line ${status === "completed" ? "completed" : ""}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -50,7 +98,6 @@ const VaultCapWarning: React.FC<{ utilization: number; isReached: boolean }> = (
 
   return (
     <div
-      role="alert"
       className="glass-panel"
       style={{
         padding: "16px",
@@ -145,13 +192,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     utilization,
     isCapWarning,
     isCapReached,
-    contractPaused,
   } = useVault();
-  const { data: holdings = [], isLoading: isHoldingsLoading } = usePortfolioHoldings(walletAddress);
-  const totalShares = holdings.reduce((sum, h) => sum + h.shares, 0);
   const toast = useToast();
-
-  const hasNoActivity = walletAddress && !isLoading && !isHoldingsLoading && totalShares === 0;
 
   const [activeTab, setActiveTab] = useState<TransactionTab>("deposit");
   const [amount, setAmount] = useState("");
@@ -194,7 +236,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const depositMutation = useDepositMutation();
   const withdrawMutation = useWithdrawMutation();
-  const { allowance, approvalStatus, needsApproval, approve, resetApproval } =
+  const { approvalStatus, needsApproval, approve, resetApproval } =
     useTokenAllowance(walletAddress);
 
   // Reset approval when deposit amount changes
@@ -203,13 +245,38 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount]);
 
-  const { isEstimating } = useFeeEstimate(
+  const { feeXlm, isEstimating, isHighFee } = useFeeEstimate(
     walletAddress,
     amount,
     activeTab
   );
 
-  const hasNoPositions = holdings.length === 0 || totalShares === 0;
+  const resetWizard = () => {
+    setAmount("");
+    setTouched(INITIAL_TOUCHED_STATE);
+    setCurrentStep("amount");
+    setTransactionResult(null);
+  };
+
+  const goToReview = () => {
+    const validationError = getAmountValidationError(
+      activeTab,
+      amount,
+      availableBalance,
+      isCapReached,
+    );
+
+    if (validationError) {
+      setTouched((previous) => ({ ...previous, [activeTab]: true }));
+      toast.warning({
+        title: "Enter a valid amount",
+        description: validationError,
+      });
+      return;
+    }
+
+    setCurrentStep("review");
+  };
 
   useEffect(() => {
     const handleTrigger = () => {
@@ -251,9 +318,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   const isSubmitDisabled =
     !walletAddress ||
     isBusy ||
-    approvalStatus === "pending" ||
     Boolean(activeAmountError) ||
-    contractPaused ||
     (activeTab === "deposit" && isCapReached);
 
 
@@ -312,209 +377,189 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   return (
     <div className="vault-dashboard gap-lg">
-      {hasNoActivity ? (
-        <div style={{ gridArea: "stats / 1 / span 2 / 1" }}>
-          <EmptyState
-            title="Start Your Yield Journey"
-            description="You have no active positions in this vault. Deposit USDC to start earning stable, predictable yield backed by Real-World Assets."
-            icon={<PackageSearch />}
-            ctaLabel="Deposit USDC"
-            onAction={() => {
-              setActiveTab("deposit");
-              setTimeout(() => {
-                const input = document.querySelector(".input-field") as HTMLInputElement | null;
-                if (input) input.focus();
-              }, 0);
+      <div className="vault-dashboard-stats">
+        <div className="glass-panel vault-stats-panel">
+          {error && (
+            <ApiStatusBanner error={{ ...error, userMessage: "Failed to load vault data" }} />
+          )}
+          <div className="vault-stats-header flex justify-between items-center" style={{ marginBottom: "24px" }}>
+            <div>
+              <h2 style={{ fontSize: "1.5rem", marginBottom: "4px" }}>
+                Global RWA Yield Fund
+              </h2>
+              <span
+                className="tag"
+                style={{
+                  background: "rgba(255, 255, 255, 0.05)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Tokens: USDC
+              </span>
+              <SharePriceDisplay />
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+                Current APY
+                <HelpIcon
+                  variant="tooltip"
+                  content="Annualized yield based on the historical performance of the vault's underlying assets."
+                />
+              </div>
+              <div className="text-gradient" style={{ fontSize: "2rem", fontFamily: "var(--font-display)", fontWeight: 700 }}>
+                {isLoading ? <Skeleton width="100px" height="2.5rem" /> : formattedApy}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              height: "1px",
+              background: "var(--border-glass)",
+              margin: "24px 0",
             }}
           />
-        </div>
-      ) : (
-        <>
-          <div className="vault-dashboard-stats">
-            <div className="glass-panel vault-stats-panel">
-              {error && (
-                <ApiStatusBanner error={{ ...error, userMessage: "Failed to load vault data" }} />
-              )}
-              <div className="vault-stats-header flex justify-between items-center" style={{ marginBottom: "24px" }}>
-                <div>
-                  <h2 style={{ fontSize: "1.5rem", marginBottom: "4px" }}>
-                    Global RWA Yield Fund
-                  </h2>
-                  <span
-                    className="tag"
-                    style={{
-                      background: "rgba(255, 255, 255, 0.05)",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    Tokens: USDC
-                  </span>
-                  <SharePriceDisplay />
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
-                    Current APY
-                    <HelpIcon
-                      variant="tooltip"
-                      content="Annualized yield based on the historical performance of the vault's underlying assets."
-                    />
-                  </div>
-                  <div className="text-gradient" style={{ fontSize: "2rem", fontFamily: "var(--font-display)", fontWeight: 700 }}>
-                    {isLoading ? <Skeleton width="100px" height="2.5rem" /> : formattedApy}
-                  </div>
-                </div>
-              </div>
 
+          <div className="vault-stats-meta flex gap-xl" style={{ marginBottom: "32px" }}>
+            <div>
               <div
                 style={{
-                  height: "1px",
-                  background: "var(--border-glass)",
-                  margin: "24px 0",
+                  color: "var(--text-secondary)",
+                  fontSize: "0.85rem",
+                  marginBottom: "4px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
                 }}
-              />
-
-              <div className="vault-stats-meta flex gap-xl" style={{ marginBottom: "32px" }}>
-                <div>
-                  <div
-                    style={{
-                      color: "var(--text-secondary)",
-                      fontSize: "0.85rem",
-                      marginBottom: "4px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    Total Value Locked
-                    <span
-                      className="flex items-center gap-xs"
-                      style={{
-                        color: "var(--accent-cyan)",
-                        fontSize: "0.7rem",
-                        fontWeight: 600,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      <Activity size={10} className={isLoading ? "animate-pulse" : undefined} />
-                      {isLoading ? "Syncing" : "Live"}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: "1.25rem", fontFamily: "var(--font-display)", fontWeight: 600 }}>
-                    {isLoading ? <Skeleton width="140px" height="1.5rem" /> : formattedTvl}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "4px" }}>
-                    Underlying Asset
-                  </div>
-                  <div className="flex items-center gap-sm">
-                    <ShieldCheck size={16} color="var(--accent-cyan)" />
-                    <span style={{ fontSize: "1.1rem", fontWeight: 500 }}>{summary.assetLabel}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ padding: "20px", background: "var(--bg-muted)" }}>
-                <h3
+              >
+                Total Value Locked
+                <span
+                  className="flex items-center gap-xs"
                   style={{
-                    fontSize: "1.1rem",
-                    marginBottom: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <TrendingUp size={18} color="var(--accent-purple)" />
-                  Strategy Overview
-                </h3>
-                <div
-                  style={{
-                    marginBottom: "12px",
-                    color: "var(--text-secondary)",
-                    fontSize: "0.8rem",
+                    color: "var(--accent-cyan)",
+                    fontSize: "0.7rem",
                     fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
                   }}
                 >
-                  BENJI Strategy
-                </div>
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: "1.6" }}>
-                  This vault pools USDC and deploys it into verified tokenized sovereign bonds available on
-                  the Stellar network.
-                </p>
-                <div className="flex gap-md" style={{ marginTop: "14px", flexWrap: "wrap" }}>
-                  <div
-                    style={{
-                      flex: "1 1 150px",
-                      padding: "10px 12px",
-                      borderRadius: "10px",
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid var(--border-glass)",
-                    }}
-                  >
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
-                      Target Allocation
-                    </div>
-                    <div style={{ fontWeight: 600 }}>70% Treasuries</div>
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>30% Cash Reserve</div>
-                  </div>
-                  <div
-                    style={{
-                      flex: "1 1 150px",
-                      padding: "10px 12px",
-                      borderRadius: "10px",
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid var(--border-glass)",
-                    }}
-                  >
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
-                      Yield Distribution
-                    </div>
-                    <div style={{ fontWeight: 600 }}>Daily Compounding</div>
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>
-                      Reflected in yvUSDC NAV
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      flex: "1 1 150px",
-                      padding: "10px 12px",
-                      borderRadius: "10px",
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid var(--border-glass)",
-                    }}
-                  >
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
-                      Risk Controls
-                    </div>
-                    <div style={{ fontWeight: 600 }}>Issuer + Duration Caps</div>
-                    <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>
-                      Rebalanced every epoch
-                    </div>
-                  </div>
-                </div>
-                <div style={{ marginTop: "12px", color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                  Strategy: <span style={{ color: "var(--text-primary)" }}>{strategy.name}</span> ({strategy.issuer})
-                </div>
-                <div
-                  className="copy-field"
-                  style={{ marginTop: "8px", color: "var(--text-secondary)", fontSize: "0.78rem" }}
-                >
-                  <span>Strategy ID:</span>
-                  <span className="copy-field-value copy-field-value-mono">{strategy.id}</span>
-                  <CopyButton value={strategy.id} label="strategy ID" />
-                </div>
+                  <Activity size={10} className={isLoading ? "animate-pulse" : undefined} />
+                  {isLoading ? "Syncing" : "Live"}
+                </span>
+              </div>
+              <div style={{ fontSize: "1.25rem", fontFamily: "var(--font-display)", fontWeight: 600 }}>
+                {isLoading ? <Skeleton width="140px" height="1.5rem" /> : formattedTvl}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "4px" }}>
+                Underlying Asset
+              </div>
+              <div className="flex items-center gap-sm">
+                <ShieldCheck size={16} color="var(--accent-cyan)" />
+                <span style={{ fontSize: "1.1rem", fontWeight: 500 }}>{summary.assetLabel}</span>
               </div>
             </div>
           </div>
 
-          <div className="vault-dashboard-chart">
-            <div className="glass-panel vault-chart-panel">
-              <VaultPerformanceChart />
+          <div className="glass-panel" style={{ padding: "20px", background: "var(--bg-muted)" }}>
+            <h3
+              style={{
+                fontSize: "1.1rem",
+                marginBottom: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <TrendingUp size={18} color="var(--accent-purple)" />
+              Strategy Overview
+            </h3>
+            <div
+              style={{
+                marginBottom: "12px",
+                color: "var(--text-secondary)",
+                fontSize: "0.8rem",
+                fontWeight: 600,
+              }}
+            >
+              BENJI Strategy
+            </div>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: "1.6" }}>
+              This vault pools USDC and deploys it into verified tokenized sovereign bonds available on
+              the Stellar network.
+            </p>
+            <div className="flex gap-md" style={{ marginTop: "14px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  flex: "1 1 150px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid var(--border-glass)",
+                }}
+              >
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
+                  Target Allocation
+                </div>
+                <div style={{ fontWeight: 600 }}>70% Treasuries</div>
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>30% Cash Reserve</div>
+              </div>
+              <div
+                style={{
+                  flex: "1 1 150px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid var(--border-glass)",
+                }}
+              >
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
+                  Yield Distribution
+                </div>
+                <div style={{ fontWeight: 600 }}>Daily Compounding</div>
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>
+                  Reflected in yvUSDC NAV
+                </div>
+              </div>
+              <div
+                style={{
+                  flex: "1 1 150px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid var(--border-glass)",
+                }}
+              >
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: "4px" }}>
+                  Risk Controls
+                </div>
+                <div style={{ fontWeight: 600 }}>Issuer + Duration Caps</div>
+                <div style={{ color: "var(--text-secondary)", fontSize: "0.8rem" }}>
+                  Rebalanced every epoch
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: "12px", color: "var(--text-secondary)", fontSize: "0.82rem" }}>
+              Strategy: <span style={{ color: "var(--text-primary)" }}>{strategy.name}</span> ({strategy.issuer})
+            </div>
+            <div
+              className="copy-field"
+              style={{ marginTop: "8px", color: "var(--text-secondary)", fontSize: "0.78rem" }}
+            >
+              <span>Strategy ID:</span>
+              <span className="copy-field-value copy-field-value-mono">{strategy.id}</span>
+              <CopyButton value={strategy.id} label="strategy ID" />
             </div>
           </div>
-        </>
-      )}
+        </div>
+      </div>
+
+      <div className="vault-dashboard-chart">
+        <div className="glass-panel vault-chart-panel">
+          <VaultPerformanceChart />
+        </div>
+      </div>
 
       <div className="vault-dashboard-actions">
         <div
@@ -584,106 +629,199 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                   <VaultCapWarning utilization={utilization} isReached={isCapReached} />
                 )}
 
-                {tab === "withdraw" && hasNoPositions ? (
-                  <div style={{ padding: "24px 0" }}>
-                    <EmptyState
-                      variant="minimal"
-                      title="No positions to withdraw"
-                      description="You haven't deposited any assets into this vault yet. Deposit USDC to start earning yield."
-                      icon={<Share2 size={32} color="var(--accent-cyan)" />}
-                      actionLabel="Go to Deposit"
-                      onAction={() => setActiveTab("deposit")}
-                    />
-                  </div>
-                ) : (
-                  <form
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void handleTransaction(tab);
-                    }}
-                  >
-                    <div style={{ marginBottom: "24px" }}>
-                      <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
-                        <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                          {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
-                        </div>
-                        <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-                          Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
-                        </div>
-                      </div>
+                  <div style={{ minHeight: "380px", display: "flex", flexDirection: "column" }}>
+                    {currentStep === "amount" && (
+                      <div className="animate-in fade-in duration-300">
+                        <div style={{ marginBottom: "24px" }}>
+                          <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
+                            <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                              {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
+                            </div>
+                            <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+                              Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
+                            </div>
+                          </div>
 
-                      <FormField
-                        label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
-                        name={`${tab}-amount`}
-                        type="number"
-                        step="any"
-                        placeholder="0.00"
-                        value={amount}
-                        onChange={(event) => {
-                          setAmount(event.target.value);
-                          setTouched((previous) => ({ ...previous, [tab]: true }));
-                        }}
-                        onBlur={() =>
-                          setTouched((previous) => ({ ...previous, [tab]: true }))
-                        }
-                        disabled={isBusy || (tab === "deposit" && isCapReached)}
-                        error={showInlineError ? activeAmountError ?? undefined : undefined}
-                      />
+                          <FormField
+                            label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
+                            name={`${tab}-amount`}
+                            type="number"
+                            step="any"
+                            placeholder="0.00"
+                            value={amount}
+                            onChange={(event) => {
+                              setAmount(event.target.value);
+                              setTouched((previous) => ({ ...previous, [tab]: true }));
+                            }}
+                            onBlur={() =>
+                              setTouched((previous) => ({ ...previous, [tab]: true }))
+                            }
+                            disabled={isBusy || (tab === "deposit" && isCapReached)}
+                            error={showInlineError ? activeAmountError ?? undefined : undefined}
+                          />
 
-                      <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
-                        <div className="flex items-center gap-sm">
-                          <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
-                          {tab === "deposit" && (
-                            <>
-                              <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
-                              <button
-                                type="button"
-                                className="btn-link flex items-center gap-xs"
-                                style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
-                                onClick={async () => {
-                                  const baseUrl = window.location.origin + window.location.pathname;
-                                  const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
-                                    ? `${baseUrl}?amount=${amount}`
-                                    : baseUrl;
-                                  
-                                  try {
-                                    await copyTextToClipboard(shareUrl);
-                                    toast.success({
-                                      title: "Link copied",
-                                      description: "Shareable vault link is ready to paste."
-                                    });
-                                  } catch {
-                                    toast.error({
-                                      title: "Copy failed",
-                                      description: "Could not copy link to clipboard."
-                                    });
-                                  }
-                                }}
-                              >
-                                <Share2 size={12} />
-                                Share Link
-                              </button>
-                            </>
-                          )}
+                          <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
+                            <div className="flex items-center gap-sm">
+                              <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
+                              {tab === "deposit" && (
+                                <>
+                                  <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
+                                  <button
+                                    type="button"
+                                    className="btn-link flex items-center gap-xs"
+                                    style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
+                                    onClick={async () => {
+                                      const baseUrl = window.location.origin + window.location.pathname;
+                                      const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
+                                        ? `${baseUrl}?action=deposit&amount=${amount}`
+                                        : baseUrl;
+                                      
+                                      try {
+                                        await copyTextToClipboard(shareUrl);
+                                        toast.success({
+                                          title: "Link copied",
+                                          description: "Shareable vault link is ready to paste."
+                                        });
+                                      } catch {
+                                        toast.error({
+                                          title: "Copy failed",
+                                          description: "Could not copy link to clipboard."
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <Share2 size={12} />
+                                    Share Link
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn-max"
+                              onClick={() => {
+                                setAmount(availableBalance.toFixed(2));
+                                setTouched((previous) => ({ ...previous, [tab]: true }));
+                              }}
+                              disabled={
+                                !walletAddress ||
+                                availableBalance <= 0 ||
+                                isBusy ||
+                                (tab === "deposit" && isCapReached)
+                              }
+                            >
+                              MAX
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          className="btn-max"
-                          onClick={() => {
-                            setAmount(availableBalance.toFixed(2));
-                            setTouched((previous) => ({ ...previous, [tab]: true }));
+
+                        <div
+                          className="glass-panel"
+                          style={{
+                            padding: "14px 16px",
+                            background: "rgba(0, 0, 0, 0.15)",
+                            marginBottom: "24px",
                           }}
-                          disabled={
-                            !walletAddress ||
-                            availableBalance <= 0 ||
-                            isBusy ||
-                            (tab === "deposit" && isCapReached)
-                          }
                         >
-                          MAX
+                          <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
+                            <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                              Estimated protocol fee
+                              <HelpIcon
+                                variant="popover"
+                                content="A protocol fee of 35 basis points (0.35%) of the transaction amount is applied. This fee is deducted before settlement."
+                              />
+                            </span>
+                            <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                              {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
+                              {tab === "deposit" ? "Estimated net deposit" : "Estimated net withdrawal"}
+                            </span>
+                            <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                              {isValidAmount ? `${estimatedNetAmount.toFixed(4)} USDC` : "0.0000 USDC"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          className="btn btn-primary"
+                          style={{ width: "100%", padding: "16px" }}
+                          type="button"
+                          onClick={goToReview}
+                          disabled={isSubmitDisabled}
+                        >
+                          Review Transaction
                         </button>
                       </div>
-                    </div>
+                    )}
+
+                    {currentStep === "review" && (
+                      <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col">
+                        <div className="flex-1">
+                          <h4 style={{ marginBottom: "20px", display: "flex", alignItems: "center", gap: "10px" }}>
+                            <AlertCircle size={20} color="var(--accent-cyan)" />
+                            Confirm Transaction
+                          </h4>
+                          
+                          <div 
+                            className="glass-panel" 
+                            style={{ 
+                              padding: "20px", 
+                              background: "rgba(255, 255, 255, 0.02)",
+                              border: "1px solid var(--border-glass)",
+                              marginBottom: "20px"
+                            }}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Action</span>
+                                <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{tab}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Amount</span>
+                                <span style={{ fontWeight: 600 }}>{enteredAmount.toFixed(2)} USDC</span>
+                              </div>
+                              <div style={{ height: "1px", background: "var(--border-glass)" }} />
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Protocol Fee (0.35%)</span>
+                                <span style={{ fontWeight: 600 }}>{estimatedFee.toFixed(4)} USDC</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Network Fee</span>
+                                <span style={{ fontWeight: 600, textAlign: "right" }}>
+                                  {isEstimating ? <Skeleton width="60px" height="1.1rem" /> : `${feeXlm.toFixed(4)} XLM`}
+                                </span>
+                              </div>
+                              <div style={{ height: "1px", background: "var(--border-glass)" }} />
+                              <div className="flex justify-between items-center">
+                                <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>Total To {tab === "deposit" ? "Vault" : "Wallet"}</span>
+                                <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--accent-cyan)" }}>
+                                  {estimatedNetAmount.toFixed(4)} USDC
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {isHighFee && (
+                            <div
+                              className="flex items-start gap-sm"
+                              style={{
+                                marginBottom: "20px",
+                                padding: "12px",
+                                borderRadius: "8px",
+                                background: "rgba(255, 69, 58, 0.1)",
+                                border: "1px solid rgba(255, 69, 58, 0.2)",
+                              }}
+                            >
+                              <AlertTriangle size={16} color="var(--text-error)" style={{ marginTop: "2px" }} />
+                              <div style={{ fontSize: "0.82rem", color: "var(--text-error)", lineHeight: "1.4" }}>
+                                <strong style={{ display: "block", marginBottom: "2px" }}>High network fee</strong>
+                                The estimated network fee exceeds 1% of your transaction value.
+                              </div>
+                            </div>
+                          )}
 
                           {tab === "deposit" && isValidAmount && needsApproval(enteredAmount) && (
                             <div
@@ -799,52 +937,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         >
                           {transactionResult.success ? "Done" : "Try Again"}
                         </button>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    className="btn btn-primary"
-                    style={{
-                      width: "100%",
-                      padding: "16px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "8px",
-                    }}
-                    type="submit"
-                    disabled={isSubmitDisabled || isEstimating}
-                  >
-                    {isProcessing === tab ? (
-                      <>
-                        <Loader2
-                          size={16}
-                          className="spin"
-                          style={{ animation: "spin 0.9s linear infinite" }}
-                        />
-                        Waiting for confirmation...
-                      </>
-                    ) : isEstimating ? (
-                      <>
-                        <Loader2
-                          size={16}
-                          className="spin"
-                          style={{ animation: "spin 0.9s linear infinite" }}
-                        />
-                        Estimating fee...
-                      </>
-                    ) : tab === "deposit" ? (
-                      isCapReached ? "Vault is full" : (allowance === 0 || needsApproval(enteredAmount) ? "Approve & Deposit" : "Deposit")
-                    ) : (
-                      "Withdraw Funds"
+                      </div>
                     )}
                   </div>
               </TabsContent>
             ))}
           </Tabs>
         </div>
-        <EarningsCalculator />
       </div>
     </div>
   );
