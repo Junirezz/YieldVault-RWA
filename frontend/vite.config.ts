@@ -18,6 +18,15 @@ export default defineConfig(({ mode }) => {
     build: {
       sourcemap: true,
     },
+    server: {
+      watch: {
+        ignored: [
+          "**/cypress/downloads/**",
+          "**/cypress/screenshots/**",
+          "**/cypress/videos/**",
+        ],
+      },
+    },
     plugins: [
       react(),
       visualizer({
