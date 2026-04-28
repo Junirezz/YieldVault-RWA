@@ -5,6 +5,8 @@ import { idempotencyStore, IdempotencyConflictError } from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
 import { requireFlag } from './featureFlags';
+import { referralService } from './referralService';
+import { getPrismaClient } from './prismaClient';
 import crypto from 'crypto';
 
 const router = Router();
@@ -39,7 +41,7 @@ async function handleVaultOperation(
     (req.headers['idempotency-key'] as string | undefined) ||
     (req.headers['x-idempotency-key'] as string | undefined);
 
-  const { amount, asset, walletAddress, email } = req.body;
+  const { amount, asset, walletAddress, email, referralCode } = req.body;
 
   if (!amount || !asset || !walletAddress) {
     return res.status(400).json({
@@ -68,6 +70,22 @@ async function handleVaultOperation(
         throw err;
       }
 
+      // Persist transaction to DB
+      const prisma = getPrismaClient();
+      await prisma.transaction.create({
+        data: {
+          user: walletAddress,
+          amount: String(amount),
+          type,
+          referralCode,
+        },
+      });
+
+      // Handle referral recording on deposit
+      if (type === 'deposit') {
+        await referralService.recordDeposit(walletAddress, referralCode);
+      }
+
       const body = {
         id: `tx-${crypto.randomBytes(4).toString('hex')}`,
         type,
@@ -79,12 +97,38 @@ async function handleVaultOperation(
         timestamp: new Date().toISOString(),
       };
 
+      // Fire webhook delivery in background so transaction API latency is not blocked.
+      const eventType: TransactionEventType =
+        type === 'deposit' ? 'transaction.deposit.created' : 'transaction.withdrawal.created';
+      void emitTransactionEvent(eventType, {
+        transactionId: body.id,
+        amount: String(body.amount),
+        asset: String(body.asset),
+        walletAddress: String(body.walletAddress),
+        transactionHash: String(body.transactionHash),
+        status: String(body.status),
+        timestamp: String(body.timestamp),
+      });
+
       span.setAttributes({ 'vault.txHash': txHash });
 
       // Post-confirmation email (fire-and-forget)
-      setTimeout(async () => {
+      const schedulePostConfirmation = process.env.NODE_ENV === 'test'
+        ? (fn: () => Promise<void>) => {
+            void fn();
+          }
+        : (fn: () => Promise<void>) => {
+            setTimeout(() => {
+              void fn();
+            }, 100);
+          };
+
+      schedulePostConfirmation(async () => {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          const confirmationDelayMs = process.env.NODE_ENV === 'test' ? 0 : 5000;
+          if (confirmationDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, confirmationDelayMs));
+          }
           logger.log('info', `${type} confirmed on-chain`, {
             txHash,
             walletAddress,
@@ -110,13 +154,15 @@ async function handleVaultOperation(
             traceId: getCurrentTraceId(),
           });
         }
-      }, 100);
+      });
 
       return { statusCode: 201, body };
     });
   };
 
   try {
+    const invalidateReadCaches = () => invalidateCache();
+
     if (idempotencyKey) {
       const fingerprint = generateFingerprint(req.body);
       const { result, replayed } = await idempotencyStore.execute(
@@ -125,16 +171,18 @@ async function handleVaultOperation(
         operation,
       );
       if (replayed) res.setHeader('idempotency-status', 'replayed');
+      invalidateReadCaches();
       return res.status(result.statusCode).json(result.body);
     }
 
     const result = await operation();
+    invalidateReadCaches();
     return res.status(result.statusCode).json(result.body);
   } catch (err) {
     if (err instanceof IdempotencyConflictError) {
-      return res.status(422).json({
-        error: 'Unprocessable Entity',
-        status: 422,
+      return res.status(409).json({
+        error: 'Conflict',
+        status: 409,
         message: err.message,
       });
     }
@@ -165,16 +213,18 @@ async function handleVaultOperation(
 /**
  * POST /api/v1/vault/deposits
  * Accepts optional Idempotency-Key header for deduplication.
+ * Requires wallet address to be on the private beta allowlist (Issue #375).
  */
-router.post('/deposits', (req: Request, res: Response) =>
+router.post('/deposits', allowlistMiddleware, (req: Request, res: Response) =>
   handleVaultOperation(req, res, 'deposit'),
 );
 
 /**
  * POST /api/v1/vault/withdrawals
  * Accepts optional Idempotency-Key header for deduplication.
+ * Requires wallet address to be on the private beta allowlist (Issue #375).
  */
-router.post('/withdrawals', (req: Request, res: Response) =>
+router.post('/withdrawals', allowlistMiddleware, (req: Request, res: Response) =>
   handleVaultOperation(req, res, 'withdrawal'),
 );
 

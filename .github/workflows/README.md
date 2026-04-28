@@ -10,6 +10,8 @@ This directory contains automated security scanning workflows for the YieldVault
 |----------|---------|---------|----------|
 | **`slither.yml`** | PR to main/develop | Ethereum/Solidity static analysis | 5-10 min |
 | **`rust-security.yml`** | PR to main/develop | Rust dependency audit + linting | 2-4 min |
+| **`frontend.yml`** | PR to main | npm dependency audit + build/tests | 5-8 min |
+| **`backend-governance.yml`** | PR to main | backend governance + npm auditing | 4-6 min |
 
 ### Existing Workflows
 

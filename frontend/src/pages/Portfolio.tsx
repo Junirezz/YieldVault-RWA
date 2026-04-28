@@ -1,16 +1,16 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Activity, TrendingUp, DollarSign, Percent, Briefcase } from "../components/icons";
+import { Activity, TrendingUp, DollarSign, Percent, Briefcase, Users, Share2 } from "../components/icons";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import {
   DataTable,
   type DataTableColumn,
 } from "../components/DataTable";
 import PageHeader from "../components/PageHeader";
-import { 
-  normalizeApiError, 
-  isValidationError, 
-  type ApiError, 
-  type ValidationError 
+import {
+  normalizeApiError,
+  isValidationError,
+  type ApiError,
+  type ValidationError
 } from "../lib/api";
 import CopyButton from "../components/CopyButton";
 import {
@@ -23,12 +23,15 @@ import { useUrlState } from "../hooks/useUrlState";
 import { useServerDataTable } from "../hooks/useServerDataTable";
 import { useToast } from "../context/ToastContext";
 import YieldBreakdownChart from "../components/YieldBreakdownChart";
+import { useReferralStats, useReferralLink } from "../hooks/useReferral";
+import ShareModal from "../components/ShareModal";
 
 interface PortfolioProps {
   walletAddress: string | null;
 }
 
 import { formatCurrency, formatNumber } from "../lib/formatters";
+
 
 const columns: DataTableColumn<PortfolioHolding>[] = [
   {
@@ -113,25 +116,29 @@ const columns: DataTableColumn<PortfolioHolding>[] = [
   },
 ];
 
-const PortfolioSummaryCard: React.FC<{ 
-  label: React.ReactNode; 
-  value: string; 
-  icon: React.ReactNode; 
+const PortfolioSummaryCard: React.FC<{
+  label: React.ReactNode;
+  value: string;
+  icon: React.ReactNode;
   trend?: string;
   trendPositive?: boolean;
-}> = ({ label, value, icon, trend, trendPositive }) => (
+  onClick?: () => void;
+  clickable?: boolean;
+}> = ({ label, value, icon, trend, trendPositive, onClick, clickable }) => (
   <div
     className="glass-panel"
-    style={{ 
-      padding: "24px", 
-      background: "var(--bg-muted)", 
+    style={{
+      padding: "24px",
+      background: "var(--bg-muted)",
       position: "relative",
       overflow: "hidden",
       border: "1px solid var(--border-glass)",
       transition: "transform 0.2s ease",
+      cursor: clickable ? "pointer" : "default",
     }}
-    onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-4px)"}
+    onMouseEnter={(e) => e.currentTarget.style.transform = clickable ? "translateY(-4px)" : "translateY(-2px)"}
     onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+    onClick={onClick}
   >
     <div style={{ position: "absolute", top: "-10px", right: "-10px", opacity: 0.05 }}>
       {React.cloneElement(icon as React.ReactElement<Record<string, unknown>>, { size: 80 })}
@@ -165,6 +172,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const { state: urlState, setSearch, setSort, setPage, setPageSize, setFilters, reset } = useUrlState<{ status: string, search: string }>({
     defaultSortBy: "valueUsd",
@@ -262,6 +270,9 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     },
   });
 
+  const { data: referralStats } = useReferralStats(walletAddress);
+  const { referralLink, referralCode } = useReferralLink(walletAddress);
+
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
   const totalGain = holdings.reduce(
     (sum, holding) => sum + holding.unrealizedGainUsd,
@@ -335,21 +346,21 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
             className="portfolio-summary-grid"
             style={{ marginBottom: "8px" }}
           >
-            <PortfolioSummaryCard 
-              label="Total Net Value" 
-              value={formatCurrency(totalValue)} 
+            <PortfolioSummaryCard
+              label="Total Net Value"
+              value={formatCurrency(totalValue)}
               icon={<DollarSign size={20} color="var(--accent-cyan)" />}
               trend={totalNetValueTrend}
               trendPositive={totalGain >= 0}
             />
-            <PortfolioSummaryCard 
-              label="Cumulative Yield" 
-              value={`${totalGain >= 0 ? '+' : ''}${formatCurrency(totalGain)}`} 
+            <PortfolioSummaryCard
+              label="Cumulative Yield"
+              value={`${totalGain >= 0 ? '+' : ''}${formatCurrency(totalGain)}`}
               icon={<TrendingUp size={20} color="var(--accent-purple)" />}
               trend={cumulativeYieldTrend}
               trendPositive={totalGain >= 0}
             />
-            <PortfolioSummaryCard 
+            <PortfolioSummaryCard
               label={
                 <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                   Weighted Avg APY
@@ -359,15 +370,37 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                   />
                 </span>
               }
-              value={`${weightedApy.toFixed(2)}%`} 
+              value={`${weightedApy.toFixed(2)}%`}
               icon={<Percent size={20} color="var(--accent-cyan)" />}
               trend={weightedApyTrend}
               trendPositive={true}
             />
-            <PortfolioSummaryCard 
-              label="Active Positions" 
-              value={holdings.filter(h => h.status === 'active').length.toString()} 
+            <PortfolioSummaryCard
+              label="Active Positions"
+              value={holdings.filter(h => h.status === 'active').length.toString()}
               icon={<Briefcase size={20} color="var(--text-secondary)" />}
+            />
+            <PortfolioSummaryCard
+              label={
+                <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  Referral Earnings
+                  <HelpIcon
+                    variant="tooltip"
+                    content="Total rewards earned from successful referrals."
+                  />
+                </span>
+              }
+              value={referralStats ? `$${referralStats.total_reward_earned}` : "$0.00"}
+              icon={<TrendingUp size={20} color="var(--accent-green)" />}
+              trend={referralStats ? `${referralStats.referral_count} referral${referralStats.referral_count !== 1 ? 's' : ''}` : "0 referrals"}
+              trendPositive={true}
+            />
+            <PortfolioSummaryCard
+              label="Share Referral Link"
+              value=""
+              icon={<Share2 size={20} color="var(--accent-cyan)" />}
+              onClick={() => setShowShareModal(true)}
+              clickable={true}
             />
           </div>
 
@@ -468,6 +501,15 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
             />
           </section>
         </div>
+      )}
+
+      {referralLink && referralCode && (
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          referralLink={referralLink}
+          referralCode={referralCode}
+        />
       )}
     </div>
   );

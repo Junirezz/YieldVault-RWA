@@ -22,4 +22,7 @@ export {
   Briefcase,
   Share2,
   Link,
+  PackageOpen,
+  Inbox,
+  PackageSearch,
 } from "lucide-react";

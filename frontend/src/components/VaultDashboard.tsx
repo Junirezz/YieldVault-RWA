@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useReferralCode } from "../hooks/useReferral";
 import { 
   Activity, 
   AlertCircle, 
@@ -25,13 +26,92 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { AlertTriangle } from "./icons";
 import HelpIcon from "./ui/HelpIcon";
+import React from "react";
+import { Check } from "lucide-react";
+
+/**
+ * Valid transaction tabs in the vault dashboard.
+ */
+type TransactionTab = "deposit" | "withdraw";
+
+/**
+ * Current step in the transaction wizard flow.
+ */
+type TransactionStep = "amount" | "review" | "result";
+
+/**
+ * Visual indicator for the 3-step transaction wizard.
+ * Shows progress through Amount, Review, and Result stages.
+ */
+const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({
+  currentStep,
+}) => {
+  const steps = [
+    { id: "amount", label: "Enter Amount" },
+    { id: "review", label: "Review & Confirm" },
+    { id: "result", label: "Success / Failure" },
+const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep }) => {
+  const steps = [
+    { id: "amount", label: "Amount" },
+    { id: "review", label: "Review" },
+    { id: "result", label: "Result" },
+  ];
+
+  const getStepStatus = (stepId: TransactionStep) => {
+    const stepOrder: TransactionStep[] = ["amount", "review", "result"];
+
+    const currentIndex = stepOrder.indexOf(currentStep);
+    const stepIndex = stepOrder.indexOf(stepId);
+
+    if (stepIndex < currentIndex) return "completed";
+    if (stepIndex === currentIndex) return "active";
+    return "pending";
+  };
+
+  return (
+    <div className="step-indicator-container">
+      {steps.map((step, index) => {
+        const status = getStepStatus(step.id as TransactionStep);
+
+        return (
+          <React.Fragment key={step.id}>
+            <div className={`step-item ${status}`}>
+              <div className="step-number">
+                {status === "completed" ? (
+                  <Check size={12} />
+                ) : (
+                  index + 1
+                )}
+              </div>
+              <span className="step-label">{step.label}</span>
+            </div>
+
+            {index < steps.length - 1 && (
+              <div
+                className={`step-line ${
+                  status === "completed" ? "completed" : ""
+                }`}
+              />
+                {status === "completed" ? <Check size={12} /> : index + 1}
+              </div>
+              <span className="step-label">{step.label}</span>
+            </div>
+            {index < steps.length - 1 && (
+              <div className={`step-line ${status === "completed" ? "completed" : ""}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+export default StepIndicator;
 
 interface VaultDashboardProps {
   walletAddress: string | null;
   usdcBalance?: number;
 }
-
-type TransactionTab = "deposit" | "withdraw";
 
 const MIN_DEPOSIT_AMOUNT = 1;
 const INITIAL_TOUCHED_STATE: Record<TransactionTab, boolean> = {
@@ -146,8 +226,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const [activeTab, setActiveTab] = useState<TransactionTab>("deposit");
   const [amount, setAmount] = useState("");
-  const [touched, setTouched] =
-    useState<Record<TransactionTab, boolean>>(INITIAL_TOUCHED_STATE);
+  const [touched, setTouched] = useState<Record<TransactionTab, boolean>>(INITIAL_TOUCHED_STATE);
+  const [referralCode, setReferralCode] = useState<string | undefined>();
+
+  // Wizard state
+  const [currentStep, setCurrentStep] = useState<TransactionStep>("amount");
+  const [transactionResult, setTransactionResult] = useState<{
+    success: boolean;
+    message: string;
+    txHash?: string
+  } | null>(null);
 
   // Handle deep link parameters
   useEffect(() => {
@@ -186,11 +274,38 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount]);
 
-  const { feeXlm, feeUsd, isEstimating, isHighFee } = useFeeEstimate(
+  const { feeXlm, isEstimating, isHighFee } = useFeeEstimate(
     walletAddress,
     amount,
     activeTab
   );
+
+  const resetWizard = () => {
+    setAmount("");
+    setTouched(INITIAL_TOUCHED_STATE);
+    setCurrentStep("amount");
+    setTransactionResult(null);
+  };
+
+  const goToReview = () => {
+    const validationError = getAmountValidationError(
+      activeTab,
+      amount,
+      availableBalance,
+      isCapReached,
+    );
+
+    if (validationError) {
+      setTouched((previous) => ({ ...previous, [activeTab]: true }));
+      toast.warning({
+        title: "Enter a valid amount",
+        description: validationError,
+      });
+      return;
+    }
+
+    setCurrentStep("review");
+  };
 
   useEffect(() => {
     const handleTrigger = () => {
@@ -238,26 +353,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const handleTransaction = async (actionType: TransactionTab) => {
     const value = Number(amount);
-    const validationError = getAmountValidationError(
-      actionType,
-      amount,
-      availableBalance,
-      isCapReached,
-    );
-
+    
     if (!walletAddress) {
       toast.warning({
         title: "Wallet required",
         description: "Connect your wallet before submitting a transaction.",
-      });
-      return;
-    }
-
-    if (validationError) {
-      setTouched((previous) => ({ ...previous, [actionType]: true }));
-      toast.warning({
-        title: "Enter a valid amount",
-        description: validationError,
       });
       return;
     }
@@ -269,8 +369,14 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         await withdrawMutation.mutateAsync({ walletAddress, amount: value });
       }
 
-      setAmount("");
-      setTouched(INITIAL_TOUCHED_STATE);
+      setTransactionResult({
+        success: true,
+        message: actionType === "deposit"
+          ? `${value.toFixed(2)} USDC has been deposited into the vault.`
+          : `${value.toFixed(2)} USDC has been withdrawn from the vault.`,
+      });
+      setCurrentStep("result");
+      
       toast.success({
         title: actionType === "deposit" ? "Deposit Successful" : "Withdrawal Successful",
         description:
@@ -279,6 +385,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
             : `${value.toFixed(2)} USDC has been withdrawn from the vault.`,
       });
     } catch (err: unknown) {
+      setTransactionResult({
+        success: false,
+        message:
+          err instanceof Error
+            ? err.message
+            : "An error occurred during the transaction.",
+      });
+      setCurrentStep("result");
+      
       toast.error({
         title: "Transaction Failed",
         description:
@@ -529,10 +644,14 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               setTouched(INITIAL_TOUCHED_STATE);
             }}
           >
-            <TabsList style={{ marginBottom: "24px" }}>
-              <TabsTrigger value="deposit">Deposit</TabsTrigger>
-              <TabsTrigger value="withdraw">Withdraw</TabsTrigger>
-            </TabsList>
+            {currentStep === "amount" && (
+              <TabsList style={{ marginBottom: "24px" }}>
+                <TabsTrigger value="deposit">Deposit</TabsTrigger>
+                <TabsTrigger value="withdraw">Withdraw</TabsTrigger>
+              </TabsList>
+            )}
+
+            <StepIndicator currentStep={currentStep} />
 
             {(["deposit", "withdraw"] as const).map((tab) => (
               <TabsContent key={tab} value={tab}>
@@ -540,324 +659,317 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                   <VaultCapWarning utilization={utilization} isReached={isCapReached} />
                 )}
 
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void handleTransaction(tab);
-                  }}
-                >
-                  <div style={{ marginBottom: "24px" }}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
-                      <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                        {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
-                      </div>
-                      <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-                        Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
-                      </div>
-                    </div>
+                  <div style={{ minHeight: "380px", display: "flex", flexDirection: "column" }}>
+                    {currentStep === "amount" && (
+                      <div className="animate-in fade-in duration-300">
+                        <div style={{ marginBottom: "24px" }}>
+                          <div className="flex justify-between items-center" style={{ marginBottom: "16px" }}>
+                            <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                              {tab === "deposit" ? "Amount to deposit" : "Amount to withdraw"}
+                            </div>
+                            <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+                              Balance: <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
+                            </div>
+                          </div>
 
-                    <FormField
-                      label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
-                      name={`${tab}-amount`}
-                      type="number"
-                      step="any"
-                      placeholder="0.00"
-                      value={amount}
-                      onChange={(event) => {
-                        setAmount(event.target.value);
-                        setTouched((previous) => ({ ...previous, [tab]: true }));
-                      }}
-                      onBlur={() =>
-                        setTouched((previous) => ({ ...previous, [tab]: true }))
-                      }
-                      disabled={isBusy || (tab === "deposit" && isCapReached)}
-                      error={showInlineError ? activeAmountError ?? undefined : undefined}
-                    />
+                          <FormField
+                            label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
+                            name={`${tab}-amount`}
+                            type="number"
+                            step="any"
+                            placeholder="0.00"
+                            value={amount}
+                            onChange={(event) => {
+                              setAmount(event.target.value);
+                              setTouched((previous) => ({ ...previous, [tab]: true }));
+                            }}
+                            onBlur={() =>
+                              setTouched((previous) => ({ ...previous, [tab]: true }))
+                            }
+                            disabled={isBusy || (tab === "deposit" && isCapReached)}
+                            error={showInlineError ? activeAmountError ?? undefined : undefined}
+                          />
 
-                    <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
-                      <div className="flex items-center gap-sm">
-                        <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
-                        {tab === "deposit" && (
-                          <>
-                            <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
+                          <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
+                            <div className="flex items-center gap-sm">
+                              <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
+                              {tab === "deposit" && (
+                                <>
+                                  <div style={{ width: "1px", height: "14px", background: "var(--border-glass)", margin: "0 4px" }} />
+                                  <button
+                                    type="button"
+                                    className="btn-link flex items-center gap-xs"
+                                    style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
+                                    onClick={async () => {
+                                      const baseUrl = window.location.origin + window.location.pathname;
+                                      const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
+                                        ? `${baseUrl}?action=deposit&amount=${amount}`
+                                        : baseUrl;
+                                      
+                                      try {
+                                        await copyTextToClipboard(shareUrl);
+                                        toast.success({
+                                          title: "Link copied",
+                                          description: "Shareable vault link is ready to paste."
+                                        });
+                                      } catch {
+                                        toast.error({
+                                          title: "Copy failed",
+                                          description: "Could not copy link to clipboard."
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <Share2 size={12} />
+                                    Share Link
+                                  </button>
+                                </>
+                              )}
+                            </div>
                             <button
                               type="button"
-                              className="btn-link flex items-center gap-xs"
-                              style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", padding: 0 }}
-                              onClick={async () => {
-                                const baseUrl = window.location.origin + window.location.pathname;
-                                const shareUrl = amount && !isNaN(Number(amount)) && Number(amount) > 0
-                                  ? `${baseUrl}?action=deposit&amount=${amount}`
-                                  : baseUrl;
-                                
-                                try {
-                                  await copyTextToClipboard(shareUrl);
-                                  toast.success({
-                                    title: "Link copied",
-                                    description: "Shareable vault link is ready to paste."
-                                  });
-                                } catch {
-                                  toast.error({
-                                    title: "Copy failed",
-                                    description: "Could not copy link to clipboard."
-                                  });
-                                }
+                              className="btn-max"
+                              onClick={() => {
+                                setAmount(availableBalance.toFixed(2));
+                                setTouched((previous) => ({ ...previous, [tab]: true }));
+                              }}
+                              disabled={
+                                !walletAddress ||
+                                availableBalance <= 0 ||
+                                isBusy ||
+                                (tab === "deposit" && isCapReached)
+                              }
+                            >
+                              MAX
+                            </button>
+                          </div>
+                        </div>
+
+                        <div
+                          className="glass-panel"
+                          style={{
+                            padding: "14px 16px",
+                            background: "rgba(0, 0, 0, 0.15)",
+                            marginBottom: "24px",
+                          }}
+                        >
+                          <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
+                            <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                              Estimated protocol fee
+                              <HelpIcon
+                                variant="popover"
+                                content="A protocol fee of 35 basis points (0.35%) of the transaction amount is applied. This fee is deducted before settlement."
+                              />
+                            </span>
+                            <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                              {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
+                              {tab === "deposit" ? "Estimated net deposit" : "Estimated net withdrawal"}
+                            </span>
+                            <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                              {isValidAmount ? `${estimatedNetAmount.toFixed(4)} USDC` : "0.0000 USDC"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          className="btn btn-primary"
+                          style={{ width: "100%", padding: "16px" }}
+                          type="button"
+                          onClick={goToReview}
+                          disabled={isSubmitDisabled}
+                        >
+                          Review Transaction
+                        </button>
+                      </div>
+                    )}
+
+                    {currentStep === "review" && (
+                      <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col">
+                        <div className="flex-1">
+                          <h4 style={{ marginBottom: "20px", display: "flex", alignItems: "center", gap: "10px" }}>
+                            <AlertCircle size={20} color="var(--accent-cyan)" />
+                            Confirm Transaction
+                          </h4>
+                          
+                          <div 
+                            className="glass-panel" 
+                            style={{ 
+                              padding: "20px", 
+                              background: "rgba(255, 255, 255, 0.02)",
+                              border: "1px solid var(--border-glass)",
+                              marginBottom: "20px"
+                            }}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Action</span>
+                                <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{tab}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Amount</span>
+                                <span style={{ fontWeight: 600 }}>{enteredAmount.toFixed(2)} USDC</span>
+                              </div>
+                              <div style={{ height: "1px", background: "var(--border-glass)" }} />
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Protocol Fee (0.35%)</span>
+                                <span style={{ fontWeight: 600 }}>{estimatedFee.toFixed(4)} USDC</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span style={{ color: "var(--text-secondary)" }}>Network Fee</span>
+                                <span style={{ fontWeight: 600, textAlign: "right" }}>
+                                  {isEstimating ? <Skeleton width="60px" height="1.1rem" /> : `${feeXlm.toFixed(4)} XLM`}
+                                </span>
+                              </div>
+                              <div style={{ height: "1px", background: "var(--border-glass)" }} />
+                              <div className="flex justify-between items-center">
+                                <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>Total To {tab === "deposit" ? "Vault" : "Wallet"}</span>
+                                <span style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--accent-cyan)" }}>
+                                  {estimatedNetAmount.toFixed(4)} USDC
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {isHighFee && (
+                            <div
+                              className="flex items-start gap-sm"
+                              style={{
+                                marginBottom: "20px",
+                                padding: "12px",
+                                borderRadius: "8px",
+                                background: "rgba(255, 69, 58, 0.1)",
+                                border: "1px solid rgba(255, 69, 58, 0.2)",
                               }}
                             >
-                              <Share2 size={12} />
-                              Share Link
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-max"
-                        onClick={() => {
-                          setAmount(availableBalance.toFixed(2));
-                          setTouched((previous) => ({ ...previous, [tab]: true }));
-                        }}
-                        disabled={
-                          !walletAddress ||
-                          availableBalance <= 0 ||
-                          isBusy ||
-                          (tab === "deposit" && isCapReached)
-                        }
-                      >
-                        MAX
-                      </button>
-                    </div>
-                  </div>
+                              <AlertTriangle size={16} color="var(--text-error)" style={{ marginTop: "2px" }} />
+                              <div style={{ fontSize: "0.82rem", color: "var(--text-error)", lineHeight: "1.4" }}>
+                                <strong style={{ display: "block", marginBottom: "2px" }}>High network fee</strong>
+                                The estimated network fee exceeds 1% of your transaction value.
+                              </div>
+                            </div>
+                          )}
 
-                  <div
-                    className="glass-panel"
-                    style={{
-                      padding: "14px 16px",
-                      background: "rgba(0, 0, 0, 0.15)",
-                      marginBottom: "16px",
-                    }}
-                  >
-                    <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem", display: "flex", alignItems: "center", gap: "6px" }}>
-                        Estimated protocol fee
-                        <HelpIcon
-                          variant="popover"
-                          content="A protocol fee of 35 basis points (0.35%) of the transaction amount is applied. This fee is deducted before settlement."
-                        />
-                      </span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                        {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem" }}>
-                        Estimated network fee
-                      </span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 600, display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        {isEstimating ? (
-                          <Skeleton width="60px" height="1.1rem" />
-                        ) : (
-                          <>
-                            <span>{feeXlm.toFixed(6)} XLM</span>
-                            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: 400 }}>
-                              ≈ ${feeUsd.toFixed(4)}
-                            </span>
-                          </>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                        {tab === "deposit" ? "Estimated net deposit" : "Estimated net withdrawal"}
-                      </span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                        {isValidAmount ? `${estimatedNetAmount.toFixed(4)} USDC` : "0.0000 USDC"}
-                      </span>
-                    </div>
-                    {isHighFee && (
-                      <div
-                        className="flex items-start gap-sm"
-                        style={{
-                          marginTop: "12px",
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          background: "rgba(255, 69, 58, 0.1)",
-                          border: "1px solid rgba(255, 69, 58, 0.2)",
-                        }}
-                      >
-                        <AlertTriangle size={16} color="var(--text-error)" style={{ marginTop: "2px" }} />
-                        <div style={{ fontSize: "0.78rem", color: "var(--text-error)", lineHeight: "1.4" }}>
-                          High fee detected: The estimated network fee exceeds 1% of your transaction value.
+                          {tab === "deposit" && isValidAmount && needsApproval(enteredAmount) && (
+                            <div
+                              className="glass-panel"
+                              style={{
+                                padding: "14px 16px",
+                                marginBottom: "20px",
+                                border: approvalStatus === "confirmed"
+                                  ? "1px solid rgba(0, 240, 255, 0.4)"
+                                  : "1px solid rgba(255, 159, 10, 0.4)",
+                                background: approvalStatus === "confirmed"
+                                  ? "rgba(0, 240, 255, 0.05)"
+                                  : "rgba(255, 159, 10, 0.05)",
+                              }}
+                            >
+                              <div className="flex items-center gap-sm" style={{ marginBottom: "10px" }}>
+                                <div
+                                  className="flex items-center gap-xs"
+                                  style={{
+                                    fontSize: "0.78rem",
+                                    fontWeight: 600,
+                                    color: approvalStatus === "confirmed" ? "var(--accent-cyan)" : "rgba(255, 159, 10, 0.9)",
+                                  }}
+                                >
+                                  <div style={{
+                                    width: "20px", height: "20px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                                    background: approvalStatus === "confirmed" ? "var(--accent-cyan)" : "rgba(255, 159, 10, 0.2)",
+                                    border: approvalStatus === "confirmed" ? "none" : "1px solid rgba(255, 159, 10, 0.6)",
+                                    fontSize: "0.7rem", color: approvalStatus === "confirmed" ? "#000" : "inherit"
+                                  }}>
+                                    {approvalStatus === "confirmed" ? <Check size={12} /> : "1"}
+                                  </div>
+                                  Approve USDC
+                                </div>
+                                <div style={{ flex: 1, height: "1px", background: "var(--border-glass)" }} />
+                                <div className="flex items-center gap-xs" style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-secondary)" }}>
+                                  <div style={{ width: "20px", height: "20px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.05)", border: "1px solid var(--border-glass)", fontSize: "0.7rem" }}>2</div>
+                                  Deposit
+                                </div>
+                              </div>
+                              {approvalStatus !== "confirmed" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline"
+                                  style={{ width: "100%", padding: "10px" }}
+                                  disabled={approvalStatus === "pending"}
+                                  onClick={async () => {
+                                    try {
+                                      await approve(enteredAmount);
+                                      toast.success({ title: "USDC Approved" });
+                                    } catch {
+                                      toast.error({ title: "Approval Failed" });
+                                    }
+                                  }}
+                                >
+                                  {approvalStatus === "pending" ? "Approving..." : "Approve USDC"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-md" style={{ marginTop: "auto" }}>
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            style={{ flex: 1 }}
+                            onClick={() => setCurrentStep("amount")}
+                            disabled={isBusy}
+                          >
+                            Back
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ flex: 2 }}
+                            onClick={() => void handleTransaction(tab)}
+                            disabled={
+                              isBusy || 
+                              (tab === "deposit" && needsApproval(enteredAmount) && approvalStatus !== "confirmed")
+                            }
+                          >
+                            {isBusy ? (
+                              <>
+                                <Loader2 size={16} className="spin" style={{ animation: "spin 0.9s linear infinite" }} />
+                                Processing...
+                              </>
+                            ) : (
+                              `Confirm ${tab}`
+                            )}
+                          </button>
                         </div>
                       </div>
                     )}
-                  </div>
 
-                  {/* Approval wizard — only shown for deposit tab when allowance is insufficient */}
-                  {tab === "deposit" && isValidAmount && needsApproval(enteredAmount) && (
-                    <div
-                      className="glass-panel"
-                      style={{
-                        padding: "14px 16px",
-                        marginBottom: "12px",
-                        border: approvalStatus === "confirmed"
-                          ? "1px solid rgba(0, 240, 255, 0.4)"
-                          : "1px solid rgba(255, 159, 10, 0.4)",
-                        background: approvalStatus === "confirmed"
-                          ? "rgba(0, 240, 255, 0.05)"
-                          : "rgba(255, 159, 10, 0.05)",
-                      }}
-                    >
-                      {/* Step indicators */}
-                      <div className="flex items-center gap-sm" style={{ marginBottom: "10px" }}>
-                        {/* Step 1 */}
-                        <div
-                          className="flex items-center gap-xs"
-                          style={{
-                            fontSize: "0.78rem",
-                            fontWeight: 600,
-                            color: approvalStatus === "confirmed"
-                              ? "var(--accent-cyan)"
-                              : "rgba(255, 159, 10, 0.9)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "20px",
-                              height: "20px",
-                              borderRadius: "50%",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              background: approvalStatus === "confirmed"
-                                ? "var(--accent-cyan)"
-                                : "rgba(255, 159, 10, 0.2)",
-                              border: approvalStatus === "confirmed"
-                                ? "none"
-                                : "1px solid rgba(255, 159, 10, 0.6)",
-                              fontSize: "0.7rem",
-                              color: approvalStatus === "confirmed" ? "#000" : "rgba(255, 159, 10, 0.9)",
-                            }}
-                          >
-                            {approvalStatus === "confirmed" ? <Check size={12} /> : "1"}
-                          </div>
-                          Approve USDC
+                    {currentStep === "result" && transactionResult && (
+                      <div className="result-view flex-1 flex flex-col justify-center">
+                        <div className={`result-icon-container ${transactionResult.success ? "success" : "error"} animate-scale-in`}>
+                          {transactionResult.success ? <Check size={32} /> : <AlertTriangle size={32} />}
                         </div>
-                        <div style={{ flex: 1, height: "1px", background: "var(--border-glass)" }} />
-                        {/* Step 2 */}
-                        <div
-                          className="flex items-center gap-xs"
-                          style={{
-                            fontSize: "0.78rem",
-                            fontWeight: 600,
-                            color: approvalStatus === "confirmed"
-                              ? "var(--text-primary)"
-                              : "var(--text-secondary)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "20px",
-                              height: "20px",
-                              borderRadius: "50%",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px solid var(--border-glass)",
-                              fontSize: "0.7rem",
-                            }}
-                          >
-                            2
-                          </div>
-                          Deposit
-                        </div>
-                      </div>
-
-                      {approvalStatus !== "confirmed" && (
-                        <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginBottom: "10px" }}>
-                          You need to approve the vault contract to spend{" "}
-                          <strong style={{ color: "var(--text-primary)" }}>
-                            {enteredAmount.toFixed(2)} USDC
-                          </strong>{" "}
-                          before depositing.
+                        <h3 style={{ marginBottom: "12px" }}>
+                          {transactionResult.success ? "Transaction Successful" : "Transaction Failed"}
+                        </h3>
+                        <p style={{ color: "var(--text-secondary)", marginBottom: "32px", maxWidth: "300px" }}>
+                          {transactionResult.message}
                         </p>
-                      )}
-
-                      {approvalStatus === "error" && (
-                        <p style={{ fontSize: "0.82rem", color: "var(--text-error)", marginBottom: "10px" }}>
-                          Approval failed. Please try again.
-                        </p>
-                      )}
-
-                      {approvalStatus !== "confirmed" && (
+                        
                         <button
                           type="button"
-                          className="btn btn-outline"
-                          style={{ width: "100%", padding: "10px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
-                          disabled={approvalStatus === "pending" || !walletAddress}
-                          onClick={async () => {
-                            try {
-                              await approve(enteredAmount);
-                              toast.success({ title: "USDC Approved", description: "You can now proceed with your deposit." });
-                            } catch {
-                              toast.error({ title: "Approval Failed", description: "Could not approve USDC. Please try again." });
-                            }
-                          }}
+                          className="btn btn-primary"
+                          style={{ width: "100%", padding: "16px" }}
+                          onClick={resetWizard}
                         >
-                          {approvalStatus === "pending" ? (
-                            <>
-                              <Loader2 size={14} style={{ animation: "spin 0.9s linear infinite" }} />
-                              Approving...
-                            </>
-                          ) : (
-                            "Approve USDC"
-                          )}
+                          {transactionResult.success ? "Done" : "Try Again"}
                         </button>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    className="btn btn-primary"
-                    style={{
-                      width: "100%",
-                      padding: "16px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "8px",
-                    }}
-                    type="submit"
-                    disabled={
-                      isSubmitDisabled || isEstimating
-                    }
-                  >
-                    {isProcessing === tab ? (
-                      <>
-                        <Loader2
-                          size={16}
-                          className="spin"
-                          style={{ animation: "spin 0.9s linear infinite" }}
-                        />
-                        Waiting for confirmation...
-                      </>
-                    ) : isEstimating ? (
-                      <>
-                        <Loader2
-                          size={16}
-                          className="spin"
-                          style={{ animation: "spin 0.9s linear infinite" }}
-                        />
-                        Estimating fee...
-                      </>
-                    ) : tab === "deposit" ? (
-                      isCapReached ? "Vault is full" : "Approve & Deposit"
-                    ) : (
-                      "Withdraw Funds"
+                      </div>
                     )}
-                  </button>
-                </form>
+                  </div>
               </TabsContent>
             ))}
           </Tabs>

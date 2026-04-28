@@ -62,11 +62,13 @@ const TransactionStatus: React.FC<TransactionStatusProps> = ({ status }) => {
         marginTop: "16px",
         padding: "14px 16px",
         borderRadius: "12px",
-        ...stateStyles,
+        border: stateStyles.border,
       }}
     >
       <div className="flex items-center gap-sm" style={{ marginBottom: "6px" }}>
-        {stateStyles.icon}
+        <div key={status.state} className="status-icon-wrapper">
+          {stateStyles.icon}
+        </div>
         <strong>{status.title}</strong>
       </div>
       <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
@@ -88,16 +90,6 @@ const TransactionStatus: React.FC<TransactionStatusProps> = ({ status }) => {
           View {status.actionLabel ?? "transaction"} on Stellar Explorer
         </a>
       ) : null}
-      <style>{`
-        .spin {
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          to {
-            transform: rotate(360deg);
-          }
-        }
-      `}</style>
     </section>
   );
 };

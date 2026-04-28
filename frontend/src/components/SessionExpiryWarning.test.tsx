@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import SessionExpiryWarning from "./SessionExpiryWarning";
 
-// Mock the useTranslation hook
 vi.mock("../i18n", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { minutes?: number }) => {
@@ -22,8 +21,7 @@ describe("SessionExpiryWarning", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // Set up a session that will expire in 4 minutes (less than 5 minute warning threshold)
-    const sessionStart = Date.now() - (30 * 60 * 1000) + (4 * 60 * 1000); // 26 minutes ago
+    const sessionStart = Date.now() - (30 * 60 * 1000) + (4 * 60 * 1000);
     localStorage.setItem("wallet_session_start", sessionStart.toString());
   });
 
@@ -46,7 +44,6 @@ describe("SessionExpiryWarning", () => {
   });
 
   it("does not render when session is not close to expiry", () => {
-    // Set up a fresh session (started 5 minutes ago)
     const sessionStart = Date.now() - (5 * 60 * 1000);
     localStorage.setItem("wallet_session_start", sessionStart.toString());
 
@@ -97,7 +94,6 @@ describe("SessionExpiryWarning", () => {
   });
 
   it("hides banner after session expires", async () => {
-    // Set up session that expires in 2 seconds for testing
     const sessionStart = Date.now() - (30 * 60 * 1000) + (2 * 1000);
     localStorage.setItem("wallet_session_start", sessionStart.toString());
 
@@ -105,12 +101,10 @@ describe("SessionExpiryWarning", () => {
       <SessionExpiryWarning onReconnect={mockOnReconnect} onDismiss={mockOnDismiss} />
     );
 
-    // Should initially show
     await waitFor(() => {
       expect(screen.getByText("Session Expiring Soon")).toBeInTheDocument();
     });
 
-    // Wait for session to expire (should happen in ~2 seconds)
     await waitFor(
       () => {
         expect(screen.queryByText("Session Expiring Soon")).not.toBeInTheDocument();

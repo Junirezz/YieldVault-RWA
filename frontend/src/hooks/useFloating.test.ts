@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useFloating, type Placement } from "./useFloating";
+import { useFloating, type Placement, type UseFloatingReturn } from "./useFloating";
 
 // Helper to create a mock DOMRect
 function mockRect(
@@ -24,7 +24,7 @@ function mockRect(
 
 // Helper to set up trigger and floating refs with mock getBoundingClientRect
 function setupRefs(
-  result: { current: ReturnType<typeof useFloating> },
+  result: { current: UseFloatingReturn },
   triggerRect: DOMRect,
   panelWidth = 100,
   panelHeight = 40

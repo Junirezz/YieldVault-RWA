@@ -23,6 +23,7 @@ interface VaultContextType {
   lastUpdate: Date;
   isLoading: boolean;
   error: ApiError | null;
+  contractPaused: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -37,6 +38,7 @@ const DEFAULT_SUMMARY: VaultSummary = {
   exchangeRate: 1.084,
   networkFeeEstimate: "~0.00001 XLM",
   updatedAt: "2026-03-25T10:00:00.000Z",
+  contractPaused: false,
   strategy: {
     id: "stellar-benji",
     name: "Franklin BENJI Connector",
@@ -127,6 +129,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
         lastUpdate,
         isLoading,
         error,
+        contractPaused: summary.contractPaused,
         refresh,
       }}
     >

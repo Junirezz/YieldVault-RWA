@@ -6,33 +6,33 @@ import Navbar from './Navbar';
 import { ThemeProvider } from '../context/ThemeContext';
 import { ToastProvider } from '../context/ToastContext';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { PreferencesProvider } from '../context/PreferencesContext';
 
 describe('Navbar', () => {
     const mockOnConnect = vi.fn();
     const mockOnDisconnect = vi.fn();
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-    const Providers: React.FC<React.PropsWithChildren> = ({ children }) => (
-        <MemoryRouter>
-            <QueryClientProvider client={queryClient}>
-                <ToastProvider>
-                    <PreferencesProvider>
-                        <ThemeProvider>{children}</ThemeProvider>
-                    </PreferencesProvider>
-                </ToastProvider>
-            </QueryClientProvider>
-        </MemoryRouter>
-    );
+    const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+    });
 
     it('renders the navbar with navigation links', () => {
         render(
-            <Providers>
-                <Navbar
-                    walletAddress={null}
-                    onConnect={mockOnConnect}
-                    onDisconnect={mockOnDisconnect}
-                />
-            </Providers>
+            <MemoryRouter>
+                <QueryClientProvider client={queryClient}>
+                    <PreferencesProvider>
+                        <ToastProvider>
+                        <ThemeProvider>
+                            <Navbar
+                                walletAddress={null}
+                                onConnect={mockOnConnect}
+                                onDisconnect={mockOnDisconnect}
+                            />
+                        </ThemeProvider>
+                    </ToastProvider>
+                </PreferencesProvider>
+            </QueryClientProvider>
+            </MemoryRouter>
         );
 
         expect(screen.getByText(/YieldVault/)).toBeInTheDocument();
@@ -44,13 +44,21 @@ describe('Navbar', () => {
 
     it('renders the wallet connect button', () => {
         render(
-            <Providers>
-                <Navbar
-                    walletAddress={null}
-                    onConnect={mockOnConnect}
-                    onDisconnect={mockOnDisconnect}
-                />
-            </Providers>
+            <MemoryRouter>
+                <QueryClientProvider client={queryClient}>
+                    <PreferencesProvider>
+                        <ToastProvider>
+                        <ThemeProvider>
+                            <Navbar
+                                walletAddress={null}
+                                onConnect={mockOnConnect}
+                                onDisconnect={mockOnDisconnect}
+                            />
+                        </ThemeProvider>
+                    </ToastProvider>
+                </PreferencesProvider>
+            </QueryClientProvider>
+            </MemoryRouter>
         );
 
         expect(screen.getByText(/Connect Freighter/i)).toBeInTheDocument();
@@ -60,13 +68,21 @@ describe('Navbar', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
         const expectedAddress = 'GABC1...9012';
         render(
-            <Providers>
-                <Navbar
-                    walletAddress={fullAddress}
-                    onConnect={mockOnConnect}
-                    onDisconnect={mockOnDisconnect}
-                />
-            </Providers>
+            <MemoryRouter>
+                <QueryClientProvider client={queryClient}>
+                    <PreferencesProvider>
+                        <ToastProvider>
+                        <ThemeProvider>
+                            <Navbar
+                                walletAddress={fullAddress}
+                                onConnect={mockOnConnect}
+                                onDisconnect={mockOnDisconnect}
+                            />
+                        </ThemeProvider>
+                    </ToastProvider>
+                </PreferencesProvider>
+            </QueryClientProvider>
+            </MemoryRouter>
         );
 
         expect(screen.getByText(expectedAddress)).toBeInTheDocument();
@@ -75,13 +91,21 @@ describe('Navbar', () => {
     it('shows a network badge when wallet is connected', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
         render(
-            <Providers>
-                <Navbar
-                    walletAddress={fullAddress}
-                    onConnect={mockOnConnect}
-                    onDisconnect={mockOnDisconnect}
-                />
-            </Providers>
+            <MemoryRouter>
+                <QueryClientProvider client={queryClient}>
+                    <PreferencesProvider>
+                        <ToastProvider>
+                        <ThemeProvider>
+                            <Navbar
+                                walletAddress={fullAddress}
+                                onConnect={mockOnConnect}
+                                onDisconnect={mockOnDisconnect}
+                            />
+                        </ThemeProvider>
+                    </ToastProvider>
+                </PreferencesProvider>
+            </QueryClientProvider>
+            </MemoryRouter>
         );
 
         expect(screen.getAllByText(/testnet|mainnet/i)[0]).toBeInTheDocument();

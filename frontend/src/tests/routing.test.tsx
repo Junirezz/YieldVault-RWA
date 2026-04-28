@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import App from '../App';
 
@@ -40,13 +41,25 @@ vi.mock('../hooks/useBalanceData', () => ({
   useUsdcBalance: () => ({ data: 1000, isLoading: false })
 }));
 
-describe('Routing and Lazy Loading', () => {
-  it('renders the loading fallback initially when navigating to a lazy route', async () => {
-    render(
-      <MemoryRouter initialEntries={['/']}>
+function renderWithProviders(initialEntries: string[]) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={initialEntries}>
         <App />
       </MemoryRouter>
-    );
+    </QueryClientProvider>
+  );
+}
+
+describe('Routing and Lazy Loading', () => {
+  it('renders the loading fallback initially when navigating to a lazy route', async () => {
+    renderWithProviders(['/']);
 
     // Shared route fallback renders while lazy chunks load
     expect(screen.getByText('app.loading.subtitle')).toBeDefined();
@@ -58,11 +71,7 @@ describe('Routing and Lazy Loading', () => {
   });
 
   it('navigates to portfolio and shows loading state', async () => {
-    render(
-      <MemoryRouter initialEntries={['/portfolio']}>
-        <App />
-      </MemoryRouter>
-    );
+    renderWithProviders(['/portfolio']);
 
     expect(screen.getByText('app.loading.subtitle')).toBeDefined();
 
@@ -72,11 +81,7 @@ describe('Routing and Lazy Loading', () => {
   });
 
   it('redirects to home for unknown routes', async () => {
-    render(
-      <MemoryRouter initialEntries={['/unknown-route']}>
-        <App />
-      </MemoryRouter>
-    );
+    renderWithProviders(['/unknown-route']);
 
     await waitFor(() => {
       expect(screen.getByTestId('home-page')).toBeDefined();

@@ -25,9 +25,45 @@ model VaultState {
 }
 
 model Transaction {
-  id        String   @id @default(uuid())
-  user      String
-  amount    String
-  type      String
-  timestamp DateTime @default(now())
+  id           String   @id @default(uuid())
+  user         String
+  amount       String
+  type         String
+  referralCode String?
+  timestamp    DateTime @default(now())
+}
+
+model Referral {
+  id              Int       @id @default(autoincrement())
+  referrerAddress String
+  referredAddress String    @unique
+  firstDepositAt  DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([referrerAddress])
+}
+
+model ReferralCode {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  ownerAddress String
+  createdAt    DateTime @default(now())
+}
+
+model AdminAuditLog {
+  id         String   @id
+  action     String
+  method     String
+  path       String
+  statusCode Int
+  actor      String
+  apiKeyHash String
+  ipAddress  String
+  userAgent  String
+  metadata   String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+  @@index([actor])
 }

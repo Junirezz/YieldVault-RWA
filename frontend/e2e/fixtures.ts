@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { test as base, type Page } from '@playwright/test';
 
 // Inline fixture data — avoids JSON import attribute requirements across Node versions
@@ -285,7 +286,6 @@ type Fixtures = {
 export const test = base.extend<Fixtures>({
   appPage: async ({ page }, use) => {
     await interceptApiRoutes(page);
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     await use(page);
   },
 });

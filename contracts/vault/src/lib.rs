@@ -13,7 +13,9 @@ mod test;
 pub mod upgrade;
 
 use crate::strategy::StrategyClient;
-use crate::upgrade::{get_admin, get_pending_admin, is_initialized, set_admin, set_initialized, set_pending_admin};
+use crate::upgrade::{
+    get_admin, get_pending_admin, is_initialized, set_admin, set_initialized, set_pending_admin,
+};
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
     Address, BytesN, Env, Vec,
@@ -186,11 +188,16 @@ impl YieldVault {
     pub fn whitelist_strategy(env: Env, strategy: Address, approved: bool) {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
-        env.storage().instance().set(&DataKey::StrategyWhitelist(strategy), &approved);
+        env.storage()
+            .instance()
+            .set(&DataKey::StrategyWhitelist(strategy), &approved);
     }
 
     pub fn is_strategy_whitelisted(env: Env, strategy: Address) -> bool {
-        env.storage().instance().get(&DataKey::StrategyWhitelist(strategy)).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::StrategyWhitelist(strategy))
+            .unwrap_or(false)
     }
 
     /// Read the active strategy address.
@@ -657,23 +664,29 @@ impl YieldVault {
             .instance()
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &ta.checked_add(amount).expect("overflow"),
+        );
 
         let ts = Self::total_shares(env.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalShares, &ts.checked_add(shares_to_mint).expect("overflow"));
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &ts.checked_add(shares_to_mint).expect("overflow"),
+        );
         state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
-        state.total_shares = state.total_shares.checked_add(shares_to_mint).expect("overflow");
+        state.total_shares = state
+            .total_shares
+            .checked_add(shares_to_mint)
+            .expect("overflow");
         env.storage().instance().set(&DataKey::State, &state);
 
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&user_key, &user_shares.checked_add(shares_to_mint).expect("overflow"));
+        env.storage().instance().set(
+            &user_key,
+            &user_shares.checked_add(shares_to_mint).expect("overflow"),
+        );
 
         env.events()
             .publish((symbol_short!("deposit"),), (amount, shares_to_mint));
@@ -740,10 +753,8 @@ impl YieldVault {
             env.storage()
                 .instance()
                 .set(&DataKey::PendingWithdrawal(user.clone()), &pending);
-            env.events().publish(
-                (symbol_short!("pndwdraw"), user),
-                (shares, unlock_ts),
-            );
+            env.events()
+                .publish((symbol_short!("pndwdraw"), user), (shares, unlock_ts));
             return Ok(0);
         }
 
@@ -812,14 +823,16 @@ impl YieldVault {
 
         token_client.transfer(&env.current_contract_address(), &user, &assets_to_return);
 
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(assets_to_return).expect("underflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &idle_ta.checked_sub(assets_to_return).expect("underflow"),
+        );
 
         let ts = Self::total_shares(env.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalShares, &ts.checked_sub(shares).expect("underflow"));
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &ts.checked_sub(shares).expect("underflow"),
+        );
 
         let vault_balance = Self::balance(env.clone(), user.clone());
         env.storage().instance().set(
@@ -827,7 +840,10 @@ impl YieldVault {
             &vault_balance.checked_sub(shares).expect("underflow"),
         );
 
-        state.total_assets = state.total_assets.checked_sub(assets_to_return).expect("underflow");
+        state.total_assets = state
+            .total_assets
+            .checked_sub(assets_to_return)
+            .expect("underflow");
         state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
         env.storage().instance().set(&DataKey::State, state);
 
@@ -838,7 +854,9 @@ impl YieldVault {
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
         let new_deposit = if current_deposit > assets_to_return {
-            current_deposit.checked_sub(assets_to_return).expect("underflow")
+            current_deposit
+                .checked_sub(assets_to_return)
+                .expect("underflow")
         } else {
             0
         };
@@ -881,9 +899,10 @@ impl YieldVault {
         strategy_client.deposit(&amount);
 
         // Update idle assets
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &idle_ta.checked_sub(amount).expect("underflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &idle_ta.checked_sub(amount).expect("underflow"),
+        );
     }
 
     /// Recall funds from the strategy.
@@ -900,9 +919,10 @@ impl YieldVault {
             .instance()
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &idle_ta.checked_add(amount).expect("overflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &idle_ta.checked_add(amount).expect("overflow"),
+        );
     }
 
     /// Admin function to artificially accrue yield, deducting the protocol fee.
@@ -917,11 +937,7 @@ impl YieldVault {
         token_client.transfer(&admin, &env.current_contract_address(), &amount);
 
         // Goal 1: deduct protocol fee before distributing to depositors
-        let fee_bps: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::FeeBps)
-            .unwrap_or(0);
+        let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         let fee_amount = amount.checked_mul(fee_bps).expect("overflow") / 10_000;
         let net_yield = amount.checked_sub(fee_amount).expect("underflow");
 
@@ -932,9 +948,10 @@ impl YieldVault {
                 .instance()
                 .get(&DataKey::TreasuryBalance)
                 .unwrap_or(0);
-            env.storage()
-                .instance()
-                .set(&DataKey::TreasuryBalance, &treasury_bal.checked_add(fee_amount).expect("overflow"));
+            env.storage().instance().set(
+                &DataKey::TreasuryBalance,
+                &treasury_bal.checked_add(fee_amount).expect("overflow"),
+            );
         }
 
         let ta = env
@@ -942,9 +959,10 @@ impl YieldVault {
             .instance()
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &ta.checked_add(net_yield).expect("overflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &ta.checked_add(net_yield).expect("overflow"),
+        );
 
         let mut state = Self::get_state(&env);
         state.total_assets = state.total_assets.checked_add(net_yield).expect("overflow");
@@ -960,11 +978,7 @@ impl YieldVault {
         if new_bps < 0 || new_bps > 10_000 {
             panic!("fee_bps must be 0-10000");
         }
-        let old_bps: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::FeeBps)
-            .unwrap_or(0);
+        let old_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &new_bps);
         env.events()
             .publish((symbol_short!("feechg"),), (old_bps, new_bps));
@@ -1068,9 +1082,10 @@ impl YieldVault {
             .instance()
             .get::<_, i128>(&DataKey::TotalAssets)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &ta.checked_add(amount).expect("overflow"));
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &ta.checked_add(amount).expect("overflow"),
+        );
 
         let mut state = Self::get_state(&env);
         state.total_assets = state.total_assets.checked_add(amount).expect("overflow");

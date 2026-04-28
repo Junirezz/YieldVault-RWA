@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Flow 2: Deposit & Withdraw Transaction
  */
 import type { Page } from '@playwright/test';
@@ -31,15 +31,15 @@ test.describe('Deposit panel  no wallet', () => {
   test('deposit panel shows wallet-not-connected overlay', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByText('Wallet Not Connected')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Approve & Deposit/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Review Transaction/i })).toBeVisible();
   });
 
-  test('submit button is disabled when amount is empty or zero', async ({ page }) => {
+  test('review button is disabled when amount is empty or zero', async ({ page }) => {
     await page.goto('/');
-    const submitBtn = page.getByRole('button', { name: /Approve & Deposit/i });
-    await expect(submitBtn).toBeDisabled();
+    const reviewBtn = page.getByRole('button', { name: /Review Transaction/i });
+    await expect(reviewBtn).toBeDisabled();
     await page.getByPlaceholder('0.00').fill('0');
-    await expect(submitBtn).toBeDisabled();
+    await expect(reviewBtn).toBeDisabled();
   });
 
   test('strategy info panel shows exchange rate and network fee', async ({ page }) => {
@@ -91,49 +91,66 @@ test.describe('Deposit & Withdraw  connected wallet', () => {
     await expect(page.getByLabel('Deposit amount')).toHaveValue(expectedBalance);
   });
 
-  test('performs a deposit and updates the balance', async ({ page }) => {
+  test('performs a deposit wizard flow and updates the balance', async ({ page }) => {
     await goToConnectedVault(page);
 
     const amountInput = page.getByLabel('Deposit amount');
-    const submitBtn = page.getByRole('button', { name: /Approve & Deposit/i });
+    const reviewBtn = page.getByRole('button', { name: /Review Transaction/i });
 
     await amountInput.fill('100');
-    await expect(submitBtn).toBeEnabled();
-    await submitBtn.click();
+    await expect(reviewBtn).toBeEnabled();
+    await reviewBtn.click();
 
-    await expect(page.getByRole('button', { name: /Dismiss Deposit Successful/i })).toBeVisible({
+    // Step 2: Review
+    await expect(page.getByText('Confirm Transaction')).toBeVisible();
+    const confirmBtn = page.getByRole('button', { name: /Confirm deposit/i });
+    await expect(confirmBtn).toBeEnabled();
+    await confirmBtn.click();
+
+    // Step 3: Result
+    await expect(page.getByText('Transaction Successful')).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByRole('button', { name: /Approve & Deposit/i })).toBeVisible();
+    await page.getByRole('button', { name: /Done/i }).click();
+    await expect(page.getByRole('button', { name: /Review Transaction/i })).toBeVisible();
   });
 
-  test('performs a withdrawal and updates the balance', async ({ page }) => {
+  test('performs a withdrawal wizard flow and updates the balance', async ({ page }) => {
     await goToConnectedVault(page);
 
     await page.getByRole('tab', { name: 'Withdraw', exact: true }).click();
     await expect(page.getByText('Amount to withdraw')).toBeVisible();
 
     await page.getByLabel('Withdrawal amount').fill('50');
-    const submitBtn = page.getByRole('button', { name: /Withdraw Funds/i });
-    await expect(submitBtn).toBeEnabled();
-    await submitBtn.click();
+    const reviewBtn = page.getByRole('button', { name: /Review Transaction/i });
+    await expect(reviewBtn).toBeEnabled();
+    await reviewBtn.click();
 
-    await expect(page.getByRole('button', { name: /Dismiss Withdrawal Successful/i })).toBeVisible({
+    // Step 2: Review
+    await expect(page.getByText('Confirm Transaction')).toBeVisible();
+    const confirmBtn = page.getByRole('button', { name: /Confirm withdrawal/i });
+    await expect(confirmBtn).toBeEnabled();
+    await confirmBtn.click();
+
+    // Step 3: Result
+    await expect(page.getByText('Transaction Successful')).toBeVisible({
       timeout: 15_000,
     });
+    await page.getByRole('button', { name: /Done/i }).click();
+    await expect(page.getByRole('tab', { name: 'Withdraw', exact: true })).toBeVisible();
   });
 
-  test('deposit submit stays disabled with an empty amount field', async ({ page }) => {
+  test('deposit review stays disabled with an empty amount field', async ({ page }) => {
     await goToConnectedVault(page);
     const depositInput = page.getByLabel('Deposit amount');
     await expect(depositInput).toHaveValue('');
-    await expect(page.getByRole('button', { name: /Approve & Deposit/i })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Review Transaction/i })).toBeDisabled();
   });
 
-  test('deposit submit stays disabled when amount exceeds available USDC balance', async ({ page }) => {
+  test('deposit review stays disabled when amount exceeds available USDC balance', async ({ page }) => {
     await goToConnectedVault(page);
     await page.getByLabel('Deposit amount').fill('999999');
-    await expect(page.getByRole('button', { name: /Approve & Deposit/i })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Review Transaction/i })).toBeDisabled();
     await expect(page.getByRole('alert')).toContainText(/exceed/i);
   });
 
