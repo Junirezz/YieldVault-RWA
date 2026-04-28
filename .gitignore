@@ -4,6 +4,8 @@
 
 # Node
 /frontend/node_modules
+node_modules/
+pnpm-lock.yaml
 
 # Editor
 .idea

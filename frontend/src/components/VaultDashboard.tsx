@@ -8,7 +8,6 @@ import {
   TrendingUp, 
   Wallet as WalletIcon, 
   Loader2,
-  Loader2, 
   Share2
 } from "./icons";
 import Skeleton from "./Skeleton";

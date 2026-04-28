@@ -8,14 +8,18 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from "recharts";
-import { type TooltipProps } from "recharts";
+import type { TooltipContentProps } from "recharts/types/component/Tooltip";
 import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 import { TrendingUp } from "./icons";
 import { useVaultHistory } from "../hooks/useVaultData";
 import Skeleton from "./Skeleton";
 import { type TimeRange, getNow, getCutoffDate } from "../lib/dateUtils";
 
-function VaultPerformanceTooltip({ active, payload, label }: TooltipProps<ValueType, NameType>) {
+const VaultPerformanceTooltip = ({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<ValueType, NameType>) => {
   if (active && payload && payload.length) {
     const raw = payload[0]?.value;
     const value = typeof raw === "number" ? raw : undefined;
