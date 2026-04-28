@@ -26,6 +26,8 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { AlertTriangle } from "./icons";
 import HelpIcon from "./ui/HelpIcon";
+import React from "react";
+import { Check } from "lucide-react";
 
 /**
  * Valid transaction tabs in the vault dashboard.
@@ -41,6 +43,13 @@ type TransactionStep = "amount" | "review" | "result";
  * Visual indicator for the 3-step transaction wizard.
  * Shows progress through Amount, Review, and Result stages.
  */
+const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({
+  currentStep,
+}) => {
+  const steps = [
+    { id: "amount", label: "Enter Amount" },
+    { id: "review", label: "Review & Confirm" },
+    { id: "result", label: "Success / Failure" },
 const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep }) => {
   const steps = [
     { id: "amount", label: "Amount" },
@@ -50,6 +59,7 @@ const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep
 
   const getStepStatus = (stepId: TransactionStep) => {
     const stepOrder: TransactionStep[] = ["amount", "review", "result"];
+
     const currentIndex = stepOrder.indexOf(currentStep);
     const stepIndex = stepOrder.indexOf(stepId);
 
@@ -62,10 +72,26 @@ const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep
     <div className="step-indicator-container">
       {steps.map((step, index) => {
         const status = getStepStatus(step.id as TransactionStep);
+
         return (
           <React.Fragment key={step.id}>
             <div className={`step-item ${status}`}>
               <div className="step-number">
+                {status === "completed" ? (
+                  <Check size={12} />
+                ) : (
+                  index + 1
+                )}
+              </div>
+              <span className="step-label">{step.label}</span>
+            </div>
+
+            {index < steps.length - 1 && (
+              <div
+                className={`step-line ${
+                  status === "completed" ? "completed" : ""
+                }`}
+              />
                 {status === "completed" ? <Check size={12} /> : index + 1}
               </div>
               <span className="step-label">{step.label}</span>
@@ -79,6 +105,8 @@ const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep
     </div>
   );
 };
+
+export default StepIndicator;
 
 interface VaultDashboardProps {
   walletAddress: string | null;
