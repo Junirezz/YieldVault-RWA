@@ -36,6 +36,7 @@ import {
   updateVaultMetrics,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
+import { startEventPollingService, stopEventPollingService } from './eventPollingService';
 
 declare global {
   namespace Express {
@@ -728,6 +729,16 @@ if (process.env.NODE_ENV !== 'test') {
 // Start latency monitoring
 latencyMonitoringService.startMonitoring();
 
+// ─── Event Polling Service (Issue: Event Replay) ────────────────────────────
+if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {
+  startEventPollingService({
+    rpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+    contractId: process.env.VAULT_CONTRACT_ID,
+    pollIntervalMs: parseInt(process.env.EVENT_POLL_INTERVAL_MS || '10000', 10),
+    batchSize: parseInt(process.env.EVENT_REPLAY_BATCH_SIZE || '100', 10),
+  });
+}
+
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
 /**
@@ -846,6 +857,11 @@ if (process.env.NODE_ENV !== 'test') {
 const stopApyScheduler = startApySnapshotScheduler();
 shutdownHandler.onShutdown(async () => {
   stopApyScheduler();
+});
+
+// Register event polling service shutdown
+shutdownHandler.onShutdown(async () => {
+  stopEventPollingService();
 });
 
 // Register database shutdown task

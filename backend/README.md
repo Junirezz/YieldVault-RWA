@@ -9,6 +9,7 @@ Express.js backend server for YieldVault Stellar RWA platform with rate limiting
 - **Rate Limiting** - Per-IP and per-API-key rate limiting to prevent abuse
 - **Dependency Monitoring** - Checks for cache and Stellar RPC availability
 - **Admin Audit Logs** - Tracks privileged admin actions via `/admin/audit-logs`
+- **Event Replay System** - Recovers from polling gaps by replaying missed on-chain events
 - **Background Job Dashboard** - Monitoring views at `/admin/jobs/dashboard` and `/admin/jobs/dashboard/view`
 - **Prisma Runtime Tuning** - Configurable pooling and query timeouts
 - **Error Handling** - Consistent JSON error responses
@@ -62,6 +63,8 @@ Rate limiting and other settings are configurable via environment variables:
 | `PRISMA_POOL_TIMEOUT_MS` | 10000 | Prisma pool wait timeout in ms |
 | `PRISMA_QUERY_TIMEOUT_MS` | 5000 | Max Prisma query time in ms |
 | `ADMIN_AUDIT_LOG_STORAGE` | hybrid | Audit log storage mode (`memory`, `prisma`, `hybrid`) |
+| `EVENT_POLL_INTERVAL_MS` | 10000 | Event polling interval (10 seconds) |
+| `EVENT_REPLAY_BATCH_SIZE` | 100 | Batch size for event replay (ledgers per batch) |
 
 ## API Endpoints
 
