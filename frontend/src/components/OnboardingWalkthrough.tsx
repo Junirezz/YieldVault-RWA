@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { X, ChevronRight, ChevronLeft } from "lucide-react";
 
 interface Step {
@@ -28,15 +28,10 @@ const STEPS: Step[] = [
 const LOCAL_STORAGE_KEY = "hasSeenWalkthrough";
 
 const OnboardingWalkthrough: React.FC = () => {
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(
+    () => !localStorage.getItem(LOCAL_STORAGE_KEY),
+  );
   const [currentStep, setCurrentStep] = useState(0);
-
-  useEffect(() => {
-    const hasSeen = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!hasSeen) {
-      setIsVisible(true);
-    }
-  }, []);
 
   const handleDismiss = () => {
     localStorage.setItem(LOCAL_STORAGE_KEY, "true");

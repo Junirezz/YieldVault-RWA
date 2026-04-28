@@ -31,12 +31,10 @@ async function runAxe(container: HTMLElement): Promise<AxeResults> {
 }
 
 function expectNoViolations(results: AxeResults): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const violations = results.violations.map(
-    (v: any) =>
+    (v) =>
       `[${v.impact}] ${v.id}: ${v.description}\n` +
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      v.nodes.map((n: any) => `  → ${n.html}`).join("\n"),
+      v.nodes.map((n) => `  → ${n.html}`).join("\n"),
   );
 
   expect(violations, `axe found ${violations.length} violation(s):\n${violations.join("\n\n")}`).toHaveLength(0);
