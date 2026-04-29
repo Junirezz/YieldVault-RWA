@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useReferralCode } from "../hooks/useReferral";
-import { 
-  Activity, 
-  AlertCircle, 
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
   Check,
-  ShieldCheck, 
-  TrendingUp, 
-  Wallet as WalletIcon, 
   Loader2,
-  Share2
+  Share2,
+  ShieldCheck,
+  TrendingUp,
+  Wallet as WalletIcon,
 } from "./icons";
 import Skeleton from "./Skeleton";
 import { useVault } from "../context/VaultContext";
@@ -24,10 +25,8 @@ import { useTokenAllowance } from "../hooks/useTokenAllowance";
 import CopyButton from "./CopyButton";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
-import { AlertTriangle } from "./icons";
 import HelpIcon from "./ui/HelpIcon";
-import React from "react";
-import { Check } from "lucide-react";
+import EmptyState from "./ui/EmptyState";
 
 /**
  * Valid transaction tabs in the vault dashboard.
@@ -43,13 +42,6 @@ type TransactionStep = "amount" | "review" | "result";
  * Visual indicator for the 3-step transaction wizard.
  * Shows progress through Amount, Review, and Result stages.
  */
-const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({
-  currentStep,
-}) => {
-  const steps = [
-    { id: "amount", label: "Enter Amount" },
-    { id: "review", label: "Review & Confirm" },
-    { id: "result", label: "Success / Failure" },
 const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep }) => {
   const steps = [
     { id: "amount", label: "Amount" },
@@ -77,21 +69,6 @@ const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep
           <React.Fragment key={step.id}>
             <div className={`step-item ${status}`}>
               <div className="step-number">
-                {status === "completed" ? (
-                  <Check size={12} />
-                ) : (
-                  index + 1
-                )}
-              </div>
-              <span className="step-label">{step.label}</span>
-            </div>
-
-            {index < steps.length - 1 && (
-              <div
-                className={`step-line ${
-                  status === "completed" ? "completed" : ""
-                }`}
-              />
                 {status === "completed" ? <Check size={12} /> : index + 1}
               </div>
               <span className="step-label">{step.label}</span>
@@ -105,8 +82,6 @@ const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep
     </div>
   );
 };
-
-export default StepIndicator;
 
 interface VaultDashboardProps {
   walletAddress: string | null;
@@ -581,6 +556,19 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               <CopyButton value={strategy.id} label="strategy ID" />
             </div>
           </div>
+
+          {/* Empty state: wallet connected, loading done, no USDC balance */}
+          {!isLoading && walletAddress && usdcBalance === 0 && (
+            <EmptyState
+              title="No deposits yet."
+              description="Start earning yield by depositing USDC into our high-efficiency vaults."
+              icon={<TrendingUp />}
+              actionLabel="Deposit Now"
+              onAction={() => {
+                window.dispatchEvent(new Event("TRIGGER_DEPOSIT"));
+              }}
+            />
+          )}
         </div>
       </div>
 
