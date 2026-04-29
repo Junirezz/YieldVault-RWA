@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { AlertTriangle, X } from "../icons";
+import { AlertTriangle, X } from "./icons";
 import { networkConfig } from "../config/network";
 
 interface NetworkWarningBannerProps {
@@ -25,8 +25,6 @@ const NetworkWarningBanner: React.FC<NetworkWarningBannerProps> = ({
       try {
         // In a real implementation, this would check the actual network via Freighter API
         // For now, we'll simulate network detection
-        const isTestnet = networkConfig.isTestnet;
-
         // Mock: assume wrong network initially, then correct after 2 seconds
         setIsWrongNetwork(true);
         setIsVisible(true);
