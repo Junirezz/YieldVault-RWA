@@ -4,8 +4,17 @@
 
 # Node
 /frontend/node_modules
-node_modules/
-pnpm-lock.yaml
+/backend/node_modules
+
+# Environment Variables - NEVER COMMIT THESE
+.env
+.env.local
+.env.*.local
+.env.development
+.env.staging
+.env.production
+*.env
+!.env.example
 
 # Editor
 .idea
@@ -20,3 +29,11 @@ GEMINI.md
 skills-lock.json
 issue.md
 contracts/vault/test_snapshots
+
+# Secrets and Keys
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+.secrets/
