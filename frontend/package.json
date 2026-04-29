@@ -16,6 +16,7 @@
     "test:e2e:debug": "npm run build && playwright test --debug",
     "test:cypress": "cypress run",
     "test:cypress:open": "cypress open",
+    "audit": "npm audit",
     "docs:api": "typedoc --entryPointStrategy expand --out ../docs/api/frontend src",
     "check-size": "bundlesize"
   },

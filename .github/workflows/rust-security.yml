@@ -1,18 +1,15 @@
-name: Rust Security Audit
+name: Dependency Vulnerability Audit
 
 on:
   pull_request:
-    branches:
-      - main
-      - develop
   push:
     branches:
       - main
       - develop
 
 jobs:
-  security-audit:
-    name: Cargo Audit & Clippy
+  dependency-audit:
+    name: Dependency Vulnerability Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,19 +23,46 @@ jobs:
         with:
           components: clippy
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
       - name: Install cargo-audit
         run: cargo install cargo-audit
 
-      - name: Run cargo-audit (detect vulnerable dependencies)
-        id: audit
+      - name: Run cargo audit
         run: |
-          cargo audit --deny warnings \
-            --ignore RUSTSEC-2026-0097 \
+          cargo audit --ignore RUSTSEC-2026-0097 \
             --ignore RUSTSEC-2024-0388 \
-            --ignore RUSTSEC-2024-0436
+            --ignore RUSTSEC-2024-0436 \
+            --json > cargo-audit.json || true
+          node scripts/dependency-audit.js cargo cargo-audit cargo-audit.json
+
+      - name: Run npm audit for backend
+        run: |
+          npm audit --json > backend/backend-audit.json || true
+          node scripts/dependency-audit.js npm backend backend/backend-audit.json
+
+      - name: Run npm audit for frontend
+        run: |
+          npm audit --json > frontend/frontend-audit.json || true
+          node scripts/dependency-audit.js npm frontend frontend/frontend-audit.json
 
       - name: Run cargo-clippy (linting)
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -61,9 +85,3 @@ jobs:
           else
             echo "✓ No unsafe code found in production code"
           fi
-
-      - name: Fail on audit violations
-        if: steps.audit.outcome == 'failure'
-        run: |
-          echo "❌ Security audit detected issues"
-          exit 1
