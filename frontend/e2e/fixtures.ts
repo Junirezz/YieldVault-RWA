@@ -129,11 +129,12 @@ export async function interceptApiRoutes(page: Page) {
     }),
   );
 
-  await page.route('**/horizon-testnet.stellar.org/accounts/**', async (route) => {
+  await page.route(/https:\/\/horizon-testnet\.stellar\.org\/accounts\/[^/?]+.*/, async (route) => {
     if (route.request().method() !== 'GET') {
       await route.continue();
       return;
     }
+
     const pathname = new URL(route.request().url()).pathname;
     const accountId = pathname.split('/').filter(Boolean).pop() ?? 'unknown';
     await route.fulfill({
