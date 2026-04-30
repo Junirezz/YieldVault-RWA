@@ -66,6 +66,16 @@ npm run docs:api
 
 See `docs/api/README.md` for output locations.
 
+## Disaster Recovery
+
+YieldVault has comprehensive disaster recovery procedures to ensure system resilience:
+
+- **RTO (Recovery Time Objective):** 1 hour for critical systems
+- **RPO (Recovery Point Objective):** 15 minutes maximum data loss
+- **Runbooks:** Step-by-step recovery procedures for all failure scenarios
+
+See [Disaster Recovery Runbooks](./docs/runbooks/README.md) for detailed procedures.
+
 ## Roadmap (Phases)
 - **Phase 1**: Planning, Documentation, and Frontend UI Baseline (Completed)
 - **Phase 2**: Soroban Smart Contract Implementation in Rust (Completed)
