@@ -1,0 +1,35 @@
+name: Load Tests (Staging)
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  load-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run k6 load test
+        uses: grafana/k6-action@v0.3.1
+        env:
+          BASE_URL: ${{ secrets.STAGING_BACKEND_URL || 'https://yieldvault-backend-staging.vercel.app' }}
+          WALLET_ADDRESS: ${{ secrets.LOAD_TEST_WALLET_ADDRESS }}
+          ASSET: ${{ secrets.LOAD_TEST_ASSET || 'USDC' }}
+          AMOUNT: ${{ secrets.LOAD_TEST_AMOUNT || '100.0' }}
+          METRICS_PATH: ${{ secrets.LOAD_TEST_METRICS_PATH || '/metrics' }}
+        with:
+          filename: tests/load/vault-load.test.js
+
+      - name: Publish load test summary
+        if: always()
+        run: |
+          if [ -f summary.md ]; then
+            cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Load test summary not found." >> "$GITHUB_STEP_SUMMARY"
+          fi

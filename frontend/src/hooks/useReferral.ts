@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../lib/apiClient";
 
 export interface ReferralStats {
@@ -20,7 +20,7 @@ export function useReferralStats(walletAddress: string | null) {
       if (!walletAddress) return null;
       try {
         return await apiClient.get<ReferralStats>(`/api/v1/referrals/${walletAddress}`);
-      } catch (error) {
+      } catch {
         // Return null for 404 (no referral activity) or other errors
         return null;
       }

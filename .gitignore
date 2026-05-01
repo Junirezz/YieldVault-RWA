@@ -4,6 +4,17 @@
 
 # Node
 /frontend/node_modules
+/backend/node_modules
+
+# Environment Variables - NEVER COMMIT THESE
+.env
+.env.local
+.env.*.local
+.env.development
+.env.staging
+.env.production
+*.env
+!.env.example
 
 # Editor
 .idea
@@ -18,3 +29,14 @@ GEMINI.md
 skills-lock.json
 issue.md
 contracts/vault/test_snapshots
+
+# Secrets scanning
+/.secrets.baseline
+
+# Secrets and Keys
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+.secrets/
