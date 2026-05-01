@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useReferralCode } from "../hooks/useReferral";
 import {
   Activity,
   AlertCircle,
@@ -43,27 +42,23 @@ type TransactionStep = "amount" | "review" | "result";
  * Shows progress through Amount, Review, and Result stages.
  */
 const StepIndicator: React.FC<{ currentStep: TransactionStep }> = ({ currentStep }) => {
-  const steps = [
+  const steps: Array<{ id: TransactionStep; label: string }> = [
     { id: "amount", label: "Amount" },
     { id: "review", label: "Review" },
     { id: "result", label: "Result" },
   ];
-
-  const getStepStatus = (stepId: TransactionStep) => {
-    const stepOrder: TransactionStep[] = ["amount", "review", "result"];
-
-    const currentIndex = stepOrder.indexOf(currentStep);
-    const stepIndex = stepOrder.indexOf(stepId);
-
-    if (stepIndex < currentIndex) return "completed";
-    if (stepIndex === currentIndex) return "active";
-    return "pending";
-  };
+  const stepOrder: TransactionStep[] = ["amount", "review", "result"];
+  const currentIndex = stepOrder.indexOf(currentStep);
 
   return (
     <div className="step-indicator-container">
       {steps.map((step, index) => {
-        const status = getStepStatus(step.id as TransactionStep);
+        const status =
+          index < currentIndex
+            ? "completed"
+            : index === currentIndex
+              ? "active"
+              : "pending";
 
         return (
           <React.Fragment key={step.id}>
@@ -202,8 +197,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<TransactionTab>("deposit");
   const [amount, setAmount] = useState("");
   const [touched, setTouched] = useState<Record<TransactionTab, boolean>>(INITIAL_TOUCHED_STATE);
-  const [referralCode, setReferralCode] = useState<string | undefined>();
-
   // Wizard state
   const [currentStep, setCurrentStep] = useState<TransactionStep>("amount");
   const [transactionResult, setTransactionResult] = useState<{

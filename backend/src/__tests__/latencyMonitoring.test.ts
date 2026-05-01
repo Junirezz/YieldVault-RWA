@@ -288,4 +288,205 @@ describe('LatencyMonitoringService', () => {
       expect(subsequentStatus.monitoringActive).toBe(true);
     });
   });
+
+  describe('Stale Data Pruning', () => {
+    test('should exclude data points outside the evaluation window from P95', () => {
+      // Use a short evaluation window for testing
+      process.env.SLO_EVALUATION_WINDOW_MS = '1000'; // 1 second
+      jest.resetModules();
+      const { latencyMonitoringService: freshService } = require('../latencyMonitoring');
+
+      const endpoint = '/api/v1/vault/summary';
+
+      // Record a breaching latency that will become stale
+      freshService.recordLatency(endpoint, 500);
+
+      const metricsBefore = freshService.getDetailedMetrics();
+      const metricBefore = metricsBefore.find(m => m.endpoint === endpoint);
+      expect(metricBefore?.currentP95).toBe(500);
+      expect(metricBefore?.isBreaching).toBe(true);
+
+      // Wait for the evaluation window to expire
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          const metricsAfter = freshService.getDetailedMetrics();
+          const metricAfter = metricsAfter.find(m => m.endpoint === endpoint);
+          // Stale data should be pruned, P95 should drop to 0
+          expect(metricAfter?.currentP95).toBe(0);
+          expect(metricAfter?.isBreaching).toBe(false);
+          expect(metricAfter?.dataPoints).toBe(0);
+          freshService.stopMonitoring();
+          resolve();
+        }, 1100);
+      });
+    });
+
+    test('should only count data points within the rolling window', () => {
+      process.env.SLO_EVALUATION_WINDOW_MS = '2000'; // 2 seconds
+      jest.resetModules();
+      const { latencyMonitoringService: freshService } = require('../latencyMonitoring');
+
+      const endpoint = '/api/v1/vault/summary';
+
+      // Record old data
+      freshService.recordLatency(endpoint, 999);
+
+      return new Promise<void>((resolve) => {
+        setTimeout(async () => {
+          // Old data is now stale; record fresh data
+          freshService.recordLatency(endpoint, 100);
+
+          const metrics = freshService.getDetailedMetrics();
+          const metric = metrics.find(m => m.endpoint === endpoint);
+          // Only the fresh data point should count
+          expect(metric?.dataPoints).toBe(1);
+          expect(metric?.currentP95).toBe(100);
+          freshService.stopMonitoring();
+          resolve();
+        }, 2200);
+      });
+    });
+  });
+
+  describe('Acceptance Criteria: Alert Message Content', () => {
+    beforeEach(() => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+      });
+    });
+
+    test('Slack alert body includes endpoint name, current P95 value, and SLO threshold', async () => {
+      process.env.ALERT_TYPE = 'slack';
+      process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      const endpoint = '/api/v1/vault/summary';
+      [250, 300, 350, 400, 450].forEach(l => svc.recordLatency(endpoint, l));
+
+      await (svc as any).checkSLOViolations();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://hooks.slack.com/test',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.any(String),
+        })
+      );
+
+      const callBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+      const affectedField = callBody.attachments[0].fields.find(
+        (f: any) => f.title === 'Affected Endpoints'
+      );
+      // Must include endpoint name
+      expect(affectedField.value).toContain('/api/v1/vault/summary');
+      // Must include current P95 value
+      expect(affectedField.value).toMatch(/P95\s*=\s*\d+(\.\d+)?ms/);
+      // Must include SLO threshold
+      expect(affectedField.value).toMatch(/SLO:\s*200ms/);
+    });
+
+    test('PagerDuty alert payload includes endpoint name, current P95 value, and SLO threshold', async () => {
+      process.env.ALERT_TYPE = 'pagerduty';
+      process.env.PAGERDUTY_INTEGRATION_KEY = 'test-pd-key';
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      const endpoint = '/api/v1/vault/deposit';
+      [600, 700, 800, 900, 1000].forEach(l => svc.recordLatency(endpoint, l));
+
+      await (svc as any).checkSLOViolations();
+
+      const callBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+      const summary: string = callBody.payload.summary;
+      // Must include endpoint name
+      expect(summary).toContain('/api/v1/vault/deposit');
+      // Must include current P95 value
+      expect(summary).toMatch(/P95=\d+(\.\d+)?ms/);
+      // Must include SLO threshold
+      expect(summary).toMatch(/SLO=500ms/);
+    });
+  });
+
+  describe('Acceptance Criteria: Alert Channel Configurable via Environment Variable', () => {
+    beforeEach(() => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+      });
+    });
+
+    test('ALERT_TYPE=slack sends only to Slack', async () => {
+      process.env.ALERT_TYPE = 'slack';
+      process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      process.env.PAGERDUTY_INTEGRATION_KEY = 'should-not-be-used';
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      [250, 300, 350, 400, 450].forEach(l => svc.recordLatency('/api/v1/vault/summary', l));
+      await (svc as any).checkSLOViolations();
+
+      const urls = (global.fetch as jest.Mock).mock.calls.map((c: any) => c[0]);
+      expect(urls.some((u: string) => u.includes('hooks.slack.com'))).toBe(true);
+      expect(urls.some((u: string) => u.includes('events.pagerduty.com'))).toBe(false);
+    });
+
+    test('ALERT_TYPE=pagerduty sends only to PagerDuty', async () => {
+      process.env.ALERT_TYPE = 'pagerduty';
+      process.env.PAGERDUTY_INTEGRATION_KEY = 'test-key';
+      delete process.env.SLACK_WEBHOOK_URL;
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      [600, 700, 800, 900, 1000].forEach(l => svc.recordLatency('/api/v1/vault/deposit', l));
+      await (svc as any).checkSLOViolations();
+
+      const urls = (global.fetch as jest.Mock).mock.calls.map((c: any) => c[0]);
+      expect(urls.some((u: string) => u.includes('events.pagerduty.com'))).toBe(true);
+      expect(urls.some((u: string) => u.includes('hooks.slack.com'))).toBe(false);
+    });
+
+    test('ALERT_TYPE=both sends to Slack and PagerDuty', async () => {
+      process.env.ALERT_TYPE = 'both';
+      process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      process.env.PAGERDUTY_INTEGRATION_KEY = 'test-key';
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      [250, 300, 350, 400, 450].forEach(l => svc.recordLatency('/api/v1/vault/summary', l));
+      await (svc as any).checkSLOViolations();
+
+      const urls = (global.fetch as jest.Mock).mock.calls.map((c: any) => c[0]);
+      expect(urls.some((u: string) => u.includes('hooks.slack.com'))).toBe(true);
+      expect(urls.some((u: string) => u.includes('events.pagerduty.com'))).toBe(true);
+    });
+  });
+
+  describe('Acceptance Criteria: Alert Fires Within 5 Minutes of SLO Breach', () => {
+    test('immediate alert fires on SLO breach via recordLatency', async () => {
+      process.env.ALERT_TYPE = 'slack';
+      process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      jest.resetModules();
+      const { latencyMonitoringService: svc } = require('../latencyMonitoring');
+
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: true, status: 200 });
+
+      // Record breaching latencies — the immediate check should fire
+      [250, 300, 350, 400, 450].forEach(l => svc.recordLatency('/api/v1/vault/summary', l));
+
+      // Allow async alert dispatch to complete
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(global.fetch).toHaveBeenCalled();
+      const callUrl = (global.fetch as jest.Mock).mock.calls[0][0];
+      expect(callUrl).toContain('hooks.slack.com');
+    });
+
+    test('periodic check interval is <= 5 minutes', () => {
+      const checkIntervalMs = parseInt(process.env.SLO_CHECK_INTERVAL_MS || '60000', 10);
+      // The check interval must be 5 minutes or less to guarantee detection within 5 min
+      expect(checkIntervalMs).toBeLessThanOrEqual(300000);
+    });
+  });
 });

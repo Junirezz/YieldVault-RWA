@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Activity, TrendingUp, DollarSign, Percent, Briefcase, Users, Share2 } from "../components/icons";
+import { Activity, TrendingUp, DollarSign, Percent, Briefcase, Share2 } from "../components/icons";
 import ApiStatusBanner from "../components/ApiStatusBanner";
 import {
   DataTable,

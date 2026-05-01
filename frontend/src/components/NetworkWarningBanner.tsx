@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { AlertTriangle, X } from "../icons";
+import { AlertTriangle, X } from "./icons";
 import { networkConfig } from "../config/network";
 
 interface NetworkWarningBannerProps {
@@ -15,9 +15,17 @@ const NetworkWarningBanner: React.FC<NetworkWarningBannerProps> = ({
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
 
   useEffect(() => {
+    let showTimer: ReturnType<typeof setTimeout> | undefined;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+
     if (!walletAddress) {
-      setIsVisible(false);
-      return;
+      hideTimer = setTimeout(() => {
+        setIsVisible(false);
+      }, 0);
+
+      return () => {
+        if (hideTimer) clearTimeout(hideTimer);
+      };
     }
 
     // Check network when wallet connects
@@ -25,23 +33,28 @@ const NetworkWarningBanner: React.FC<NetworkWarningBannerProps> = ({
       try {
         // In a real implementation, this would check the actual network via Freighter API
         // For now, we'll simulate network detection
-        const isTestnet = networkConfig.isTestnet;
+        showTimer = setTimeout(() => {
+          // Mock: assume wrong network initially, then correct after 2 seconds
+          setIsWrongNetwork(true);
+          setIsVisible(true);
 
-        // Mock: assume wrong network initially, then correct after 2 seconds
-        setIsWrongNetwork(true);
-        setIsVisible(true);
-
-        // Simulate network switch detection
-        setTimeout(() => {
-          setIsWrongNetwork(false);
-          setIsVisible(false);
-        }, 2000);
+          // Simulate network switch detection
+          hideTimer = setTimeout(() => {
+            setIsWrongNetwork(false);
+            setIsVisible(false);
+          }, 2000);
+        }, 0);
       } catch (error) {
         console.error("Network check failed:", error);
       }
     };
 
     checkNetwork();
+
+    return () => {
+      if (showTimer) clearTimeout(showTimer);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
   }, [walletAddress]);
 
   const handleDismiss = () => {

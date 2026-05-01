@@ -11,6 +11,7 @@ import OnboardingWalkthrough from "./components/OnboardingWalkthrough";
 import { FeatureGate } from "./components/FeatureGate";
 import { FeatureFlagProvider } from "./context/FeatureFlagContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { PreferencesProvider } from "./context/PreferencesContext";
 import { useUsdcBalance } from "./hooks/useBalanceData";
 import { queryClient } from "./lib/queryClient";
 import { clearWalletSessionState } from "./lib/sessionCleanup";

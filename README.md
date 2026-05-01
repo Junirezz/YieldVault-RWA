@@ -81,3 +81,10 @@ See [Disaster Recovery Runbooks](./docs/runbooks/README.md) for detailed procedu
 - **Phase 2**: Soroban Smart Contract Implementation in Rust (Completed)
 - **Phase 3**: Stellar Testnet Deployment and Frontend Integration (Up next)
 - **Phase 4**: Security Audit and Mainnet Launch
+
+## 🤝 Contributing
+Fork the repository and clone it to your local machine
+Create a new branch for your changes
+Make and test your updates following the project guidelines
+Commit and push your changes to your fork
+Open a Pull Request with a clear description

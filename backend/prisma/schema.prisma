@@ -67,3 +67,21 @@ model AdminAuditLog {
   @@index([action])
   @@index([actor])
 }
+
+model EventCursor {
+  id                Int      @id @default(1)
+  lastLedgerSeq     Int
+  lastProcessedAt   DateTime @updatedAt
+}
+
+model ProcessedEvent {
+  id              String   @id
+  ledgerSeq       Int
+  eventType       String
+  contractId      String
+  txHash          String
+  processedAt     DateTime @default(now())
+
+  @@index([ledgerSeq])
+  @@index([txHash])
+}

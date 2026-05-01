@@ -30,6 +30,9 @@ skills-lock.json
 issue.md
 contracts/vault/test_snapshots
 
+# Secrets scanning
+/.secrets.baseline
+
 # Secrets and Keys
 *.pem
 *.key

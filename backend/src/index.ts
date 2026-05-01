@@ -11,12 +11,22 @@ initTracing();
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import NodeCache from 'node-cache';
+import { loginHandler, refreshHandler } from './auth';
+import { createAdminAuditMiddleware, getAuditLogs, getAuditLogMetrics } from './auditLog';
+import { recordAdminAuditLog } from './adminAudit';
+import { startApySnapshotScheduler } from './apySnapshot';
+import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
-import { validateApiKey, registerApiKey } from './middleware/apiKeyAuth';
+import {
+  validateApiKey,
+  registerApiKey,
+  hasRequiredApiKeyRole,
+  normalizeApiKeyRole,
+} from './middleware/apiKeyAuth';
 import {
   addAddress,
   removeAddress,
@@ -26,8 +36,14 @@ import {
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
+import {
+  buildPortfolioHoldingsResponse,
+  buildTransactionsResponse,
+  buildVaultHistoryResponse,
+} from './listEndpoints';
 import listRouter from './listEndpoints';
 import referralRouter from './referralEndpoints';
+import { referralService } from './referralService';
 import {
   register,
   httpRequestCount,
@@ -36,6 +52,16 @@ import {
   updateVaultMetrics,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
+import { startEventPollingService, stopEventPollingService } from './eventPollingService';
+import { prisma, getPrismaRuntimeConfig } from './prisma';
+import {
+  registerWebhookEndpoint,
+  updateWebhookEndpoint,
+  listWebhookEndpoints,
+  listWebhookDeliveries,
+  getWebhookDeliveryMetrics,
+} from './webhookDelivery';
+import { getJobMetrics, getJobHealthStatus } from './jobGovernance';
 
 declare global {
   namespace Express {
@@ -61,6 +87,58 @@ logger.configure(logLevel);
 
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
+
+function buildVaultSummaryResponse() {
+  return {
+    totalAssets: 0,
+    totalShares: 0,
+    apy: 0,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function resolveActingAdminAddress(req: Request): string {
+  return (
+    req.get('x-admin-address') ||
+    req.get('x-admin-id') ||
+    req.get('x-wallet-address') ||
+    'unknown'
+  );
+}
+
+async function buildReferralStatsSnapshot(wallet: string) {
+  const stats = await referralService.getReferralStats(wallet);
+  if (!stats) {
+    return {
+      statusCode: 404,
+      body: {
+        error: 'Not Found',
+        status: 404,
+        message: 'No referral activity found for this wallet',
+      },
+    };
+  }
+
+  return {
+    statusCode: 200,
+    body: stats,
+  };
+}
+
+async function buildImpersonatedVaultState(wallet: string) {
+  return {
+    walletAddress: wallet,
+    summary: buildVaultSummaryResponse(),
+    transactions: buildTransactionsResponse({ walletAddress: wallet }),
+    portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: wallet }),
+    vaultHistory: buildVaultHistoryResponse({}),
+    referralStats: await buildReferralStatsSnapshot(wallet),
+    referralCode: {
+      statusCode: 200,
+      body: { code: await referralService.getOrCreateReferralCode(wallet) },
+    },
+  };
+}
 
 // ─── Rate Limiting Middleware ────────────────────────────────────────────────
 // Issue #145: Rate limiting per IP/user key
@@ -308,13 +386,7 @@ app.get(
   apiLimiter,
   cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
   (_req: Request, res: Response) => {
-    // This would typically fetch data from Stellar RPC or database
-    res.json({
-      totalAssets: 0,
-      totalShares: 0,
-      apy: 0,
-      timestamp: new Date().toISOString(),
-    });
+    res.json(buildVaultSummaryResponse());
   },
 );
 
@@ -324,12 +396,7 @@ app.get(
   cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
   (_req: Request, res: Response) => {
     res.setHeader('deprecation', 'true');
-    res.json({
-      totalAssets: 0,
-      totalShares: 0,
-      apy: 0,
-      timestamp: new Date().toISOString(),
-    });
+    res.json(buildVaultSummaryResponse());
   },
 );
 
@@ -448,20 +515,86 @@ app.get('/admin/allowlist', validateApiKey, (_req: Request, res: Response) => {
 });
 
 /**
+ * GET /admin/impersonate/:wallet - inspect vault state as a specific wallet
+ * Requires super-admin API key.
+ */
+app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: Response) => {
+  const wallet = String(req.params.wallet || '').trim();
+  const actingAdminAddress = resolveActingAdminAddress(req);
+
+  req.adminAuditActor = actingAdminAddress;
+  req.adminAuditMetadata = {
+    actingAdminAddress,
+    adminRole: req.authApiKeyRole || 'admin',
+    targetWallet: wallet || 'unknown',
+    impersonation: true,
+  };
+
+  if (!wallet) {
+    req.adminAuditAction = 'admin.impersonate.invalid';
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'wallet path parameter is required',
+    });
+    return;
+  }
+
+  if (!hasRequiredApiKeyRole(req, 'super-admin')) {
+    req.adminAuditAction = 'admin.impersonate.denied';
+    res.status(403).json({
+      error: 'Forbidden',
+      status: 403,
+      message: 'Super-admin role is required for impersonation',
+    });
+    return;
+  }
+
+  req.adminAuditAction = 'admin.impersonate';
+
+  try {
+    const snapshot = await buildImpersonatedVaultState(wallet);
+    res.status(200).json(snapshot);
+  } catch (error) {
+    req.adminAuditAction = 'admin.impersonate.failed';
+    req.adminAuditMetadata = {
+      ...req.adminAuditMetadata,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: 'Failed to build impersonated vault state',
+    });
+  }
+});
+
+/**
  * POST /admin/api-keys/register - Register a new API key
  * Requires API key authentication (for boostrapping, requires special permission)
  */
 app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Response) => {
-  const { key } = req.body;
+  const { key, role: requestedRole } = req.body;
   if (!key) {
     res.status(400).json({ error: 'Missing key in request body' });
     return;
   }
 
-  const hash = registerApiKey(key);
+  const role = normalizeApiKeyRole(requestedRole) || 'admin';
+  if (role === 'super-admin' && !hasRequiredApiKeyRole(req, 'super-admin')) {
+    res.status(403).json({
+      error: 'Forbidden',
+      status: 403,
+      message: 'Super-admin role is required to register super-admin API keys',
+    });
+    return;
+  }
+
+  const hash = registerApiKey(key, { role });
   res.json({
     message: 'API key registered',
     hash,
+    role,
     created: new Date().toISOString(),
   });
 });
@@ -728,6 +861,16 @@ if (process.env.NODE_ENV !== 'test') {
 // Start latency monitoring
 latencyMonitoringService.startMonitoring();
 
+// ─── Event Polling Service (Issue: Event Replay) ────────────────────────────
+if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {
+  startEventPollingService({
+    rpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+    contractId: process.env.VAULT_CONTRACT_ID,
+    pollIntervalMs: parseInt(process.env.EVENT_POLL_INTERVAL_MS || '10000', 10),
+    batchSize: parseInt(process.env.EVENT_REPLAY_BATCH_SIZE || '100', 10),
+  });
+}
+
 // ─── Dependency Health Checks ────────────────────────────────────────────────
 
 /**
@@ -756,6 +899,24 @@ async function getDatabaseHealth(): Promise<{ primary: string; replica: string }
   } catch {
     return { primary: 'down', replica: 'down' };
   }
+}
+
+async function getPrismaHealth(): Promise<'up' | 'down'> {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return 'up';
+  } catch {
+    return 'down';
+  }
+}
+
+function getPrismaConfig() {
+  const config = getPrismaRuntimeConfig();
+  return {
+    prismaPoolSize: config.poolMax,
+    prismaQueryTimeoutMs: config.queryTimeoutMs,
+    prismaPoolTimeoutMs: config.poolTimeoutMs,
+  };
 }
 
 /**
@@ -846,6 +1007,11 @@ if (process.env.NODE_ENV !== 'test') {
 const stopApyScheduler = startApySnapshotScheduler();
 shutdownHandler.onShutdown(async () => {
   stopApyScheduler();
+});
+
+// Register event polling service shutdown
+shutdownHandler.onShutdown(async () => {
+  stopEventPollingService();
 });
 
 // Register database shutdown task
