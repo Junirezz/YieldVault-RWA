@@ -28,7 +28,9 @@ class EndpointLatencyTracker {
   constructor(
     private endpoint: string,
     private type: EndpointType,
-    private sloThreshold: number
+    private sloThreshold: number,
+    private evaluationWindowMs: number,
+    private alertCooldownMs: number
   ) {}
 
   addLatencyMeasurement(latencyMs: number): void {
@@ -38,18 +40,30 @@ class EndpointLatencyTracker {
       latency: latencyMs,
     });
 
-    // Keep only data points within the evaluation window
-    const cutoffTime = now - this.getSLOConfig().evaluationWindowMs;
+    // Prune stale data on every write
+    this.pruneStaleData(now);
+  }
+
+  /**
+   * Remove data points that fall outside the rolling evaluation window.
+   * Must be called before any P95 calculation or SLO check so that
+   * stale measurements don't produce false positives/negatives.
+   */
+  pruneStaleData(nowMs: number = Date.now()): void {
+    const cutoffTime = nowMs - this.evaluationWindowMs;
     this.dataPoints = this.dataPoints.filter(point => point.timestamp > cutoffTime);
   }
 
   calculateP95(): number {
+    // Always prune before calculating so stale data is excluded
+    this.pruneStaleData();
+
     if (this.dataPoints.length === 0) return 0;
-    
+
     const sortedLatencies = this.dataPoints
       .map(point => point.latency)
       .sort((a, b) => a - b);
-    
+
     const p95Index = Math.ceil(sortedLatencies.length * 0.95) - 1;
     return sortedLatencies[p95Index] || 0;
   }
@@ -61,13 +75,14 @@ class EndpointLatencyTracker {
 
   shouldAlert(): boolean {
     const now = Date.now();
-    const cooldownExpired = now - this.lastAlertTime > this.getSLOConfig().alertCooldownMs;
+    const cooldownExpired = now - this.lastAlertTime > this.alertCooldownMs;
+    // isSLOBreached() -> calculateP95() already prunes stale data
     const isBreaching = this.isSLOBreached();
-    
+
     // Alert if SLO is breached and cooldown has expired
     // OR if this is the first time we detect a breach (no previous alert)
     const isFirstBreach = this.lastAlertTime === 0 && isBreaching;
-    
+
     return isBreaching && (cooldownExpired || isFirstBreach);
   }
 
@@ -80,17 +95,23 @@ class EndpointLatencyTracker {
   }
 
   getDataPointCount(): number {
+    this.pruneStaleData();
     return this.dataPoints.length;
   }
 
-  private getSLOConfig(): SLOConfig {
-    return {
-      readEndpoints: parseInt(process.env.SLO_READ_THRESHOLD_MS || '200', 10),
-      writeEndpoints: parseInt(process.env.SLO_WRITE_THRESHOLD_MS || '500', 10),
-      evaluationWindowMs: parseInt(process.env.SLO_EVALUATION_WINDOW_MS || '300000', 10), // 5 minutes
-      alertCooldownMs: parseInt(process.env.SLO_ALERT_COOLDOWN_MS || '900000', 10), // 15 minutes
-    };
+  // Public getters for properties needed by the service
+  get endpointType(): EndpointType {
+    return this.type;
   }
+
+  get threshold(): number {
+    return this.sloThreshold;
+  }
+
+  get alertTime(): number {
+    return this.lastAlertTime;
+  }
+
 }
 
 interface SLOViolation {
@@ -136,7 +157,13 @@ export class LatencyMonitoringService {
     
     endpointMappings.forEach((type, endpoint) => {
       const threshold = type === EndpointType.READ ? sloConfig.readEndpoints : sloConfig.writeEndpoints;
-      this.trackers.set(endpoint, new EndpointLatencyTracker(endpoint, type, threshold));
+      this.trackers.set(endpoint, new EndpointLatencyTracker(
+        endpoint,
+        type,
+        threshold,
+        sloConfig.evaluationWindowMs,
+        sloConfig.alertCooldownMs
+      ));
     });
   }
 
@@ -179,7 +206,9 @@ export class LatencyMonitoringService {
       const newTracker = new EndpointLatencyTracker(
         normalizedEndpoint,
         EndpointType.READ,
-        sloConfig.readEndpoints
+        sloConfig.readEndpoints,
+        sloConfig.evaluationWindowMs,
+        sloConfig.alertCooldownMs
       );
       newTracker.addLatencyMeasurement(latencyMs);
       this.trackers.set(normalizedEndpoint, newTracker);
@@ -235,9 +264,9 @@ export class LatencyMonitoringService {
   private async checkImmediateAlert(tracker: EndpointLatencyTracker, endpoint: string): Promise<void> {
     const violation: SLOViolation = {
       endpoint,
-      type: tracker['type'],
+      type: tracker.endpointType,
       currentP95: tracker.getCurrentP95(),
-      threshold: tracker['sloThreshold'],
+      threshold: tracker.threshold,
       dataPoints: tracker.getDataPointCount(),
     };
     
@@ -258,9 +287,9 @@ export class LatencyMonitoringService {
       if (tracker.shouldAlert()) {
         violations.push({
           endpoint,
-          type: tracker['type'],
+          type: tracker.endpointType,
           currentP95: tracker.getCurrentP95(),
-          threshold: tracker['sloThreshold'],
+          threshold: tracker.threshold,
           dataPoints: tracker.getDataPointCount(),
         });
         
@@ -334,12 +363,12 @@ export class LatencyMonitoringService {
     this.trackers.forEach((tracker, endpoint) => {
       metrics.push({
         endpoint,
-        type: tracker['type'],
+        type: tracker.endpointType,
         currentP95: tracker.getCurrentP95(),
-        threshold: tracker['sloThreshold'],
+        threshold: tracker.threshold,
         isBreaching: tracker.isSLOBreached(),
         dataPoints: tracker.getDataPointCount(),
-        lastAlertTime: tracker['lastAlertTime'],
+        lastAlertTime: tracker.alertTime || undefined,
       });
     });
 
