@@ -25,12 +25,13 @@ import { useToast } from "../context/ToastContext";
 import YieldBreakdownChart from "../components/YieldBreakdownChart";
 import { useReferralStats, useReferralLink } from "../hooks/useReferral";
 import ShareModal from "../components/ShareModal";
+import EmptyState from "../components/ui/EmptyState";
+import { useNavigate } from "react-router-dom";
+import { formatCurrency, formatNumber } from "../lib/formatters";
 
 interface PortfolioProps {
   walletAddress: string | null;
 }
-
-import { formatCurrency, formatNumber } from "../lib/formatters";
 
 
 const columns: DataTableColumn<PortfolioHolding>[] = [
@@ -169,6 +170,7 @@ const PortfolioSummaryCard: React.FC<{
 
 const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   const toast = useToast();
+  const navigate = useNavigate();
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -406,6 +408,16 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
 
           <YieldBreakdownChart totalGain={totalGain} />
 
+          {/* Empty state: wallet connected, loading done, no portfolio value */}
+          {!isLoading && totalValue === 0 ? (
+            <EmptyState
+              title="Your portfolio is empty."
+              description="Once you deposit, you'll be able to track your assets and growth here."
+              icon={<Briefcase />}
+              actionLabel="Deposit Now"
+              onAction={() => navigate("/")}
+            />
+          ) : (
           <section
             className="glass-panel"
             style={{ padding: "24px", background: "var(--bg-muted)" }}
@@ -500,6 +512,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               )}
             />
           </section>
+          )}
         </div>
       )}
 
