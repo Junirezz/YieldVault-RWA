@@ -1,2 +1,10 @@
-// Mock for @prisma/instrumentation to prevent loading issues in tests
-module.exports = {};
+class PrismaInstrumentation {
+  setTracerProvider() {}
+  setMeterProvider() {}
+  enable() {}
+  disable() {}
+}
+
+module.exports = {
+  PrismaInstrumentation,
+};

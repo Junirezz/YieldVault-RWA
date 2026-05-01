@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import { Share2, Copy, Check, X, MessageCircle, Twitter, Facebook, Link as LinkIcon } from "../icons";
+import { Share2, Copy, Check, MessageCircle, Twitter, Facebook } from "./icons";
 import Modal from "./Modal";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useToast } from "../context/ToastContext";
-import { useTranslation } from "../i18n";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -20,7 +19,6 @@ const ShareModal: React.FC<ShareModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const toast = useToast();
-  const { t } = useTranslation();
 
   const handleCopy = async () => {
     try {

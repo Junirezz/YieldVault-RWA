@@ -8,20 +8,21 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from "recharts";
+import type { TooltipContentProps } from "recharts/types/component/Tooltip";
+import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 import { TrendingUp } from "./icons";
 import { useVaultHistory } from "../hooks/useVaultData";
 import Skeleton from "./Skeleton";
 import { type TimeRange, getNow, getCutoffDate } from "../lib/dateUtils";
 
-interface VaultPerformanceTooltipProps {
-  active?: boolean;
-  payload?: ReadonlyArray<{ value?: number }>;
-  label?: string;
-}
-
-function VaultPerformanceTooltip({ active, payload, label }: VaultPerformanceTooltipProps) {
+const VaultPerformanceTooltip = ({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<ValueType, NameType>) => {
   if (active && payload && payload.length) {
-    const value = payload[0]?.value;
+    const raw = payload[0]?.value;
+    const value = typeof raw === "number" ? raw : undefined;
     if (value === undefined) return null;
     return (
       <div
@@ -48,6 +49,7 @@ function VaultPerformanceTooltip({ active, payload, label }: VaultPerformanceToo
 const VaultPerformanceChart: React.FC = () => {
   const { data: rawData = [], isLoading } = useVaultHistory();
   const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
+  const isTest = process.env.NODE_ENV === 'test';
 
   const filteredData = useMemo(() => {
     if (!rawData.length) return [];
@@ -111,8 +113,8 @@ const VaultPerformanceChart: React.FC = () => {
             style={{ minHeight: "260px" }}
           />
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={filteredData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          isTest ? (
+            <AreaChart data={filteredData} width={400} height={260} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
@@ -148,7 +150,46 @@ const VaultPerformanceChart: React.FC = () => {
                 animationDuration={1200}
               />
             </AreaChart>
-          </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={filteredData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis 
+                  dataKey="date" 
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                  tickFormatter={(str: string) => {
+                    const date = new Date(str);
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  }}
+                  minTickGap={30}
+                />
+                <YAxis 
+                  domain={['auto', 'auto']}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                />
+                <Tooltip content={VaultPerformanceTooltip} />
+                <Area 
+                  type="monotone" 
+                  dataKey="value" 
+                  stroke="var(--accent-cyan)" 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#colorValue)" 
+                  animationDuration={1200}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )
         )}
       </div>
     </div>

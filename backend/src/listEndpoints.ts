@@ -17,7 +17,10 @@ import {
   sendPaginatedResponse,
   encodeCursor,
   PaginationConfig,
+  createPaginatedResponse,
+  PaginatedResponse,
 } from './pagination';
+import { getApyHistory } from './apySnapshot';
 import { cacheMiddleware } from './middleware/cache';
 
 const router = Router();
@@ -100,6 +103,19 @@ interface VaultHistoryPoint {
   date: string;
   value: number;
   [key: string]: unknown;
+}
+
+export interface WalletStateQuery {
+  limit?: number;
+  cursor?: string;
+  page?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  type?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  walletAddress?: string;
 }
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
@@ -258,6 +274,88 @@ function filterVaultHistory(
   });
 }
 
+export function buildTransactionsResponse(
+  query: WalletStateQuery
+): PaginatedResponse<Transaction> {
+  const pagination = {
+    limit: query.limit ?? TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20,
+    cursor: query.cursor,
+    page: query.page,
+    sortBy: query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    type: query.type,
+    status: query.status,
+    from: query.from,
+    to: query.to,
+    walletAddress: query.walletAddress,
+  };
+
+  let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = pagination.page
+    ? paginateWithOffset(filtered, pagination)
+    : paginateWithCursor(filtered, pagination, (tx) => encodeCursor(tx.id));
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
+export function buildPortfolioHoldingsResponse(
+  query: WalletStateQuery
+): PaginatedResponse<PortfolioHolding> {
+  const pagination = {
+    limit: query.limit ?? PORTFOLIO_PAGINATION_CONFIG.defaultLimit ?? 20,
+    cursor: query.cursor,
+    sortBy: query.sortBy ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    status: query.status,
+    walletAddress: query.walletAddress,
+  };
+
+  let filtered = filterPortfolioHoldings(MOCK_PORTFOLIO_HOLDINGS, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = paginateWithCursor(filtered, pagination, (holding) =>
+    encodeCursor(holding.id)
+  );
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
+export function buildVaultHistoryResponse(
+  query: Pick<WalletStateQuery, 'limit' | 'cursor' | 'sortBy' | 'sortOrder' | 'from' | 'to'>
+): PaginatedResponse<VaultHistoryPoint> {
+  const pagination = {
+    limit: query.limit ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultLimit ?? 30,
+    cursor: query.cursor,
+    sortBy: query.sortBy ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    from: query.from,
+    to: query.to,
+  };
+
+  let filtered = filterVaultHistory(MOCK_VAULT_HISTORY, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = paginateWithCursor(filtered, pagination, (point) =>
+    encodeCursor(point.date)
+  );
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 /**
@@ -310,27 +408,16 @@ function filterVaultHistory(
 router.get('/transactions', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, TRANSACTION_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildTransactionsResponse({
+      ...pagination,
       type: req.query.type as string | undefined,
       status: req.query.status as string | undefined,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
       walletAddress: req.query.walletAddress as string | undefined,
-    };
+    });
 
-    // Filter transactions
-    let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
-
-    // Sort transactions
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    const paginated = pagination.page
-      ? paginateWithOffset(filtered, pagination)
-      : paginateWithCursor(filtered, pagination, (tx) => encodeCursor(tx.id));
-
-    sendPaginatedResponse(res, paginated.data, paginated.pagination);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching transactions:', error);
     res.status(500).json({
@@ -365,27 +452,13 @@ router.get('/transactions', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Reques
 router.get('/portfolio/holdings', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, PORTFOLIO_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildPortfolioHoldingsResponse({
+      ...pagination,
       status: req.query.status as string | undefined,
       walletAddress: req.query.walletAddress as string | undefined,
-    };
+    });
 
-    // Filter holdings
-    let filtered = filterPortfolioHoldings(MOCK_PORTFOLIO_HOLDINGS, filters);
-
-    // Sort holdings
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    // Paginate with cursor
-    const { data, pagination: paginationMeta } = paginateWithCursor(
-      filtered,
-      pagination,
-      (holding) => encodeCursor(holding.id)
-    );
-
-    sendPaginatedResponse(res, data, paginationMeta);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching portfolio holdings:', error);
     res.status(500).json({
@@ -420,25 +493,13 @@ router.get('/portfolio/holdings', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: 
 router.get('/vault/history', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, VAULT_HISTORY_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildVaultHistoryResponse({
+      ...pagination,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
-    };
+    });
 
-    // Filter history
-    let filtered = filterVaultHistory(MOCK_VAULT_HISTORY, filters);
-
-    // Sort history
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    // Paginate with cursor
-    const { data, pagination: paginationMeta } = paginateWithCursor(filtered, pagination, (point) =>
-      encodeCursor(point.date)
-    );
-
-    sendPaginatedResponse(res, data, paginationMeta);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching vault history:', error);
     res.status(500).json({

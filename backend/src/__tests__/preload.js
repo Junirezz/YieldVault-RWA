@@ -1,2 +1,2 @@
-// Preload script to prevent problematic modules from loading during tests
 process.env.NODE_ENV = 'test';
+process.env.OTEL_ENABLED = 'false';

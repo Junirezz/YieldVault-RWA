@@ -293,12 +293,12 @@ describe("VaultDashboard", () => {
 
      const input = await screen.findByPlaceholderText("0.00");
      fireEvent.change(input, { target: { value: "100" } });
-     expect(input).toHaveValue("100");
+     expect(input).toHaveValue(100);
 
      const withdrawTab = screen.getByText("Withdraw");
      fireEvent.click(withdrawTab);
 
      const clearedInput = screen.getByPlaceholderText("0.00");
-     expect(clearedInput).toHaveValue("");
+     expect(clearedInput).toHaveValue(null);
    });
  });
