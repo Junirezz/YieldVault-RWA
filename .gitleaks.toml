@@ -1,0 +1,17 @@
+title = "YieldVault RWA Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow known non-secret placeholders in tests and docs"
+condition = "AND"
+paths = [
+  '''backend/src/__tests__/api\.test\.ts''',
+  '''docs/api/README\.md''',
+]
+regexTarget = "line"
+regexes = [
+  '''x-idempotency-key['"]\s*,\s*['"]integration-deposit-1['"]''',
+  '''x-api-key:\s*your-api-key''',
+]
