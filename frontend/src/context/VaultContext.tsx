@@ -72,9 +72,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     : DEFAULT_SUMMARY;
 
-  const error: ApiError | null = queryError
-    ? normalizeApiError(queryError)
-    : null;
+  // Normalize any query error so consumers can render an API status banner.
+  const error: ApiError | null = queryError ? normalizeApiError(queryError) : null;
 
   const lastUpdate = new Date(summary.updatedAt);
 
