@@ -103,7 +103,7 @@ export async function listAdminAuditLogs(filters: AuditLogFilters): Promise<Admi
       take: filters.limit,
     });
 
-    return rows.map((row) => ({
+    return rows.map((row: any) => ({
       id: row.id,
       action: row.action,
       method: row.method,

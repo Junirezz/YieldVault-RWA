@@ -189,11 +189,8 @@ export function paginateWithCursor<T>(
             : {}),
         },
       };
-    if (cursorIndex !== -1) {
-      startIndex = cursorIndex + 1;
-    } else {
-      invalidCursor = true;
     }
+
     startIndex = cursorIndex + 1;
   }
 
