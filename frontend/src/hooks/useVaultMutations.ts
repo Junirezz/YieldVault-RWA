@@ -8,6 +8,7 @@ import type { Transaction } from "../lib/transactionApi";
 interface MutationParams {
   walletAddress: string;
   amount: number;
+  referralCode?: string;
 }
 
 interface OptimisticSnapshot {
@@ -57,13 +58,14 @@ export function useDepositMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ walletAddress, amount }: MutationParams) => {
+    mutationFn: async ({ walletAddress, amount, referralCode }: MutationParams) => {
       await submitDeposit({
         walletAddress,
         amount: amount.toString(),
         asset: "USDC",
+        referralCode,
       });
-      return { walletAddress, amount };
+      return { walletAddress, amount, referralCode };
     },
     onMutate: async ({ walletAddress, amount }) => {
       const balanceKey = queryKeys.balance.usdc(walletAddress);

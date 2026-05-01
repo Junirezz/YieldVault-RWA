@@ -399,7 +399,7 @@ describe("TransactionHistory", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText("No transactions found for this wallet."),
+        screen.getByText("No transactions yet"),
       ).toBeInTheDocument(),
     );
   });
@@ -424,7 +424,7 @@ describe("TransactionHistory", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText("No transactions matched the current filter."),
+        screen.getByText("No matches found"),
       ).toBeInTheDocument(),
     );
   });

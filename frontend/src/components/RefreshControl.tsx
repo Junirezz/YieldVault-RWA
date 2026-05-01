@@ -99,6 +99,7 @@ const RefreshControl: React.FC<RefreshControlProps> = ({
       <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}>
         {isPolling ? (
           <button
+            aria-label={t('refresh.pause')}
             onClick={onPause}
             style={{
               padding: '4px 12px',
@@ -114,6 +115,7 @@ const RefreshControl: React.FC<RefreshControlProps> = ({
           </button>
         ) : isPaused && pauseReason === 'manual' ? (
           <button
+            aria-label={t('refresh.resume')}
             onClick={onResume}
             style={{
               padding: '4px 12px',
@@ -131,6 +133,7 @@ const RefreshControl: React.FC<RefreshControlProps> = ({
         ) : null}
 
         <button
+          aria-label={isRefetching ? t('refresh.refreshing') : t('refresh.refreshNow')}
           onClick={onRefresh}
           disabled={isRefetching}
           style={{

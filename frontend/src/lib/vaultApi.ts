@@ -17,13 +17,6 @@ export class SharePriceFetchError extends Error {
 /** 10^18 — the fixed-point divisor used by the vault contract's i128 share price. */
 export const FIXED_POINT_DIVISOR = 1_000_000_000_000_000_000n;
 
-/**
- * Convert a raw i128 contract value to a JavaScript number.
- *
- * Uses BigInt integer division to preserve precision, then converts to number.
- * The share price range (1.0 ± small yield) is well within Number.MAX_SAFE_INTEGER
- * after dividing by 10^18.
- */
 export function decodeSharePrice(raw: bigint): number {
   const integerPart = raw / FIXED_POINT_DIVISOR;
   const remainder = raw % FIXED_POINT_DIVISOR;
@@ -32,15 +25,6 @@ export function decodeSharePrice(raw: bigint): number {
 
 // ─── getSharePrice ────────────────────────────────────────────────────────────
 
-/**
- * Fetch the current share price from the vault contract via Soroban simulation.
- *
- * Uses `simulateTransaction` (a read-only view call) — no funded account required.
- * A well-known placeholder address is used as the transaction source; the simulation
- * ignores sequence numbers and fees.
- *
- * @throws {SharePriceFetchError} on any failure (missing config, RPC error, bad response)
- */
 export async function getSharePrice(): Promise<number> {
   if (!networkConfig.contractId) {
     throw new SharePriceFetchError("Vault contract ID is not configured");
@@ -49,11 +33,8 @@ export async function getSharePrice(): Promise<number> {
   const server = new rpc.Server(networkConfig.rpcUrl);
   const contract = new Contract(networkConfig.contractId);
 
-  // Soroban simulation does not require a funded account. We use a well-known
-  // testnet placeholder address and fall back to a minimal stub if getAccount fails.
   const PLACEHOLDER_ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
   const sourceAccount = await server.getAccount(PLACEHOLDER_ADDRESS).catch(() => {
-    // Minimal account-like object sufficient for TransactionBuilder
     return {
       accountId: () => PLACEHOLDER_ADDRESS,
       sequenceNumber: () => "0",
@@ -62,7 +43,7 @@ export async function getSharePrice(): Promise<number> {
   });
 
   const tx = new TransactionBuilder(
-    sourceAccount as Parameters<typeof TransactionBuilder>[0],
+    sourceAccount as ConstructorParameters<typeof TransactionBuilder>[0],
     {
       fee: BASE_FEE,
       networkPassphrase: networkConfig.networkPassphrase,
@@ -94,10 +75,8 @@ export async function getSharePrice(): Promise<number> {
     throw new SharePriceFetchError("Contract returned no value");
   }
 
-  // The i128 XDR value is accessed via the SDK's scVal helpers.
-  // hi is the high 64 bits (signed), lo is the low 64 bits (unsigned).
   const raw = returnValue.i128();
-  const rawBigInt = (BigInt(raw.hi) << 64n) | BigInt(raw.lo);
+  const rawBigInt = (BigInt(raw.hi().toString()) << 64n) | BigInt(raw.lo().toString());
 
   return decodeSharePrice(rawBigInt);
 }
@@ -123,6 +102,7 @@ export interface VaultSummary {
   exchangeRate: number;
   networkFeeEstimate: string;
   updatedAt: string;
+  contractPaused: boolean;
   strategy: StrategyMetadata;
 }
 
@@ -177,7 +157,6 @@ const MOCK_VAULT_HISTORY: VaultHistoryPoint[] = [
   { date: "2026-03-25", value: 103.75 },
 ];
 
-
 export async function getVaultSummary() {
   return apiClient.get<VaultSummary>("/mock-api/vault-summary.json");
 }
@@ -197,13 +176,11 @@ export async function getVaultHistory(params?: unknown): Promise<VaultHistoryPoi
 
 export async function submitDeposit(params: unknown) {
   validate(DepositRequestSchema, params, "DepositRequest");
-  // Simulate backend interaction
   return new Promise<void>((resolve) => setTimeout(resolve, 2000));
 }
 
 export async function submitWithdrawal(params: unknown) {
   validate(WithdrawalRequestSchema, params, "WithdrawalRequest");
-  // Simulate backend interaction
   return new Promise<void>((resolve) => setTimeout(resolve, 2000));
 }
 
@@ -214,7 +191,7 @@ export async function getXlmPrice(): Promise<number> {
     return data.stellar.usd;
   } catch (error) {
     console.error("Failed to fetch XLM price", error);
-    return 0.12; // Fallback price
+    return 0.12;
   }
 }
 
@@ -223,11 +200,8 @@ export async function estimateNetworkFee(_params: {
   amount: number;
   action: "deposit" | "withdraw";
 }): Promise<string> {
-  // In a real implementation, this would use StellarSdk.SorobanRpc.Server.simulateTransaction
-  // For this exercise, we simulate the RPC response delay and return a realistic estimate
   await new Promise((resolve) => setTimeout(resolve, 600));
   
-  // Simulate variation based on action and some randomness
   const baseFee = _params.action === "deposit" ? 0.05 : 0.07;
   const randomFactor = 0.95 + Math.random() * 0.1;
   const xlmAmount = baseFee * randomFactor;

@@ -79,6 +79,8 @@ export const DepositRequestSchema = z.object({
     .min(0, "Slippage cannot be negative")
     .max(500, "Slippage tolerance may not exceed 500 bps (5%)")
     .optional(),
+  /** Optional referral code for tracking referrals. */
+  referralCode: z.string().optional(),
 });
 
 export type DepositRequest = z.infer<typeof DepositRequestSchema>;

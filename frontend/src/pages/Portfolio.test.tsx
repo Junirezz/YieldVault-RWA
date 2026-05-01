@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import Portfolio from "./Portfolio";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "../context/ToastContext";
 
 const mockHoldings = [
@@ -88,22 +89,32 @@ function renderPortfolio(
   initialEntry = "/portfolio",
   walletAddress: string | null = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 ) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <ToastProvider>
-        <Routes>
-          <Route
-            path="/portfolio"
-            element={
-              <>
-                <Portfolio walletAddress={walletAddress} />
-                <LocationDisplay />
-              </>
-            }
-          />
-        </Routes>
-      </ToastProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <ToastProvider>
+          <Routes>
+            <Route
+              path="/portfolio"
+              element={
+                <>
+                  <Portfolio walletAddress={walletAddress} />
+                  <LocationDisplay />
+                </>
+              }
+            />
+          </Routes>
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

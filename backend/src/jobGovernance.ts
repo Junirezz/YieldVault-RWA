@@ -15,6 +15,18 @@ export interface DeadLetterRecord {
   failedAt: string;
 }
 
+export interface JobRuntimeMetric {
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+  inFlight: number;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastDurationMs: number | null;
+  averageDurationMs: number;
+}
+
 export const JOB_POLICIES: Record<JobName, JobPolicy> = {
   priceRefresh: {
     maxAttempts: 3,
@@ -41,6 +53,38 @@ class JobGovernanceStore {
 
   private readonly failureCounts = new Map<JobName, number>();
 
+  private readonly runtime = new Map<JobName, JobRuntimeMetric>();
+
+  markStarted(jobName: JobName): void {
+    const metrics = this.ensureRuntimeMetric(jobName);
+    metrics.totalRuns += 1;
+    metrics.inFlight += 1;
+    metrics.lastRunAt = new Date().toISOString();
+  }
+
+  markCompleted(jobName: JobName, durationMs: number, success: boolean): void {
+    const metrics = this.ensureRuntimeMetric(jobName);
+    metrics.inFlight = Math.max(0, metrics.inFlight - 1);
+    metrics.lastDurationMs = durationMs;
+    const completedRuns = metrics.successfulRuns + metrics.failedRuns;
+    metrics.averageDurationMs =
+      completedRuns === 0
+        ? durationMs
+        : Math.round(
+            (metrics.averageDurationMs * completedRuns + durationMs) /
+              (completedRuns + 1),
+          );
+
+    if (success) {
+      metrics.successfulRuns += 1;
+      metrics.lastSuccessAt = new Date().toISOString();
+      return;
+    }
+
+    metrics.failedRuns += 1;
+    metrics.lastFailureAt = new Date().toISOString();
+  }
+
   recordDeadLetter(record: DeadLetterRecord): void {
     this.deadLetters.unshift(record);
     const failures = (this.failureCounts.get(record.jobName) || 0) + 1;
@@ -54,6 +98,7 @@ class JobGovernanceStore {
   clear(): void {
     this.deadLetters.length = 0;
     this.failureCounts.clear();
+    this.runtime.clear();
   }
 
   getMetrics() {
@@ -69,11 +114,34 @@ class JobGovernanceStore {
       recurringFailures,
       deadLetters: [...this.deadLetters],
       policies: JOB_POLICIES,
+      runtime: Object.fromEntries(this.runtime),
     };
   }
 
   hasRecurringFailures(): boolean {
     return Object.keys(this.getMetrics().recurringFailures).length > 0;
+  }
+
+  private ensureRuntimeMetric(jobName: JobName): JobRuntimeMetric {
+    const existing = this.runtime.get(jobName);
+    if (existing) {
+      return existing;
+    }
+
+    const created: JobRuntimeMetric = {
+      totalRuns: 0,
+      successfulRuns: 0,
+      failedRuns: 0,
+      inFlight: 0,
+      lastRunAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastDurationMs: null,
+      averageDurationMs: 0,
+    };
+
+    this.runtime.set(jobName, created);
+    return created;
   }
 }
 
@@ -84,13 +152,17 @@ export async function runJobWithRetry<T>(
   task: () => Promise<T>,
   options: { payload?: unknown; sleep?: (delayMs: number) => Promise<void> } = {}
 ): Promise<T> {
+  const startedAt = Date.now();
+  jobGovernanceStore.markStarted(jobName);
   const policy = JOB_POLICIES[jobName];
   const sleep = options.sleep || defaultSleep;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
     try {
-      return await task();
+      const result = await task();
+      jobGovernanceStore.markCompleted(jobName, Date.now() - startedAt, true);
+      return result;
     } catch (error) {
       lastError = error;
 
@@ -108,6 +180,7 @@ export async function runJobWithRetry<T>(
     payload: options.payload ?? null,
     failedAt: new Date().toISOString(),
   });
+  jobGovernanceStore.markCompleted(jobName, Date.now() - startedAt, false);
 
   throw new Error(normalizedError);
 }

@@ -4,11 +4,13 @@ import ApiStatusBanner from "../components/ApiStatusBanner";
 import Badge from "../components/Badge";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import PageHeader from "../components/PageHeader";
-import {
-  normalizeApiError,
-  isValidationError,
-  type ApiError,
-  type ValidationError,
+import EmptyState from "../components/ui/EmptyState";
+import { Activity } from "../components/icons";
+import { 
+  normalizeApiError, 
+  isValidationError, 
+  type ApiError, 
+  type ValidationError 
 } from "../lib/api";
 import {
   formatAmount,
@@ -307,10 +309,18 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     }
   };
 
-  const emptyMessage =
-    txType !== "all"
-      ? "No transactions matched the current filter."
-      : "No transactions found for this wallet.";
+  const emptyMessage = (
+    <EmptyState
+      variant="minimal"
+      title={txType !== "all" ? "No matches found" : "No transactions yet"}
+      description={
+        txType !== "all"
+          ? "Try changing your filter settings to see more history."
+          : "Once you make a deposit or withdrawal, it will appear here."
+      }
+      icon={<Activity size={24} />}
+    />
+  );
 
   return (
     <div className="glass-panel" style={{ padding: "32px" }}>

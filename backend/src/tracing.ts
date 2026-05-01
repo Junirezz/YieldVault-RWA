@@ -14,7 +14,6 @@ import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
-import { PrismaInstrumentation } from '@prisma/instrumentation';
 import {
   trace,
   context,
@@ -23,7 +22,7 @@ import {
   type Tracer,
 } from '@opentelemetry/api';
 
-const OTEL_ENABLED = process.env.OTEL_ENABLED !== 'false';
+const OTEL_ENABLED = process.env.NODE_ENV !== 'test' && process.env.OTEL_ENABLED !== 'false';
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'yieldvault-backend';
 const OTLP_ENDPOINT =
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
@@ -31,7 +30,33 @@ const OTLP_ENDPOINT =
 let sdk: NodeSDK | null = null;
 
 export function initTracing(): void {
-  if (!OTEL_ENABLED) return;
+  // Skip all tracing initialization in test environments or if disabled
+  if (!OTEL_ENABLED || IS_TEST_ENV) return;
+
+  // Build the instrumentations array
+  const instrumentations: any[] = [
+    new HttpInstrumentation(),
+    new ExpressInstrumentation(),
+  ];
+
+  // Only load PrismaInstrumentation in production (non-test) environments
+  // The instrumentation package auto-registers hooks that can cause panics in tests
+  // if the Prisma Query Engine doesn't receive the expected configuration
+  if (!IS_TEST_ENV) {
+    try {
+      // Dynamically require to avoid loading the module at import time
+      // This prevents auto-instrumentation hooks from being registered prematurely
+      const PrismaInstrumentationModule = require('@prisma/instrumentation') as any;
+      if (PrismaInstrumentationModule && PrismaInstrumentationModule.PrismaInstrumentation) {
+        instrumentations.push(new PrismaInstrumentationModule.PrismaInstrumentation());
+      }
+    } catch (e) {
+      console.warn(
+        'Failed to load PrismaInstrumentation:',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
 
   const exporter = new OTLPTraceExporter({ url: `${OTLP_ENDPOINT}/v1/traces` });
 
@@ -41,14 +66,7 @@ export function initTracing(): void {
       [ATTR_SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
     }),
     traceExporter: exporter,
-    instrumentations: [
-      new HttpInstrumentation({
-        // Propagate W3C trace context on all outbound HTTP (covers Soroban RPC)
-        headersToPropagate: ['traceparent', 'tracestate'],
-      }),
-      new ExpressInstrumentation(),
-      new PrismaInstrumentation(),
-    ],
+    instrumentations,
   });
 
   sdk.start();

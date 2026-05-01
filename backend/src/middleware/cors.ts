@@ -30,10 +30,10 @@ const getCORSOrigins = (): (string | RegExp)[] => {
   });
 };
 
-const allowedOrigins = getCORSOrigins();
-
 export const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
+    const allowedOrigins = getCORSOrigins();
+
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
       return callback(null, true);
@@ -63,14 +63,17 @@ export const corsOptions: CorsOptions = {
  * Custom CORS middleware wrapper to handle rejection with 403
  */
 export const corsMiddleware = (req: Request, res: Response, next: NextFunction) => {
-  cors(corsOptions)(req, res, (err) => {
+  return cors(corsOptions)(req, res, (err) => {
     if (err) {
-      return res.status(403).json({
+      res.status(403).json({
         error: 'Forbidden',
         status: 403,
         message: 'CORS policy: This origin is not allowed access.',
       });
+      return;
     }
+
     next();
+    return;
   });
 };

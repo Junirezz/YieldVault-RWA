@@ -34,6 +34,20 @@ export const activeConnections = new Gauge({
   registers: [register],
 });
 
+export const cacheHitCount = new Counter({
+  name: 'cache_hit_count',
+  help: 'Number of cache hits for GET requests',
+  labelNames: ['method', 'route'],
+  registers: [register],
+});
+
+export const cacheMissCount = new Counter({
+  name: 'cache_miss_count',
+  help: 'Number of cache misses for GET requests',
+  labelNames: ['method', 'route'],
+  registers: [register],
+});
+
 // --- Vault Specific Metrics ---
 
 export const vaultTvl = new Gauge({

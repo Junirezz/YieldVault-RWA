@@ -43,7 +43,9 @@ pub fn get_pending_admin(env: &Env) -> Option<Address> {
 
 pub fn set_pending_admin(env: &Env, admin: &Option<Address>) {
     if let Some(addr) = admin {
-        env.storage().instance().set(&ProxyDataKey::PendingAdmin, addr);
+        env.storage()
+            .instance()
+            .set(&ProxyDataKey::PendingAdmin, addr);
     } else {
         env.storage().instance().remove(&ProxyDataKey::PendingAdmin);
     }
@@ -67,7 +69,6 @@ pub fn is_initialized(env: &Env) -> bool {
 }
 
 pub fn set_initialized(env: &Env) {
-    env.storage()
-        .instance()
-        .set(&ProxyDataKey::Initialized, &true);
+    env.storage().instance().set(&ProxyDataKey::Initialized, &true);
 }
+

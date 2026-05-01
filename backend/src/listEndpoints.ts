@@ -1,7 +1,7 @@
 /**
  * @file listEndpoints.ts
  * List endpoints with pagination and filtering support.
- * 
+ *
  * Provides consistent list endpoints for:
  * - Transactions
  * - Portfolio holdings
@@ -12,13 +12,19 @@ import { Router, Request, Response } from 'express';
 import {
   parsePaginationQuery,
   paginateWithCursor,
+  paginateWithOffset,
   sortItems,
   sendPaginatedResponse,
   encodeCursor,
   PaginationConfig,
+  createPaginatedResponse,
+  PaginatedResponse,
 } from './pagination';
+import { getApyHistory } from './apySnapshot';
+import { cacheMiddleware } from './middleware/cache';
 
 const router = Router();
+const CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || '30000', 10);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +46,7 @@ const router = Router();
 interface Transaction {
   id: string;
   type: 'deposit' | 'withdrawal';
+  status: 'pending' | 'completed' | 'failed';
   amount: string;
   asset: string;
   timestamp: string;
@@ -98,11 +105,25 @@ interface VaultHistoryPoint {
   [key: string]: unknown;
 }
 
+export interface WalletStateQuery {
+  limit?: number;
+  cursor?: string;
+  page?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  type?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  walletAddress?: string;
+}
+
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
 const MOCK_TRANSACTIONS: Transaction[] = Array.from({ length: 100 }, (_, i) => ({
   id: `tx-${i + 1}`,
   type: i % 2 === 0 ? 'deposit' : 'withdrawal',
+  status: i % 11 === 0 ? 'failed' : i % 3 === 0 ? 'pending' : 'completed',
   amount: (Math.random() * 1000).toFixed(2),
   asset: ['XLM', 'USDC', 'yUSDC', 'RWA'][i % 4],
   timestamp: new Date(Date.now() - i * 3600000).toISOString(),
@@ -159,17 +180,62 @@ const VAULT_HISTORY_PAGINATION_CONFIG: Partial<PaginationConfig> = {
  */
 function filterTransactions(
   transactions: Transaction[],
-  filters: { type?: string; walletAddress?: string }
+  filters: { type?: string; status?: string; walletAddress?: string; from?: string; to?: string }
 ): Transaction[] {
+  const from = parseDateFilter(filters.from, 'start');
+  const to = parseDateFilter(filters.to, 'end');
+
   return transactions.filter((tx) => {
     if (filters.type && filters.type !== 'all' && tx.type !== filters.type) {
+      return false;
+    }
+    if (filters.status && filters.status !== 'all' && tx.status !== filters.status) {
       return false;
     }
     if (filters.walletAddress && tx.walletAddress !== filters.walletAddress) {
       return false;
     }
+    if (!isTransactionInDateRange(tx.timestamp, from, to)) {
+      return false;
+    }
     return true;
   });
+}
+
+function parseDateFilter(value: string | undefined, boundary: 'start' | 'end'): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const hasTimeComponent = value.includes('T');
+  const normalizedValue = hasTimeComponent
+    ? value
+    : boundary === 'start'
+      ? `${value}T00:00:00.000Z`
+      : `${value}T23:59:59.999Z`;
+  const timestamp = Date.parse(normalizedValue);
+
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function isTransactionInDateRange(
+  timestamp: string,
+  from: number | null,
+  to: number | null
+): boolean {
+  const transactionTime = Date.parse(timestamp);
+
+  if (Number.isNaN(transactionTime)) {
+    return false;
+  }
+  if (from !== null && transactionTime < from) {
+    return false;
+  }
+  if (to !== null && transactionTime > to) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -208,6 +274,88 @@ function filterVaultHistory(
   });
 }
 
+export function buildTransactionsResponse(
+  query: WalletStateQuery
+): PaginatedResponse<Transaction> {
+  const pagination = {
+    limit: query.limit ?? TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20,
+    cursor: query.cursor,
+    page: query.page,
+    sortBy: query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    type: query.type,
+    status: query.status,
+    from: query.from,
+    to: query.to,
+    walletAddress: query.walletAddress,
+  };
+
+  let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = pagination.page
+    ? paginateWithOffset(filtered, pagination)
+    : paginateWithCursor(filtered, pagination, (tx) => encodeCursor(tx.id));
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
+export function buildPortfolioHoldingsResponse(
+  query: WalletStateQuery
+): PaginatedResponse<PortfolioHolding> {
+  const pagination = {
+    limit: query.limit ?? PORTFOLIO_PAGINATION_CONFIG.defaultLimit ?? 20,
+    cursor: query.cursor,
+    sortBy: query.sortBy ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    status: query.status,
+    walletAddress: query.walletAddress,
+  };
+
+  let filtered = filterPortfolioHoldings(MOCK_PORTFOLIO_HOLDINGS, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = paginateWithCursor(filtered, pagination, (holding) =>
+    encodeCursor(holding.id)
+  );
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
+export function buildVaultHistoryResponse(
+  query: Pick<WalletStateQuery, 'limit' | 'cursor' | 'sortBy' | 'sortOrder' | 'from' | 'to'>
+): PaginatedResponse<VaultHistoryPoint> {
+  const pagination = {
+    limit: query.limit ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultLimit ?? 30,
+    cursor: query.cursor,
+    sortBy: query.sortBy ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortBy,
+    sortOrder: query.sortOrder ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
+  };
+  const filters = {
+    from: query.from,
+    to: query.to,
+  };
+
+  let filtered = filterVaultHistory(MOCK_VAULT_HISTORY, filters);
+  if (pagination.sortBy) {
+    filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder);
+  }
+
+  const paginated = paginateWithCursor(filtered, pagination, (point) =>
+    encodeCursor(point.date)
+  );
+
+  return createPaginatedResponse(paginated.data, paginated.pagination);
+}
+
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 /**
@@ -231,6 +379,15 @@ function filterVaultHistory(
  *         name: type
  *         schema: { type: string, enum: [deposit, withdrawal, all] }
  *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [pending, completed, failed, all] }
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date-time }
+ *       - in: query
  *         name: walletAddress
  *         schema: { type: string }
  *     responses:
@@ -248,30 +405,19 @@ function filterVaultHistory(
  *                 pagination:
  *                   $ref: '#/components/schemas/PaginationMeta'
  */
-router.get('/transactions', (req: Request, res: Response) => {
+router.get('/transactions', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, TRANSACTION_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildTransactionsResponse({
+      ...pagination,
       type: req.query.type as string | undefined,
+      status: req.query.status as string | undefined,
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
       walletAddress: req.query.walletAddress as string | undefined,
-    };
+    });
 
-    // Filter transactions
-    let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
-
-    // Sort transactions
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    // Paginate with cursor
-    const { data, pagination: paginationMeta } = paginateWithCursor(
-      filtered,
-      pagination,
-      (tx) => encodeCursor(tx.id)
-    );
-
-    sendPaginatedResponse(res, data, paginationMeta);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching transactions:', error);
     res.status(500).json({
@@ -303,30 +449,16 @@ router.get('/transactions', (req: Request, res: Response) => {
  *       200:
  *         description: List of holdings
  */
-router.get('/portfolio/holdings', (req: Request, res: Response) => {
+router.get('/portfolio/holdings', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, PORTFOLIO_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildPortfolioHoldingsResponse({
+      ...pagination,
       status: req.query.status as string | undefined,
       walletAddress: req.query.walletAddress as string | undefined,
-    };
+    });
 
-    // Filter holdings
-    let filtered = filterPortfolioHoldings(MOCK_PORTFOLIO_HOLDINGS, filters);
-
-    // Sort holdings
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    // Paginate with cursor
-    const { data, pagination: paginationMeta } = paginateWithCursor(
-      filtered,
-      pagination,
-      (holding) => encodeCursor(holding.id)
-    );
-
-    sendPaginatedResponse(res, data, paginationMeta);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching portfolio holdings:', error);
     res.status(500).json({
@@ -358,36 +490,77 @@ router.get('/portfolio/holdings', (req: Request, res: Response) => {
  *       200:
  *         description: Vault history points
  */
-router.get('/vault/history', (req: Request, res: Response) => {
+router.get('/vault/history', cacheMiddleware({ ttl: CACHE_TTL_MS }), (req: Request, res: Response) => {
   try {
     const pagination = parsePaginationQuery(req, VAULT_HISTORY_PAGINATION_CONFIG);
-    const filters = {
+    const response = buildVaultHistoryResponse({
+      ...pagination,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
-    };
+    });
 
-    // Filter history
-    let filtered = filterVaultHistory(MOCK_VAULT_HISTORY, filters);
-
-    // Sort history
-    if (pagination.sortBy) {
-      filtered = sortItems(filtered, pagination.sortBy, pagination.sortOrder || 'desc');
-    }
-
-    // Paginate with cursor
-    const { data, pagination: paginationMeta } = paginateWithCursor(
-      filtered,
-      pagination,
-      (point) => encodeCursor(point.date)
-    );
-
-    sendPaginatedResponse(res, data, paginationMeta);
+    sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
     console.error('Error fetching vault history:', error);
     res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
       message: 'Failed to fetch vault history',
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /api/v1/vault/apy/history:
+ *   get:
+ *     summary: APY history
+ *     description: >
+ *       Returns one APY data point per day for the requested range.
+ *       Missing days are backfilled with the previous known value (never null).
+ *       Snapshots are written nightly by the APY snapshot job (Issue #374).
+ *     tags: [Vault]
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+ *         description: Number of calendar days of history to return (max 365).
+ *     responses:
+ *       200:
+ *         description: Array of APY snapshots ordered oldest → newest
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date: { type: string, format: date }
+ *                       apy:  { type: number }
+ *                 days: { type: integer }
+ *                 count: { type: integer }
+ */
+router.get('/vault/apy/history', async (req: Request, res: Response) => {
+  try {
+    const rawDays = parseInt((req.query.days as string) || '30', 10);
+    const days = Number.isFinite(rawDays) ? rawDays : 30;
+
+    const data = await getApyHistory(days);
+
+    res.json({
+      data,
+      days,
+      count: data.length,
+    });
+  } catch (err) {
+    console.error('Error fetching APY history:', err);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: 'Failed to fetch APY history',
     });
   }
 });

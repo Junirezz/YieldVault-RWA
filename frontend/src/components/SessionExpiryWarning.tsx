@@ -70,6 +70,8 @@ const SessionExpiryWarning: React.FC<SessionExpiryWarningProps> = ({
 
   return (
     <div
+      role="alert"
+      aria-live="assertive"
       className="session-expiry-warning"
       style={{
         position: "fixed",

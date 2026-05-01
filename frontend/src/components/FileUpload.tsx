@@ -237,7 +237,7 @@ export function FileUpload({
                 border: "1px solid var(--border-glass)",
               }}
             >
-              <FileIcon size={20} style={{ flexShrink: 0, color: "var(--text-tertiary)" }} />
+              <FileIcon size={20} aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-tertiary)" }} />
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -249,7 +249,14 @@ export function FileUpload({
 
                 {/* Progress bar */}
                 {uf.status === "uploading" && (
-                  <div style={{ marginTop: "8px", height: "4px", background: "var(--bg-muted)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={uf.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Uploading ${uf.file.name}: ${uf.progress}%`}
+                    style={{ marginTop: "8px", height: "4px", background: "var(--bg-muted)", borderRadius: "2px", overflow: "hidden" }}
+                  >
                     <div
                       style={{
                         height: "100%",
