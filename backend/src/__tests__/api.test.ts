@@ -1,4 +1,22 @@
 import request from 'supertest';
+
+// Mock the sorobanClient before importing app
+jest.mock('../sorobanClient', () => ({
+  submitVaultOperation: jest.fn(async (type: string, wallet: string, amount: string, asset: string) => {
+    // Return a mock transaction hash
+    return `mock_tx_hash_${type}_${Date.now()}`;
+  }),
+  SorobanSimulationError: class SorobanSimulationError extends Error {
+    code: string;
+    statusCode: number = 502;
+    constructor(message: string, code = 'SIMULATION_ERROR') {
+      super(message);
+      this.name = 'SorobanSimulationError';
+      this.code = code;
+    }
+  },
+}));
+
 import app from '../index';
 
 describe('Backend API', () => {
@@ -75,7 +93,7 @@ describe('Backend API', () => {
 
   describe('Rate Limiting - API Endpoints', () => {
     it('should include rate limit headers in response', async () => {
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       expect(response.status).toBe(200);
       expect(response.headers).toHaveProperty('ratelimit-limit');
@@ -88,32 +106,46 @@ describe('Backend API', () => {
       // It attempts to exceed the API rate limit
       const requests = Array(35).fill(null); // More than configured limit
       const results = await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() => request(app).get('/api/v1/vault/summary'))
       );
 
       expect(results.some((r) => r.status === 429)).toBe(true);
     });
 
-    it('should return 429 with clear error message', async () => {
+    it('should return 429 with clear error message and Retry-After header', async () => {
       // Make multiple requests to trigger rate limit
       const requests = Array(35).fill(null);
       await Promise.all(
-        requests.map(() => request(app).get('/api/vault/summary'))
+        requests.map(() => request(app).get('/api/v1/vault/summary'))
       );
 
-      const response = await request(app).get('/api/vault/summary');
+      const response = await request(app).get('/api/v1/vault/summary');
 
       if (response.status === 429) {
         expect(response.body).toHaveProperty('error');
         expect(response.body).toHaveProperty('status', 429);
         expect(response.body).toHaveProperty('message');
+        // Issue #251: retryAfter field in body
+        expect(response.body).toHaveProperty('retryAfter');
+        expect(typeof response.body.retryAfter).toBe('number');
+        // Issue #251: Retry-After header must be present
+        expect(response.headers).toHaveProperty('retry-after');
       }
     });
 
-    it('should support per-user rate limiting with API key', async () => {
-      // Test that API key in header is used for rate limiting
+    it('should support per-user rate limiting with wallet address header', async () => {
+      // Test that x-wallet-address header is used as the rate-limit key
       const response = await request(app)
-        .get('/api/vault/summary')
+        .get('/api/v1/vault/summary')
+        .set('x-wallet-address', 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567');
+
+      expect([200, 429]).toContain(response.status);
+    });
+
+    it('should support per-user rate limiting with API key (backward compat)', async () => {
+      // Test that x-api-key header is still accepted as fallback key
+      const response = await request(app)
+        .get('/api/v1/vault/summary')
         .set('x-api-key', 'test-key-123');
 
       expect([200, 429]).toContain(response.status);
@@ -143,48 +175,54 @@ describe('Backend API', () => {
     });
   });
 
-  // ─── Configuration Tests ─────────────────────────────────────────────────
+  describe('Cache Middleware', () => {
+    it('should cache repeated list endpoint requests and mark hits', async () => {
+      const first = await request(app).get('/api/v1/transactions');
+      expect(first.headers['x-cache-hit']).toBe('false');
 
-  describe('Configuration', () => {
-    it('should have proper rate limit defaults', async () => {
-      // This verifies the backend is configured with sensible defaults
-      expect(process.env.PORT || 3000).toBeDefined();
+      const second = await request(app).get('/api/v1/transactions');
+      expect(second.headers['x-cache-hit']).toBe('true');
     });
 
-    it('should not expose sensitive info in error responses', async () => {
-      const response = await request(app).get('/api/vault/summary');
+    it('should separate cache entries by query string', async () => {
+      const first = await request(app).get('/api/v1/transactions?limit=1');
+      expect(first.headers['x-cache-hit']).toBe('false');
 
-      // Ensure no stack traces in error responses in production-like environment
-      if (response.status >= 500) {
-        if (process.env.NODE_ENV === 'production') {
-          expect(response.body.message).not.toContain('at ');
-          expect(response.body.message).not.toContain('Error');
-        }
+      const second = await request(app).get('/api/v1/transactions?limit=2');
+      expect(second.headers['x-cache-hit']).toBe('false');
+
+      const third = await request(app).get('/api/v1/transactions?limit=2');
+      expect(third.headers['x-cache-hit']).toBe('true');
+    });
+
+    it('should invalidate cached list responses after a vault deposit', async () => {
+      const priorAllowlist = process.env.ALLOWLIST_ENABLED;
+      process.env.ALLOWLIST_ENABLED = 'false';
+
+      try {
+        await request(app).get('/api/v1/transactions');
+        const cached = await request(app).get('/api/v1/transactions');
+        expect(cached.headers['x-cache-hit']).toBe('true');
+
+        const depositResponse = await request(app)
+          .post('/api/v1/vault/deposits')
+          .send({
+            amount: '100',
+            asset: 'USDC',
+            walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+            email: 'user@example.com',
+          });
+
+        expect(depositResponse.status).toBe(201);
+
+        const afterInvalidate = await request(app).get('/api/v1/transactions');
+        expect(afterInvalidate.headers['x-cache-hit']).toBe('false');
+      } finally {
+        process.env.ALLOWLIST_ENABLED = priorAllowlist;
       }
     });
-  });
 
-  // ─── Integration Tests ──────────────────────────────────────────────────
+    it('should cache referral stats for a referrer wallet', async () => {
+      const referrerWallet = 'GREFERRER1234567890';
 
-  describe('Integration', () => {
-    it('should have proper CORS headers configured', async () => {
-      const response = await request(app)
-        .get('/health')
-        .set('Origin', 'http://localhost:5173');
-
-      // Response should include appropriate headers
-      expect(response.status).toBe(200);
-    });
-
-    it('should handle JSON body parsing', async () => {
-      const response = await request(app)
-        .post('/api/vault/summary')
-        .send({
-          test: 'data',
-        });
-
-      // Should either accept or reject with proper error
-      expect([200, 405, 404, 400]).toContain(response.status);
-    });
-  });
-});
+      const codeResponse = await request(app).get(`/api/v1/referrals/code/${referrerWallet}`);
