@@ -1,0 +1,124 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "uptime": {
+      "type": "number"
+    },
+    "environment": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "cache": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "stellarRpc": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "databasePrimary": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "databaseReplica": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "prisma": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        },
+        "jobs": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "api",
+        "cache",
+        "stellarRpc",
+        "databasePrimary",
+        "databaseReplica",
+        "prisma",
+        "jobs"
+      ],
+      "additionalProperties": false
+    },
+    "sorobanCircuitBreaker": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string"
+        },
+        "failures": {
+          "type": "number"
+        },
+        "retryAfterMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "state",
+        "failures",
+        "retryAfterMs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "status",
+    "timestamp",
+    "uptime",
+    "environment",
+    "checks",
+    "sorobanCircuitBreaker"
+  ],
+  "additionalProperties": false
+}

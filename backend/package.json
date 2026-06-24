@@ -13,7 +13,9 @@
     "format": "prettier --write src",
     "audit": "npm audit",
     "generate:openapi": "tsx scripts/generate-openapi.ts",
-    "ci:governance": "npm run lint && npm run test && node scripts/check-migrations.js",
+    "ci:governance": "npm run lint && npm run test && node scripts/check-migrations.js && npm run snapshots:check",
+    "snapshots:write": "tsx scripts/check-schema-snapshots.ts --write",
+    "snapshots:check": "tsx scripts/check-schema-snapshots.ts",
     "db:check-drift": "prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-migrations prisma/migrations --exit-code"
   },
   "keywords": [

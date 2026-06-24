@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "ready": {
+      "type": "boolean"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "cache": {
+          "type": "boolean"
+        },
+        "stellarRpc": {
+          "type": "boolean"
+        },
+        "database": {
+          "type": "boolean"
+        },
+        "prisma": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cache",
+        "stellarRpc",
+        "database",
+        "prisma"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ready",
+    "timestamp",
+    "dependencies"
+  ],
+  "additionalProperties": false
+}

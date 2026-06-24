@@ -50,5 +50,8 @@ jobs:
             exit 1
           fi
 
+      - name: Check API contract schema snapshots
+        run: npm run snapshots:check
+
       - name: Check for database schema drift
         run: npm run db:check-drift
