@@ -12,6 +12,7 @@
 use soroban_sdk::{Address, Env};
 
 use crate::upgrade::get_admin;
+use crate::DataKey;
 
 /// Errors that can occur during whitelist operations
 #[derive(Debug, Clone, Copy)]
@@ -85,14 +86,9 @@ impl SecureWhitelist {
         }
         admin.require_auth();
 
-        // Validate strategy address is not empty/invalid
-        if strategy == &Address::from_contract_id(&[0u8; 32]) {
-            return Err(WhitelistError::InvalidStrategy);
-        }
-
-        // Store whitelist entry
-        let whitelist_key = (&"whitelist", strategy);
-        env.storage().instance().set(&whitelist_key, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::StrategyWhitelist(strategy.clone()), &true);
 
         Ok(())
     }
@@ -130,9 +126,9 @@ impl SecureWhitelist {
         }
         admin.require_auth();
 
-        // Remove whitelist entry
-        let whitelist_key = (&"whitelist", strategy);
-        env.storage().instance().remove(&whitelist_key);
+        env.storage()
+            .instance()
+            .remove(&DataKey::StrategyWhitelist(strategy.clone()));
 
         Ok(())
     }
@@ -155,10 +151,9 @@ impl SecureWhitelist {
     /// }
     /// ```
     pub fn is_strategy_whitelisted(env: &Env, strategy: &Address) -> bool {
-        let whitelist_key = (&"whitelist", strategy);
         env.storage()
             .instance()
-            .get::<_, bool>(&whitelist_key)
+            .get(&DataKey::StrategyWhitelist(strategy.clone()))
             .unwrap_or(false)
     }
 

@@ -2098,3 +2098,38 @@ fn test_whitelist_consistency_with_set_strategy() {
     vault.whitelist_strategy(&benji_strategy, &false);
     assert!(!vault.is_strategy_whitelisted(&benji_strategy));
 }
+
+// ─── Issue #744: admin parameter change interval ─────────────────────────────
+
+#[test]
+fn test_admin_param_change_interval_blocks_rapid_updates() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (vault, _usdc, _usdc_sa, admin) = setup_vault(&env);
+    vault.set_admin_param_change_interval(&60).unwrap();
+    vault.set_fee_bps(&100).unwrap();
+
+    let second = vault.try_set_fee_bps(&200);
+    assert_eq!(second, Err(Ok(VaultError::AdminParamChangeTooSoon)));
+
+    env.ledger().with_mut(|li| {
+        li.timestamp += 61;
+    });
+
+    vault.set_fee_bps(&200).unwrap();
+    assert_eq!(vault.fee_bps(), 200);
+}
+
+#[test]
+fn test_admin_param_change_interval_applies_across_setters() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (vault, _usdc, _usdc_sa, _admin) = setup_vault(&env);
+    vault.set_admin_param_change_interval(&120).unwrap();
+    vault.set_min_deposit(&10).unwrap();
+
+    let blocked = vault.try_set_dao_threshold(&5);
+    assert_eq!(blocked, Err(Ok(VaultError::AdminParamChangeTooSoon)));
+}
