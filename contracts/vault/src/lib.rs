@@ -385,7 +385,8 @@ impl YieldVault {
         assert!(
             post_version >= pre_version,
             "storage version must not decrease: was {}, now {}",
-            pre_version, post_version
+            pre_version,
+            post_version
         );
 
         env.deployer().update_current_contract_wasm(new_wasm_hash);
@@ -409,7 +410,8 @@ impl YieldVault {
         assert!(
             post_version >= pre_version,
             "storage version must not decrease: was {}, now {}",
-            pre_version, post_version
+            pre_version,
+            post_version
         );
         Ok(())
     }
@@ -642,8 +644,10 @@ impl YieldVault {
             dispute_deadline,
         };
         emergency::write_proposal(&env, proposal_id, &proposal);
-        env.events()
-            .publish((symbol_short!("emrgprop"),), (proposal_id, kind as u32, dispute_deadline));
+        env.events().publish(
+            (symbol_short!("emrgprop"),),
+            (proposal_id, kind as u32, dispute_deadline),
+        );
         proposal_id
     }
 
@@ -651,7 +655,11 @@ impl YieldVault {
     ///
     /// Confirmation is only allowed after the dispute window has closed and the
     /// proposal has not been cancelled.
-    pub fn confirm_emergency_action(env: Env, confirmer: Address, proposal_id: u32) -> Result<(), VaultError> {
+    pub fn confirm_emergency_action(
+        env: Env,
+        confirmer: Address,
+        proposal_id: u32,
+    ) -> Result<(), VaultError> {
         confirmer.require_auth();
         let secondary = emergency::secondary_approver(&env).expect("secondary approver not set");
         assert!(
@@ -2131,10 +2139,11 @@ impl YieldVault {
         let guard = Self::admin_param_guard(env);
         let now = env.ledger().timestamp();
         if guard.last_change_ts > 0
-            && now < guard
-                .last_change_ts
-                .checked_add(guard.min_interval_secs)
-                .expect("overflow")
+            && now
+                < guard
+                    .last_change_ts
+                    .checked_add(guard.min_interval_secs)
+                    .expect("overflow")
         {
             return Err(VaultError::AdminParamChangeTooSoon);
         }
