@@ -69,7 +69,9 @@ fn test_dual_approval_emergency_pause() {
     // Advance past the 1-hour dispute window before the secondary can confirm.
     env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
 
-    vault.confirm_emergency_action(&secondary, &proposal_id).unwrap();
+    vault
+        .confirm_emergency_action(&secondary, &proposal_id)
+        .unwrap();
 
     assert!(vault.is_paused());
     assert_eq!(vault.pause_reason(), Some(PauseReason::SecurityIncident));
@@ -150,7 +152,10 @@ fn test_confirm_blocked_during_dispute_window() {
 
     // Try to confirm immediately — should be blocked.
     assert_eq!(
-        vault.try_confirm_emergency_action(&secondary, &proposal_id).unwrap_err().unwrap(),
+        vault
+            .try_confirm_emergency_action(&secondary, &proposal_id)
+            .unwrap_err()
+            .unwrap(),
         VaultError::DisputeWindowActive
     );
 }
@@ -174,7 +179,9 @@ fn test_confirm_allowed_after_dispute_window() {
     );
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
-    vault.confirm_emergency_action(&secondary, &proposal_id).unwrap();
+    vault
+        .confirm_emergency_action(&secondary, &proposal_id)
+        .unwrap();
     assert!(vault.is_paused());
 }
 
@@ -226,7 +233,10 @@ fn test_cancelled_proposal_cannot_be_confirmed() {
     // Even after the window passes, a cancelled proposal must be rejected.
     env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
     assert_eq!(
-        vault.try_confirm_emergency_action(&secondary, &proposal_id).unwrap_err().unwrap(),
+        vault
+            .try_confirm_emergency_action(&secondary, &proposal_id)
+            .unwrap_err()
+            .unwrap(),
         VaultError::ProposalCancelled
     );
 }
@@ -252,7 +262,10 @@ fn test_cancel_fails_after_dispute_window_closes() {
     env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
 
     assert_eq!(
-        vault.try_cancel_emergency_action(&proposal_id).unwrap_err().unwrap(),
+        vault
+            .try_cancel_emergency_action(&proposal_id)
+            .unwrap_err()
+            .unwrap(),
         VaultError::DisputeWindowClosed
     );
 }
@@ -282,12 +295,17 @@ fn test_custom_dispute_window_respected() {
     // Still blocked at 9 minutes.
     env.ledger().set_timestamp(env.ledger().timestamp() + 540);
     assert_eq!(
-        vault.try_confirm_emergency_action(&secondary, &proposal_id).unwrap_err().unwrap(),
+        vault
+            .try_confirm_emergency_action(&secondary, &proposal_id)
+            .unwrap_err()
+            .unwrap(),
         VaultError::DisputeWindowActive
     );
 
     // Allowed after 10 minutes.
     env.ledger().set_timestamp(env.ledger().timestamp() + 61);
-    vault.confirm_emergency_action(&secondary, &proposal_id).unwrap();
+    vault
+        .confirm_emergency_action(&secondary, &proposal_id)
+        .unwrap();
     assert!(vault.is_paused());
 }

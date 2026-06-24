@@ -396,7 +396,8 @@ impl YieldVault {
         assert!(
             post_version >= pre_version,
             "storage version must not decrease: was {}, now {}",
-            pre_version, post_version
+            pre_version,
+            post_version
         );
 
         env.deployer().update_current_contract_wasm(new_wasm_hash);
@@ -420,7 +421,8 @@ impl YieldVault {
         assert!(
             post_version >= pre_version,
             "storage version must not decrease: was {}, now {}",
-            pre_version, post_version
+            pre_version,
+            post_version
         );
         Ok(())
     }
@@ -650,8 +652,10 @@ impl YieldVault {
             dispute_deadline,
         };
         emergency::write_proposal(&env, proposal_id, &proposal);
-        env.events()
-            .publish((symbol_short!("emrgprop"),), (proposal_id, kind as u32, dispute_deadline));
+        env.events().publish(
+            (symbol_short!("emrgprop"),),
+            (proposal_id, kind as u32, dispute_deadline),
+        );
         proposal_id
     }
 
@@ -659,7 +663,11 @@ impl YieldVault {
     ///
     /// Confirmation is only allowed after the dispute window has closed and the
     /// proposal has not been cancelled.
-    pub fn confirm_emergency_action(env: Env, confirmer: Address, proposal_id: u32) -> Result<(), VaultError> {
+    pub fn confirm_emergency_action(
+        env: Env,
+        confirmer: Address,
+        proposal_id: u32,
+    ) -> Result<(), VaultError> {
         confirmer.require_auth();
         let secondary = emergency::secondary_approver(&env).expect("secondary approver not set");
         assert!(
@@ -1945,8 +1953,10 @@ impl YieldVault {
         };
         env.storage().instance().set(&deposit_key, &new_deposit);
 
-        env.events()
-            .publish((symbol_short!("wdqueue"), user.clone()), (tail, assets_to_return));
+        env.events().publish(
+            (symbol_short!("wdqueue"), user.clone()),
+            (tail, assets_to_return),
+        );
 
         Err(VaultError::WithdrawalQueued)
     }
@@ -1972,7 +1982,11 @@ impl YieldVault {
 
         while head < tail && processed < max_entries {
             let key = DataKey::WithdrawalQueueEntry(head);
-            let Some(entry) = env.storage().instance().get::<_, WithdrawalQueueEntry>(&key) else {
+            let Some(entry) = env
+                .storage()
+                .instance()
+                .get::<_, WithdrawalQueueEntry>(&key)
+            else {
                 head = head.checked_add(1).expect("overflow");
                 continue;
             };
@@ -1986,11 +2000,7 @@ impl YieldVault {
                 break;
             }
 
-            token_client.transfer(
-                &env.current_contract_address(),
-                &entry.user,
-                &entry.assets,
-            );
+            token_client.transfer(&env.current_contract_address(), &entry.user, &entry.assets);
             env.storage().instance().set(
                 &DataKey::TotalAssets,
                 &idle.checked_sub(entry.assets).expect("underflow"),
