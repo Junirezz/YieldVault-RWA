@@ -76,6 +76,7 @@ function isMaintenanceBypassPath(pathname: string): boolean {
     pathname === '/health' ||
     pathname === '/ready' ||
     pathname === '/metrics' ||
+    pathname === '/maintenance/status' ||
     pathname.startsWith('/admin/maintenance')
   );
 }

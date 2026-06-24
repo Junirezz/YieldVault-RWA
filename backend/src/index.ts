@@ -121,6 +121,13 @@ import {
   logMaintenanceTransition,
 } from './maintenanceMode';
 import {
+  buildMaintenanceStatusPayload,
+  cancelMaintenanceWindow,
+  listMaintenanceWindows,
+  scheduleMaintenanceWindow,
+  startMaintenanceWindowScheduler,
+} from './maintenanceWindow';
+import {
   buildExportMetadataHeaderValue,
   getExportJobById,
   listExportJobs,
@@ -623,6 +630,14 @@ app.get('/ready', async (_req: Request, res: Response) => {
   res.status(isReady ? 200 : 503).json(readiness);
 });
 
+/**
+ * GET /maintenance/status
+ * Public read-only maintenance window visibility (Issue #714).
+ */
+app.get('/maintenance/status', (_req: Request, res: Response) => {
+  res.status(200).json(buildMaintenanceStatusPayload());
+});
+
 // ─── Versioned API v1 Router ──────────────────────────────────────────────
 const apiV1 = express.Router();
 app.use('/api/v1', apiV1);
@@ -1044,6 +1059,78 @@ app.post('/admin/maintenance', validateApiKey, async (req: Request, res: Respons
     maintenance: next,
     timestamp: new Date().toISOString(),
     receipt,
+  });
+});
+
+/**
+ * GET /admin/maintenance/windows - list scheduled maintenance windows
+ */
+app.get('/admin/maintenance/windows', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    windows: listMaintenanceWindows(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * POST /admin/maintenance/windows - schedule a maintenance window
+ * Body: { title: string, reason?: string, startsAt: string, endsAt: string }
+ */
+app.post('/admin/maintenance/windows', validateApiKey, (req: Request, res: Response) => {
+  const { title, reason, startsAt, endsAt } = req.body;
+  if (typeof title !== 'string' || !title.trim()) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`title` (string) is required',
+    });
+    return;
+  }
+  if (typeof startsAt !== 'string' || typeof endsAt !== 'string') {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`startsAt` and `endsAt` (ISO strings) are required',
+    });
+    return;
+  }
+
+  try {
+    const actor = resolveActingAdminAddress(req);
+    const window = scheduleMaintenanceWindow({
+      title,
+      reason: typeof reason === 'string' ? reason : undefined,
+      startsAt,
+      endsAt,
+      actor,
+    });
+    res.status(201).json({ window, timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * DELETE /admin/maintenance/windows/:windowId - cancel a scheduled window
+ */
+app.delete('/admin/maintenance/windows/:windowId', validateApiKey, (req: Request, res: Response) => {
+  const cancelled = cancelMaintenanceWindow(req.params.windowId);
+  if (!cancelled) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Maintenance window not found',
+    });
+    return;
+  }
+  res.status(200).json({
+    cancelled: true,
+    windowId: req.params.windowId,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -3245,6 +3332,11 @@ if (process.env.NODE_ENV !== 'test') {
   const stopApyScheduler = startApySnapshotScheduler();
   shutdownHandler.onShutdown(async () => {
     stopApyScheduler();
+  });
+
+  const stopMaintenanceWindowScheduler = startMaintenanceWindowScheduler();
+  shutdownHandler.onShutdown(async () => {
+    stopMaintenanceWindowScheduler();
   });
 
   // ─── Database Backup Scheduler (Issue #376) ──────────────────────────────────
