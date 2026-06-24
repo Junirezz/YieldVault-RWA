@@ -203,6 +203,9 @@ pub enum DataKey {
     EmergencyDisputeWindow,
     // Monotonic counter stamped on every event topic for deterministic indexer ordering.
     EventSeq,
+    // FIFO withdrawal queue metadata (head/tail sequence counters)
+    WithdrawalQueueMeta,
+    WithdrawalQueueEntry(u64),
 }
 
 #[contracttype]
@@ -221,6 +224,24 @@ pub struct StrategyProposal {
 pub struct PendingWithdrawal {
     pub shares: i128,
     pub unlock_timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Queued withdrawal awaiting available idle liquidity (FIFO by sequence).
+pub struct WithdrawalQueueEntry {
+    pub user: Address,
+    pub shares: i128,
+    pub assets: i128,
+    pub enqueued_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Head/tail sequence counters for the withdrawal liquidity queue.
+pub struct WithdrawalQueueMeta {
+    pub head: u64,
+    pub tail: u64,
 }
 
 #[contracttype]
@@ -306,6 +327,8 @@ pub enum VaultError {
     ProposalCancelled = 19,
     /// Dispute window has already closed; the proposal can no longer be cancelled.
     DisputeWindowClosed = 20,
+    /// Withdrawal was queued because idle liquidity was insufficient.
+    WithdrawalQueued = 21,
 }
 
 #[contractclient(name = "KoreanDebtStrategyClient")]
@@ -1754,6 +1777,16 @@ impl YieldVault {
                 .unwrap_or(0);
         }
 
+        if idle_ta < assets_to_return {
+            return Self::enqueue_withdrawal_for_liquidity(
+                env,
+                state,
+                user,
+                shares,
+                assets_to_return,
+            );
+        }
+
         token_client.transfer(&env.current_contract_address(), &user, &assets_to_return);
 
         env.storage().instance().set(
@@ -1822,6 +1855,158 @@ impl YieldVault {
             (assets_to_return, shares),
         );
         Ok(assets_to_return)
+    }
+
+    fn withdrawal_queue_meta(env: &Env) -> WithdrawalQueueMeta {
+        env.storage()
+            .instance()
+            .get(&DataKey::WithdrawalQueueMeta)
+            .unwrap_or(WithdrawalQueueMeta { head: 1, tail: 1 })
+    }
+
+    fn set_withdrawal_queue_meta(env: &Env, meta: &WithdrawalQueueMeta) {
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalQueueMeta, meta);
+    }
+
+    fn withdrawal_queue_head(env: &Env) -> u64 {
+        Self::withdrawal_queue_meta(env).head
+    }
+
+    fn withdrawal_queue_tail(env: &Env) -> u64 {
+        Self::withdrawal_queue_meta(env).tail
+    }
+
+    fn set_withdrawal_queue_head(env: &Env, head: u64) {
+        let mut meta = Self::withdrawal_queue_meta(env);
+        meta.head = head;
+        Self::set_withdrawal_queue_meta(env, &meta);
+    }
+
+    fn set_withdrawal_queue_tail(env: &Env, tail: u64) {
+        let mut meta = Self::withdrawal_queue_meta(env);
+        meta.tail = tail;
+        Self::set_withdrawal_queue_meta(env, &meta);
+    }
+
+    /// Queue a withdrawal payout when idle liquidity is insufficient after divest.
+    fn enqueue_withdrawal_for_liquidity(
+        env: &Env,
+        state: &mut VaultState,
+        user: Address,
+        shares: i128,
+        assets_to_return: i128,
+    ) -> Result<i128, VaultError> {
+        let tail = Self::withdrawal_queue_tail(env);
+        let entry = WithdrawalQueueEntry {
+            user: user.clone(),
+            shares,
+            assets: assets_to_return,
+            enqueued_at: env.ledger().timestamp(),
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalQueueEntry(tail), &entry);
+        Self::set_withdrawal_queue_tail(env, tail.checked_add(1).expect("queue overflow"));
+
+        let vault_balance = Self::balance(env.clone(), user.clone());
+        env.storage().instance().set(
+            &DataKey::ShareBalance(user.clone()),
+            &vault_balance.checked_sub(shares).expect("underflow"),
+        );
+
+        let ts = Self::total_shares(env.clone());
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &ts.checked_sub(shares).expect("underflow"),
+        );
+
+        state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
+        state.total_assets = state
+            .total_assets
+            .checked_sub(assets_to_return)
+            .expect("underflow");
+        env.storage().instance().set(&DataKey::State, state);
+
+        let deposit_key = DataKey::UserDeposit(user.clone());
+        let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
+        let new_deposit = if vault_balance == 0 || shares >= vault_balance {
+            0
+        } else {
+            let cost_basis_reduction = shares
+                .checked_mul(current_deposit)
+                .expect("overflow")
+                .checked_div(vault_balance)
+                .expect("division by zero");
+            current_deposit
+                .checked_sub(cost_basis_reduction)
+                .expect("underflow")
+        };
+        env.storage().instance().set(&deposit_key, &new_deposit);
+
+        env.events()
+            .publish((symbol_short!("wdqueue"), user.clone()), (tail, assets_to_return));
+
+        Err(VaultError::WithdrawalQueued)
+    }
+
+    /// Returns the number of withdrawals waiting in the liquidity queue.
+    pub fn withdrawal_queue_length(env: Env) -> u64 {
+        let head = Self::withdrawal_queue_head(&env);
+        let tail = Self::withdrawal_queue_tail(&env);
+        tail.saturating_sub(head)
+    }
+
+    /// Process queued withdrawals in deterministic FIFO order while liquidity allows.
+    pub fn process_withdrawal_queue(env: Env, max_entries: u32) -> u32 {
+        if max_entries == 0 {
+            return 0;
+        }
+
+        let token_addr = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
+        let token_client = token::Client::new(&env, &token_addr);
+        let mut processed: u32 = 0;
+        let mut head = Self::withdrawal_queue_head(&env);
+        let tail = Self::withdrawal_queue_tail(&env);
+
+        while head < tail && processed < max_entries {
+            let key = DataKey::WithdrawalQueueEntry(head);
+            let Some(entry) = env.storage().instance().get::<_, WithdrawalQueueEntry>(&key) else {
+                head = head.checked_add(1).expect("overflow");
+                continue;
+            };
+
+            let idle = env
+                .storage()
+                .instance()
+                .get::<_, i128>(&DataKey::TotalAssets)
+                .unwrap_or(0);
+            if idle < entry.assets {
+                break;
+            }
+
+            token_client.transfer(
+                &env.current_contract_address(),
+                &entry.user,
+                &entry.assets,
+            );
+            env.storage().instance().set(
+                &DataKey::TotalAssets,
+                &idle.checked_sub(entry.assets).expect("underflow"),
+            );
+            env.storage().instance().remove(&key);
+            env.events().publish(
+                (symbol_short!("wdqproc"), entry.user.clone()),
+                (head, entry.assets),
+            );
+
+            head = head.checked_add(1).expect("overflow");
+            processed = processed.checked_add(1).expect("overflow");
+        }
+
+        Self::set_withdrawal_queue_head(&env, head);
+        processed
     }
 
     /// Move idle funds to the strategy.

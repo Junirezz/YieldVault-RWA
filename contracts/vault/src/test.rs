@@ -2098,3 +2098,95 @@ fn test_whitelist_consistency_with_set_strategy() {
     vault.whitelist_strategy(&benji_strategy, &false);
     assert!(!vault.is_strategy_whitelisted(&benji_strategy));
 }
+
+// ─── Issue #740: withdrawal queue sequencing ─────────────────────────────────
+
+fn setup_vault_with_strategy(
+    e: &Env,
+) -> (
+    YieldVaultClient<'_>,
+    token::Client<'_>,
+    token::StellarAssetClient<'_>,
+    BenjiStrategyClient<'_>,
+    Address,
+    Address,
+) {
+    let admin = Address::generate(e);
+    let token_admin = Address::generate(e);
+    let usdc = create_token(e, &token_admin);
+    let usdc_sa = token::StellarAssetClient::new(e, &usdc.address);
+    let benji_token = create_token(e, &token_admin);
+
+    let vault_id = e.register(YieldVault, ());
+    let vault = YieldVaultClient::new(e, &vault_id);
+    vault.initialize(&admin, &usdc.address);
+
+    let strategy_id = e.register(BenjiStrategy, ());
+    let strategy = BenjiStrategyClient::new(e, &strategy_id);
+    strategy.initialize(&vault_id, &usdc.address, &benji_token.address);
+    vault.whitelist_strategy(&strategy_id, &true);
+    vault.set_strategy(&strategy_id);
+
+    (vault, usdc, usdc_sa, strategy, admin, vault_id)
+}
+
+#[test]
+fn test_withdrawal_queue_processes_fifo_when_liquidity_returns() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (vault, usdc, usdc_sa, strategy, _admin, vault_id) = setup_vault_with_strategy(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    usdc_sa.mint(&user_a, &1_000);
+    usdc_sa.mint(&user_b, &1_000);
+
+    vault.deposit(&user_a, &500);
+    vault.deposit(&user_b, &500);
+    vault.invest(&980).unwrap();
+
+    let result_a = vault.try_withdraw(&user_a, &200);
+    assert_eq!(result_a, Err(Ok(VaultError::WithdrawalQueued)));
+
+    let result_b = vault.try_withdraw(&user_b, &150);
+    assert_eq!(result_b, Err(Ok(VaultError::WithdrawalQueued)));
+
+    assert_eq!(vault.withdrawal_queue_length(), 2);
+
+    vault.divest(&980);
+    token::StellarAssetClient::new(&env, &strategy.address)
+        .mint(&vault_id, &980);
+
+    let processed = vault.process_withdrawal_queue(&10);
+    assert_eq!(processed, 2);
+    assert_eq!(vault.withdrawal_queue_length(), 0);
+    assert_eq!(usdc.balance(&user_a), 700);
+    assert_eq!(usdc.balance(&user_b), 850);
+}
+
+#[test]
+fn test_withdrawal_queue_stops_when_liquidity_insufficient_for_head() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let (vault, _usdc, usdc_sa, strategy, _admin, vault_id) = setup_vault_with_strategy(&env);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    usdc_sa.mint(&user_a, &2_000);
+    usdc_sa.mint(&user_b, &2_000);
+    vault.deposit(&user_a, &1_000);
+    vault.deposit(&user_b, &1_000);
+    vault.invest(&1_950).unwrap();
+
+    assert_eq!(vault.try_withdraw(&user_a, &500), Err(Ok(VaultError::WithdrawalQueued)));
+    assert_eq!(vault.try_withdraw(&user_b, &400), Err(Ok(VaultError::WithdrawalQueued)));
+
+    vault.divest(&200);
+    token::StellarAssetClient::new(&env, &strategy.address)
+        .mint(&vault_id, &200);
+
+    assert_eq!(vault.process_withdrawal_queue(&10), 1);
+    assert_eq!(vault.withdrawal_queue_length(), 1);
+}
