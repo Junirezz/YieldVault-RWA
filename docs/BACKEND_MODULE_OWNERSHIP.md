@@ -103,6 +103,7 @@ Modules are grouped by **functional domain**. Each entry lists:
 | Idempotency store & key handling | `@reliability-owner` | `@data-owner` | **High** | [idempotency.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/idempotency.ts), [idempotencyRetention.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/idempotencyRetention.ts) | [idempotencyRetention.test.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/__tests__/idempotencyRetention.test.ts) | `backend`, `reliability`, `idempotency` |
 | Retry budget (circuit-breaker adjunct) | `@reliability-owner` | `@backend-lead` | **Medium** | [retryBudget.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/retryBudget.ts) | — | `backend`, `reliability` |
 | Soroban RPC circuit breaker | `@integrations-owner` | `@reliability-owner` | **High** | [circuitBreaker.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/circuitBreaker.ts) | [circuitBreaker.test.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/__tests__/circuitBreaker.test.ts) | `backend`, `reliability`, `stellar` |
+| Withdrawal partial-failure recovery (saga journal) | `@reliability-owner` | `@vault-domain-owner` | **Core** | [withdrawalRecovery.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/withdrawalRecovery.ts) | [withdrawalRecovery.test.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/__tests__/withdrawalRecovery.test.ts), [withdrawalRecoveryEndpoint.test.ts](file:///c:/Users/USER/Desktop/YieldVault-RWA/backend/src/__tests__/withdrawalRecoveryEndpoint.test.ts) | `backend`, `reliability`, `vault` |
 
 ---
 
@@ -208,7 +209,7 @@ Use this table when you only know the source filename and need to find the ownin
 | `middleware/cors.ts`, `middleware/geofencing.ts`, `middleware/allowlist.ts`, `middleware/validate.ts`, `middleware/payloadLimit.ts` | Security middleware | `@auth-owner` |
 | `middleware/cache.ts` | Cache middleware | `@reliability-owner` |
 | `middleware/withdrawalDailyLimit.ts` | Vault limits | `@vault-domain-owner` |
-| `rateLimiter.ts`, `idempotency.ts`, `idempotencyRetention.ts`, `retryBudget.ts`, `circuitBreaker.ts` | Resilience & Throttling | `@reliability-owner` |
+| `rateLimiter.ts`, `idempotency.ts`, `idempotencyRetention.ts`, `retryBudget.ts`, `circuitBreaker.ts`, `withdrawalRecovery.ts` | Resilience & Throttling | `@reliability-owner` |
 | `vaultEndpoints.ts`, `apySnapshot.ts` | Vault domain | `@vault-domain-owner` |
 | `transactionEndpoints.ts`, `transactionBackfill.ts` | Transactions | `@vault-domain-owner` |
 | `listEndpoints.ts`, `pagination.ts`, `dateRange.ts` | Data & pagination | `@data-owner` |
@@ -240,7 +241,7 @@ When opening a PR, auto-assign reviewers based on which **top-level directories 
 |---------------------|-------------------|----------------------|
 | `backend/src/auth.ts` OR `backend/src/wallet*.ts` OR `backend/src/scopedAdminTokens.ts` OR `backend/src/middleware/{apiKeyAuth,rbac,tenantGuard,walletQueryGuard,walletSignedAction}.ts` | `backend`, `auth`, `security` | `@auth-owner` (Primary), `@backend-lead` (Secondary) |
 | `backend/src/middleware/*.ts` (any middleware) | `backend`, `middleware` | Primary = owner per module above; Secondary = `@backend-lead` |
-| `backend/src/{rateLimiter,circuitBreaker,idempotency*,retryBudget}.ts` | `backend`, `reliability` | `@reliability-owner` (Primary), `@auth-owner` (Secondary) |
+| `backend/src/{rateLimiter,circuitBreaker,idempotency*,retryBudget,withdrawalRecovery}.ts` | `backend`, `reliability` | `@reliability-owner` (Primary), `@auth-owner` (Secondary) |
 | `backend/src/{vaultEndpoints,transactionEndpoints,apySnapshot,listEndpoints,referral*,walletAlias*}.ts` | `backend`, `vault` or `backend`, `transactions` | `@vault-domain-owner` (Primary), `@data-owner` (Secondary) |
 | `backend/prisma/schema.prisma` OR `backend/migrations/` OR `backend/scripts/{migrate-postgres,check-postgres-drift}.js` | `backend`, `database`, `migrations` | `@data-owner` (Primary), `@backend-lead` (Secondary) — 2 approvals required for schema changes |
 | `backend/src/{export*,bulkExport*,exportManifest,apiContractSnapshots,governanceSnapshotExport,pagination,dateRange}.ts` OR `backend/schema-snapshots/` | `backend`, `data` | `@data-owner` (Primary), `@vault-domain-owner` (Secondary) |

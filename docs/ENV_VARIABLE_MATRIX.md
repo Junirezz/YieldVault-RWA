@@ -120,6 +120,21 @@ Complete reference for all environment variables across the YieldVault RWA stack
 | `EVENT_POLL_INTERVAL_MS` | `10000` (10 s) | ⬜ optional | `10000` |
 | `EVENT_REPLAY_BATCH_SIZE` | `100` | ⬜ optional | `100` |
 
+### Withdrawal Partial-Failure Recovery
+
+See [Withdrawal Partial-Failure Recovery](../backend/docs/WITHDRAWAL_PARTIAL_FAILURE_RECOVERY.md).
+
+| Variable | Default | Required | Production Recommendation |
+|---|---|---|---|
+| `WITHDRAWAL_RECOVERY_MAX_STEP_ATTEMPTS` | `3` | ⬜ optional | `3` (irreversible steps are always 1) |
+| `WITHDRAWAL_RECOVERY_MAX_ATTEMPTS` | `5` | ⬜ optional | `5` |
+| `WITHDRAWAL_RECOVERY_BASE_BACKOFF_MS` | `2000` (2 s) | ⬜ optional | `2000` |
+| `WITHDRAWAL_RECOVERY_MAX_BACKOFF_MS` | `60000` (60 s) | ⬜ optional | `60000` |
+| `WITHDRAWAL_RECOVERY_STALE_MS` | `120000` (2 min) | ⬜ optional | `120000` |
+| `WITHDRAWAL_RECOVERY_SWEEP_MS` | `15000` (15 s) | ⬜ optional | `15000` |
+| `WITHDRAWAL_RECOVERY_MAX_PER_SWEEP` | `25` | ⬜ optional | `25` |
+| `WITHDRAWAL_RECOVERY_RETENTION` | `1000` | ⬜ optional | `1000` |
+
 ### OpenTelemetry (Tracing)
 
 | Variable | Default | Required | Production Recommendation |

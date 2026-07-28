@@ -213,3 +213,45 @@ export const adaptiveThrottleActiveBlocks = new Gauge({
   labelNames: ['using_redis'],
   registers: [register],
 });
+
+// --- Withdrawal Partial-Failure Recovery Metrics (Issue #954) ---
+
+export const withdrawalSagaTotal = new Counter({
+  name: 'withdrawal_saga_total',
+  help: 'Terminal outcomes of multi-step withdrawal sagas',
+  labelNames: ['plan', 'outcome'],
+  registers: [register],
+});
+
+export const withdrawalSagaStepFailureTotal = new Counter({
+  name: 'withdrawal_saga_step_failure_total',
+  help: 'Withdrawal saga step failures by step and failure classification',
+  labelNames: ['step', 'classification'],
+  registers: [register],
+});
+
+export const withdrawalSagaCompensationTotal = new Counter({
+  name: 'withdrawal_saga_compensation_total',
+  help: 'Withdrawal saga compensating actions executed, by step and result',
+  labelNames: ['step', 'result'],
+  registers: [register],
+});
+
+export const withdrawalSagaRetryTotal = new Counter({
+  name: 'withdrawal_saga_retry_total',
+  help: 'Automated recovery passes over partially failed withdrawal sagas',
+  labelNames: ['plan'],
+  registers: [register],
+});
+
+export const withdrawalSagaAwaitingRecovery = new Gauge({
+  name: 'withdrawal_saga_awaiting_recovery',
+  help: 'Withdrawal sagas waiting for an automated recovery pass',
+  registers: [register],
+});
+
+export const withdrawalSagaManualInterventionRequired = new Gauge({
+  name: 'withdrawal_saga_manual_intervention_required',
+  help: 'Withdrawal sagas with irreversible partial state awaiting an operator',
+  registers: [register],
+});

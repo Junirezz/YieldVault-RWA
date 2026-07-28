@@ -4,7 +4,11 @@ import { logger } from './middleware/structuredLogging';
 import { allowlistMiddleware } from './middleware/allowlist';
 import { triggerCacheInvalidation, registerInvalidationHook } from './middleware/cache';
 import { depositsLimiter } from './rateLimiter';
-import { idempotencyStore, IdempotencyConflictError } from './idempotency';
+import {
+  idempotencyStore,
+  IdempotencyConflictError,
+  type IdempotentOperationResult,
+} from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
 import { submitVaultOperation, SorobanSimulationError } from './sorobanClient';
@@ -25,6 +29,10 @@ import crypto from 'crypto';
 import { tryAcquireWalletLock } from './walletLock';
 import { normalizeWalletAddress } from './walletUtils';
 import { recordVaultLifecycleEvent } from './vaultAuditLog';
+import {
+  registerWithdrawalPlan,
+  withdrawalRecoveryCoordinator,
+} from './withdrawalRecovery';
 import Decimal from 'decimal.js';
 
 const router = Router();
@@ -130,6 +138,106 @@ async function updateVaultStateAndSnapshot(
   });
 }
 
+// ─── Withdrawal partial-failure recovery plan (Issue #954) ───────────────────
+
+/** Name of the registered saga plan used by POST /vault/withdrawals. */
+export const WITHDRAWAL_PLAN = 'vault.withdrawal';
+
+/**
+ * Deterministic transaction row id derived from the withdrawal identity so a
+ * recovery pass upserts the same row instead of inserting a duplicate.
+ */
+function withdrawalRowId(withdrawalId: string): string {
+  return `wd_${crypto.createHash('sha256').update(withdrawalId).digest('hex').slice(0, 28)}`;
+}
+
+/**
+ * The three durable steps of a withdrawal, journalled independently so a
+ * failure between any two of them can be retried, compensated, or escalated.
+ *
+ * Ordering matters: the on-chain submission is irreversible, so everything that
+ * can fail cheaply (validation, limits, locks) already ran in middleware before
+ * this plan starts.
+ */
+registerWithdrawalPlan(WITHDRAWAL_PLAN, [
+  {
+    name: 'chain_submit',
+    // Funds move here. Never repeat this step: a second submission could
+    // withdraw twice.
+    irreversible: true,
+    maxAttempts: 1,
+    execute: async ({ saga }) => {
+      const txHash = await submitSorobanTx('withdrawal', {
+        amount: saga.amount,
+        asset: saga.asset,
+        walletAddress: saga.state.rawWalletAddress ?? saga.walletAddress,
+      });
+
+      recordVaultLifecycleEvent({
+        operation: 'withdrawal',
+        phase: 'submitted',
+        actor: saga.walletAddress,
+        amount: saga.amount,
+        asset: saga.asset,
+        txHash,
+        correlationId: saga.correlationId ?? undefined,
+        traceId: getCurrentTraceId(),
+        metadata: { sagaId: saga.id },
+      });
+
+      return { txHash };
+    },
+  },
+  {
+    name: 'persist_transaction',
+    execute: async ({ saga }) => {
+      const prisma = getPrismaClient();
+      const id = withdrawalRowId(saga.withdrawalId);
+      const referralCode =
+        typeof saga.state.referralCode === 'string' ? saga.state.referralCode : undefined;
+
+      // Upsert on a deterministic id keeps retries idempotent even when the
+      // previous attempt committed the row before failing.
+      await prisma.transaction.upsert({
+        where: { id },
+        update: { status: 'completed' },
+        create: {
+          id,
+          user: saga.walletAddress,
+          amount: saga.amount,
+          type: 'withdrawal',
+          status: 'completed',
+          referralCode,
+        },
+      });
+
+      return { transactionRowId: id };
+    },
+    compensate: async ({ saga }) => {
+      const id = saga.state.transactionRowId;
+      if (typeof id !== 'string') return;
+      const prisma = getPrismaClient();
+      await prisma.transaction.update({
+        where: { id },
+        data: { status: 'reversed' },
+      });
+    },
+  },
+  {
+    name: 'vault_state_update',
+    execute: async ({ saga }) => {
+      // Runs inside a single Prisma transaction, so a failure applies nothing
+      // and a retry cannot double-apply the delta.
+      await updateVaultStateAndSnapshot('withdrawal', saga.amount, new Date());
+    },
+    compensate: async ({ saga }) => {
+      // Re-add the withdrawn assets and shares, restoring the pre-withdrawal
+      // totals and recording the reversal as its own share-price snapshot.
+      await updateVaultStateAndSnapshot('deposit', saga.amount, new Date());
+    },
+  },
+]);
+
 /** Shared handler logic for deposit / withdrawal to avoid duplication. */
 async function handleVaultOperation(
   req: Request,
@@ -145,6 +253,11 @@ async function handleVaultOperation(
   const normalizedWallet = normalizeWalletAddress(walletAddress);
   const correlationId = req.header('x-correlation-id') || undefined;
   const walletLock = tryAcquireWalletLock(normalizedWallet);
+  // Identity for the withdrawal saga journal. When the client supplies an
+  // Idempotency-Key it becomes the saga identity, so a retry resumes the
+  // existing saga instead of starting a second on-chain submission. Without a
+  // key each request is a distinct withdrawal, exactly as before.
+  const withdrawalId = idempotencyKey || `wd-${crypto.randomBytes(12).toString('hex')}`;
 
   if (!walletLock.acquired) {
     return res.status(409).json({
@@ -168,7 +281,9 @@ async function handleVaultOperation(
     metadata: { idempotent: !!idempotencyKey },
   });
 
-  const operation = async () => {
+  // Withdrawals may return either the created transaction (201) or a recovery
+  // acknowledgement (202), so the result body is widened to a record.
+  const operation = async (): Promise<IdempotentOperationResult<Record<string, unknown>>> => {
     return withSpan(`vault.${type}`, async (span) => {
       span.setAttributes({
         'vault.amount': String(amount),
@@ -177,41 +292,120 @@ async function handleVaultOperation(
       });
 
       let txHash: string;
-      try {
-        txHash = await submitSorobanTx(type, { amount, asset, walletAddress });
-      } catch (err) {
-        if (err instanceof CircuitOpenError) {
-          // Bubble up so the route handler can return 503
-          throw err;
-        }
-        throw err;
-      }
 
-      // Audit: the transaction was accepted by the Soroban RPC.
-      recordVaultLifecycleEvent({
-        operation: type,
-        phase: 'submitted',
-        actor: normalizedWallet,
-        amount: String(amount),
-        asset: String(asset),
-        txHash,
-        correlationId,
-        traceId: getCurrentTraceId(),
-      });
-
-      // Persist transaction to DB
-      const prisma = getPrismaClient();
-      await prisma.transaction.create({
-        data: {
-          user: normalizedWallet,
+      if (type === 'withdrawal') {
+        // Withdrawals run as a journalled saga so a failure between the
+        // on-chain submission and the ledger writes is recoverable instead of
+        // leaving silent drift (Issue #954).
+        const outcome = await withdrawalRecoveryCoordinator.run(WITHDRAWAL_PLAN, {
+          withdrawalId,
+          walletAddress: normalizedWallet,
           amount: String(amount),
-          type,
-          status: 'completed',
-          referralCode,
-        },
-      });
+          asset: String(asset),
+          correlationId: correlationId ?? null,
+          idempotencyKey: idempotencyKey ?? null,
+          state: {
+            rawWalletAddress: walletAddress,
+            referralCode: referralCode ?? null,
+          },
+        });
 
-      await updateVaultStateAndSnapshot(type, String(amount), new Date());
+        if (!outcome.completed) {
+          if (outcome.partial) {
+            // The on-chain withdrawal succeeded but the ledger is not caught up.
+            // Returning 500 here would tell the client nothing happened, which
+            // is false. Acknowledge the withdrawal and hand back a recovery
+            // handle instead.
+            const sagaTxHash =
+              typeof outcome.saga.state.txHash === 'string'
+                ? outcome.saga.state.txHash
+                : undefined;
+
+            recordVaultLifecycleEvent({
+              operation: 'withdrawal',
+              phase: 'failed',
+              actor: normalizedWallet,
+              amount: String(amount),
+              asset: String(asset),
+              txHash: sagaTxHash,
+              correlationId,
+              traceId: getCurrentTraceId(),
+              errorCode: 'WITHDRAWAL_PARTIAL_FAILURE',
+              errorMessage: outcome.saga.lastError?.message,
+              metadata: {
+                sagaId: outcome.saga.id,
+                recoveryStatus: outcome.status,
+                recovering: outcome.recovering,
+              },
+            });
+
+            span.setAttributes({
+              'vault.saga.id': outcome.saga.id,
+              'vault.saga.status': outcome.status,
+            });
+
+            return {
+              statusCode: 202,
+              body: {
+                id: outcome.saga.withdrawalId,
+                type,
+                amount,
+                asset,
+                walletAddress,
+                transactionHash: sagaTxHash ?? null,
+                status: 'recovering',
+                recovery: {
+                  sagaId: outcome.saga.id,
+                  status: outcome.status,
+                  automatedRetryScheduled: outcome.recovering,
+                  nextAttemptAt: outcome.saga.nextAttemptAt,
+                  failedStep: outcome.saga.lastError?.step ?? null,
+                  steps: outcome.saga.steps.map((step) => ({
+                    name: step.name,
+                    status: step.status,
+                  })),
+                },
+                timestamp: new Date().toISOString(),
+              },
+            };
+          }
+
+          // Nothing irreversible happened (or it was rolled back cleanly) —
+          // surface the original failure so the existing error mapping applies.
+          throw outcome.error ?? new Error('Withdrawal failed before submission');
+        }
+
+        txHash = String(outcome.saga.state.txHash);
+        span.setAttributes({ 'vault.saga.id': outcome.saga.id });
+      } else {
+        txHash = await submitSorobanTx(type, { amount, asset, walletAddress });
+
+        // Audit: the transaction was accepted by the Soroban RPC.
+        recordVaultLifecycleEvent({
+          operation: type,
+          phase: 'submitted',
+          actor: normalizedWallet,
+          amount: String(amount),
+          asset: String(asset),
+          txHash,
+          correlationId,
+          traceId: getCurrentTraceId(),
+        });
+
+        // Persist transaction to DB
+        const prisma = getPrismaClient();
+        await prisma.transaction.create({
+          data: {
+            user: normalizedWallet,
+            amount: String(amount),
+            type,
+            status: 'completed',
+            referralCode,
+          },
+        });
+
+        await updateVaultStateAndSnapshot(type, String(amount), new Date());
+      }
 
       // Audit: transaction durably recorded and vault state updated.
       recordVaultLifecycleEvent({
