@@ -58,6 +58,12 @@ isn't in the `allow` list:
 - `redirectTo` defaults to `/` and can be overridden per route.
 - The attempted path is passed through `location.state.from` so a future
   redirect target (e.g. after connecting a wallet) can restore it.
+- `useRestoreGuardedRoute` (`src/hooks/useRestoreGuardedRoute.ts`), called
+  from `App.tsx` with the current `role`, consumes that `location.state.from`:
+  whenever `role` changes, it tries the stashed path once. If the new role
+  is allowed, the user lands back where they originally tried to go; if not,
+  `ProtectedRoute` guards it again and the hook won't retry the same value,
+  so there's no redirect loop.
 
 ## Adding a New Gated Route
 
