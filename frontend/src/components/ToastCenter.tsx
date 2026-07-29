@@ -3,7 +3,7 @@ import { Bell, X } from "lucide-react";
 import type { ToastItem } from "../context/ToastContext";
 import { useToast } from "../context/ToastContext";
 
-function groupToasts(toasts: ToastItem[]): (ToastItem & { count: number })[] {
+function groupToasts(toasts: ToastItem[]): { toast: ToastItem; count: number }[] {
   const groups = new Map<string, { toast: ToastItem; count: number }>();
   for (const t of toasts) {
     const key = `${t.variant}::${t.title}::${t.description ?? ""}`;

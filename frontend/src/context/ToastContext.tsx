@@ -109,7 +109,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     const cleanupInterval = setInterval(() => {
-      const now = Date.now();
       const staleKeys: string[] = [];
       recentToasts.current.forEach((toastId, key) => {
         if (!timeoutRefs.current.has(toastId)) {

@@ -16,7 +16,7 @@ Implement the `useFloating` positioning hook, `Tooltip` and `Popover` primitives
   - Set a `hidden` flag when the trigger rect is entirely outside the visible viewport
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
 
-  - [-]* 1.1 Write unit tests for `useFloating` — flip and offset
+  - [x]* 1.1 Write unit tests for `useFloating` — flip and offset
     - Test that flip is applied when preferred placement overflows the viewport boundary
     - Test that no flip occurs when preferred placement fits within the viewport
     - Test that the configured offset is correctly applied for all 8 placement values
@@ -48,7 +48,7 @@ Implement the `useFloating` positioning hook, `Tooltip` and `Popover` primitives
   - Emit a `console.warn` in development when `children` is not a valid React element
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15_
 
-  - [ ]* 2.1 Write unit tests for `Tooltip`
+  - [x]* 2.1 Write unit tests for `Tooltip`
     - Panel shown on keyboard focus (immediate, 0 ms delay)
     - Panel shown on hover after 300 ms (use `vi.useFakeTimers()`)
     - Panel hidden on blur within 150 ms
@@ -92,7 +92,7 @@ Implement the `useFloating` positioning hook, `Tooltip` and `Popover` primitives
   - Consume `useFloating` for positioning; recalculate on scroll/resize without closing the panel
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, 2.12, 2.13, 2.14, 2.15, 2.16_
 
-  - [ ]* 4.1 Write unit tests for `Popover`
+  - [x]* 4.1 Write unit tests for `Popover`
     - Panel opens on trigger click
     - Panel opens on Enter/Space keydown on trigger
     - Panel closes on Escape; focus returns to trigger
@@ -126,7 +126,7 @@ Implement the `useFloating` positioning hook, `Tooltip` and `Popover` primitives
   - When `variant="popover"`, wrap the button in `<Popover content={content} placement={placement} disabled={disabled}>`
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
 
-  - [ ]* 5.1 Write unit tests for `HelpIcon`
+  - [x]* 5.1 Write unit tests for `HelpIcon`
     - Trigger button has correct `aria-label` from `label` prop
     - Default `aria-label` is `"More information"`
     - `variant="tooltip"` renders a Tooltip

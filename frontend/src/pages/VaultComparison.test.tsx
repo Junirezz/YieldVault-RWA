@@ -1,7 +1,6 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { MemoryRouter } from "react-router-dom";
 import axe from "axe-core";
 import VaultComparison from "./VaultComparison";
 import { MAX_COMPARISON_SELECTION } from "../lib/vaultStrategies";
@@ -50,9 +49,10 @@ function LocationProbe() {
   return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderComparison(initialEntries: string[] = ["/compare"]) {
+function renderComparison(initialEntries: string | string[] = ["/compare"]) {
+  const entries = typeof initialEntries === "string" ? [initialEntries] : initialEntries;
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
+    <MemoryRouter initialEntries={entries}>
       <Routes>
         <Route path="/compare" element={<VaultComparison />} />
         <Route path="/" element={<LocationProbe />} />
