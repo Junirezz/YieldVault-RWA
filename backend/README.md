@@ -246,6 +246,19 @@ When bumping snapshots intentionally:
 2. Run `npm run snapshots:write` and commit `schema-snapshots/*.json`
 3. Align OpenAPI annotations and run `npm run generate:openapi`
 
+### Wallet Alias Persistence
+
+Wallet alias identity groups are persisted in Prisma and loaded into the
+`walletAliasService` cache on startup. New aliases registered through auth or
+`/api/v1/wallet-aliases/link` survive backend restarts and continue to resolve
+for referral attribution.
+
+Environments that relied on the previous in-memory-only alias registry do not
+have a durable source to backfill from after a restart. If those aliases matter,
+export or re-register the live mappings before deploying/restarting; otherwise
+the persistent tables will start empty and only new registrations will be
+preserved.
+
 ## Issues Addressed
 
 ### Issue #145: Rate Limiting
