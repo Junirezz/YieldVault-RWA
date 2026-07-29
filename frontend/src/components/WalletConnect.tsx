@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useReducer } from "react";
-import { setAllowed, isAllowed, getAddress } from "@stellar/freighter-api";
-import { Loader2, LogOut, Wallet, AlertCircle } from './icons';
-import { hasCustomRpcConfig, networkConfig } from '../config/network';
-import { useToast } from '../context/ToastContext';
-import { useTranslation } from '../i18n';
-import CopyButton from './CopyButton';
-import { discoverConnectedAddress } from "../lib/stellarAccount";
+import { setAllowed, isAllowed, getAddress, isConnected } from "@stellar/freighter-api";
 import { LogOut, Wallet, AlertCircle } from "./icons";
 import { hasCustomRpcConfig, networkConfig } from "../config/network";
 import { useToast } from "../context/ToastContext";
@@ -45,6 +39,23 @@ const IS_AUTOMATED_TEST =
   (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
 
 const WALLET_POLL_INTERVAL_MS = IS_AUTOMATED_TEST ? 100 : 10_000;
+
+/**
+ * Whether Freighter still reports itself as reachable.
+ *
+ * An approved address can outlive the extension itself (locked, disabled, or
+ * removed mid-session), so this is checked before trusting a discovered
+ * address. Anything other than an explicit `false` counts as reachable, since
+ * older API versions omit the flag.
+ */
+async function isFreighterReachable(): Promise<boolean> {
+  try {
+    const result = await isConnected();
+    return result?.isConnected !== false;
+  } catch {
+    return false;
+  }
+}
 
 interface WalletConnectProps {
   walletAddress: string | null;
@@ -119,17 +130,24 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
           return;
         }
 
-        const discovered = useExtendedRetry
-          ? await discoverConnectedAddressWithRetry()
-          : await discoverConnectedAddress();
+        const reachable = await isFreighterReachable();
+        const discovered = reachable
+          ? useExtendedRetry
+            ? await discoverConnectedAddressWithRetry()
+            : await discoverConnectedAddress()
+          : null;
 
         if (!mounted) return;
 
-        if (discovered) {
+        // Adopting a discovered session silently is only safe for a wallet the
+        // user has already linked here. Without a remembered provider they get
+        // the reconnect prompt or the connect button instead of being signed in
+        // by a session they never granted to this app.
+        if (discovered && (walletAddress || getLastWalletProvider())) {
           clearWalletManualDisconnect();
           dispatch({ type: "ADDRESS_SYNCED", address: discovered });
           onConnect(discovered);
-        } else if (walletAddress) {
+        } else if (!discovered && walletAddress) {
           dispatch({ type: "EXTERNAL_DISCONNECT" });
           onDisconnect("connection-lost");
           toast.info({
@@ -161,9 +179,11 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
   const handleConnect = useCallback(async () => {
     dispatch({ type: "CONNECT_REQUESTED" });
     try {
-      await setAllowed();
-      const allowed = await isAllowed();
-      if (allowed.isAllowed) {
+      // `setAllowed` already reports the outcome of the approval prompt; only
+      // fall back to a separate `isAllowed` round-trip when it says nothing.
+      const granted = await setAllowed();
+      const isGranted = granted?.isAllowed ?? (await isAllowed()).isAllowed;
+      if (isGranted) {
         const userInfo = await getAddress();
         if (userInfo.address) {
           // Set session start time for expiry tracking
@@ -189,7 +209,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
         dispatch({ type: "CONNECT_FAILED", error });
         toast.error({
           title: t("toast.walletConnectionFailed.title"),
-          description: t(walletErrorI18nKeys(error.code).description),
+          description: t("toast.walletConnectionFailed.description"),
         });
         return;
       }
@@ -202,7 +222,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
       dispatch({ type: "CONNECT_FAILED", error: denied });
       toast.warning({
         title: t("toast.walletPermissionRequired.title"),
-        description: t(walletErrorI18nKeys(denied.code).description),
+        description: t("toast.walletPermissionRequired.description"),
       });
     } catch (e: unknown) {
       console.error(e);
@@ -210,7 +230,7 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
       dispatch({ type: "CONNECT_FAILED", error });
       toast.error({
         title: t("toast.walletConnectionFailed.title"),
-        description: t(walletErrorI18nKeys(error.code).description),
+        description: t("toast.walletConnectionFailed.description"),
       });
     }
   }, [onConnect, toast, t]);

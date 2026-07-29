@@ -1,12 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { Activity, ShieldCheck, TrendingUp, Wallet as WalletIcon } from "./icons";
-import { AlertTriangle, Info } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowDownUp, ArrowUpRight, Clock3, Menu, X } from "lucide-react";
+import { ArrowDownUp, ArrowUpRight, Clock3, Menu, X, AlertTriangle } from "lucide-react";
 import {
   Activity,
   AlertCircle,
-  AlertTriangle,
   Check,
   Share2,
   ShieldCheck,
@@ -21,10 +17,6 @@ import SharePriceDisplay from "./SharePriceDisplay";
 import VaultPerformanceChart from "./VaultPerformanceChart";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
-import { FormField, SubmitButton } from "../forms";
-import CopyButton from "./CopyButton";
-import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
-import TransactionStatusModal from "./TransactionStatusModal";
 import { FormField } from "../forms";
 import { isApiError, isValidationError } from "../lib/api";
 import { useForm } from "../forms/useForm";
@@ -37,7 +29,6 @@ import { createWithdrawFormSchema } from "../forms/schemas/withdrawFormSchema";
 import { mapServerError } from "../lib/errorMappers";
 import confetti from "canvas-confetti";
 import CopyButton from "./CopyButton";
-import Badge from "./Badge";
 import { Button } from "./ui/Button";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
@@ -70,8 +61,8 @@ import {
 import type { StaleFieldChange } from "../lib/staleSubmissionDetection";
 import { t } from "../i18n";
 import { useTransactionHistory } from "../hooks/useTransactionData";
-import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import TransactionTimeline, { type TxTimelineStatus } from "./TransactionTimeline";
+import Badge from "./Badge";
 
 const FIRST_DEPOSIT_PREFIX = "yieldvault:first-deposit:";
 const MAX_TRANSACTION_RETRY_ATTEMPTS = 3;
@@ -202,32 +193,11 @@ const VaultCapWarning: React.FC<{ utilization: number; isReached: boolean }> = (
   );
 };
 
-function buildFakeTxHash(walletAddress: string, action: "deposit" | "withdraw", amount: number): string {
-  const seed = `${walletAddress}-${action}-${amount.toFixed(2)}-${Date.now()}`;
-  let hash = "";
-  for (let i = 0; i < 64; i += 1) {
-    const code = seed.charCodeAt(i % seed.length);
-    hash += ((code + i * 13) % 16).toString(16);
-  }
-  return hash;
-}
-
-
-
 const VaultDashboard: React.FC<VaultDashboardProps> = ({
   walletAddress,
   usdcBalance = 0,
   xlmBalance = 0,
 }) => {
-  const { formattedTvl, formattedApy, summary, error, isLoading, utilization, isCapReached, isCapWarning } = useVault();
-  const toast = useToast();
-  const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
-  const [amount, setAmount] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalTxHash, setModalTxHash] = useState<string | null>(null);
-  const [modalAmount, setModalAmount] = useState(0);
-  const [modalActionType, setModalActionType] = useState<"deposit" | "withdraw">("deposit");
-  const [modalError, setModalError] = useState<string | null>(null);
   const navigate = useNavigate();
   const dashboardUrl = useDashboardUrlState();
   const {
@@ -430,9 +400,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       : null;
   const isBusy = isProcessing !== null;
 
-  const isBusy = isProcessing !== null;
-
-  const availableBalance = walletAddress ? usdcBalance : 0;
   const strategy = summary.strategy;
   const enteredAmount = Number(amount);
   const activeAmountError = errors.amount;
@@ -516,9 +483,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     if (recentFailedTx) {
       next.push({
         id: "failed-tx",
-        title: t("vaultDashboard.riskSummary.failedTx.title", "Recent Transaction Failed"),
-        description: t("vaultDashboard.riskSummary.failedTx.desc", "A recent transaction failed. Review your history or retry."),
-        label: t("vaultDashboard.riskSummary.failedTx.cta", "View History"),
+        title: t("vaultDashboard.riskSummary.failedTx.title"),
+        description: t("vaultDashboard.riskSummary.failedTx.desc"),
+        label: t("vaultDashboard.riskSummary.failedTx.cta"),
         tone: "warning",
         onClick: () => navigate("/transactions"),
       });
@@ -531,9 +498,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     if (isHighExposure) {
       next.push({
         id: "high-exposure",
-        title: t("vaultDashboard.riskSummary.highExposure.title", "High Portfolio Exposure"),
-        description: t("vaultDashboard.riskSummary.highExposure.desc", "More than 80% of your portfolio is in this vault."),
-        label: t("vaultDashboard.riskSummary.highExposure.cta", "Review Allocation"),
+        title: t("vaultDashboard.riskSummary.highExposure.title"),
+        description: t("vaultDashboard.riskSummary.highExposure.desc"),
+        label: t("vaultDashboard.riskSummary.highExposure.cta"),
         tone: "info",
         onClick: () => navigate("/portfolio"),
       });
@@ -603,17 +570,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       return;
     }
 
-    setModalAmount(value);
-    setModalActionType(actionType);
-    setModalError(null);
-    setModalTxHash(null);
-    setIsModalOpen(true);
-
-    try {
-      // Simulate Freighter signature delay
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      const hash = buildFakeTxHash(walletAddress, actionType, value);
-      setModalTxHash(hash);
     if (!options.isRetry) {
       setRetryCount(0);
     }
@@ -718,8 +674,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
             ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
             : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
       });
-    } catch (err: any) {
-      setModalError(err.message || "An error occurred during the transaction.");
     } catch (err: unknown) {
       if (isTransactionConflict(err)) {
         setActiveConflict({
@@ -1729,58 +1683,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                           </Button>
                         </div>
                       </div>
-                    </div>
-
-                    <FormField
-                      label={tab === "deposit" ? "Deposit amount" : "Withdrawal amount"}
-                      name={`${tab}-amount`}
-                      type="number"
-                      placeholder="0.00"
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      disabled={isBusy || (tab === "deposit" && isCapReached)}
-                    />
-
-                    <div className="flex justify-between items-center" style={{ margin: "16px 0 24px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>Asset: USDC</span>
-                      <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={() => setAmount(availableBalance.toFixed(2))}
-                        disabled={!walletAddress || availableBalance <= 0 || isBusy || (tab === "deposit" && isCapReached)}
-                      >
-                        MAX
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel" style={{ padding: "14px 16px", background: "rgba(0, 0, 0, 0.15)", marginBottom: "16px" }}>
-                    <div className="flex justify-between items-center" style={{ marginBottom: "6px" }}>
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.86rem" }}>Estimated protocol fee</span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                        {isValidAmount ? `${estimatedFee.toFixed(4)} USDC` : "0.0000 USDC"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                        {tab === "deposit" ? "Estimated net deposit" : "Estimated net withdrawal"}
-                      </span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                        {isValidAmount ? `${estimatedNetAmount.toFixed(4)} USDC` : "0.0000 USDC"}
-                      </span>
-                    </div>
-                    <div style={{ marginTop: "6px", color: "var(--text-secondary)", fontSize: "0.75rem" }}>
-                      Network fee: {summary.networkFeeEstimate}
-                    </div>
-                  </div>
-
-                  <SubmitButton
-                    loading={isBusy && activeTab === tab}
-                    disabled={!walletAddress || isBusy || !amount || Number(amount) <= 0 || (tab === "deposit" && isCapReached)}
-                    label={tab === "deposit" ? (isCapReached ? "Vault is full" : "Approve & Deposit") : "Withdraw Funds"}
-                    loadingLabel="Processing Transaction..."
-                  />
-                </form>
                     )}
 
                     {dashboardUrl.state.step === "result" && (
@@ -1862,14 +1764,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           </button>
         </div>
       </div>
-      <TransactionStatusModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        txHash={modalTxHash}
-        actionType={modalActionType}
-        amount={modalAmount}
-        error={modalError}
-      />
       {mobileActionsOpen && (
         <div className="mobile-bottom-sheet" role="dialog" aria-modal="true" aria-label={t("vaultDashboard.quickVaultActionsAria")}>
           <button

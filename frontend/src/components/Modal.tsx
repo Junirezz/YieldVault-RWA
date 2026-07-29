@@ -140,7 +140,6 @@ export const Modal: React.FC<ModalProps> = ({
         padding: '1rem',
       }}
       onClick={handleBackdropClick}
-      onClick={handleBackdropClick}
     >
       <div
         ref={modalRef}

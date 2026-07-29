@@ -76,7 +76,6 @@ export async function fetchUsdcBalance(
       return ServerFactory(horizonUrl);
     }
   })();
-  const server = new Horizon.Server(horizonUrl);
   const account = await server.accounts().accountId(walletAddress).call();
 
   const usdc = account.balances.find((balance) => {

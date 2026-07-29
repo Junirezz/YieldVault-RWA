@@ -164,7 +164,7 @@ const TransactionTimeline: React.FC<TransactionTimelineProps> = ({
                   style={{ marginTop: "8px", padding: "4px 12px", fontSize: "0.8rem" }}
                   onClick={onRetry}
                 >
-                  {t("txTimeline.retryButton", "Retry")}
+                  {t("txTimeline.retryButton")}
                 </button>
               )}
             </div>

@@ -1,4 +1,3 @@
-import React, { useState, useEffect } from "react";
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Briefcase } from "../components/icons";
 import { useTranslation } from "../i18n";
@@ -31,6 +30,7 @@ import EmptyState from "../components/ui/EmptyState";
 import FirstTimePortfolioPanel from "../components/FirstTimePortfolioPanel";
 import PortfolioOverview from "../components/PortfolioOverview";
 import VaultHealthIndicator from "../components/VaultHealthIndicator";
+import AccountStatementExport from "../components/AccountStatementExport";
 import { useVaultHealth } from "../hooks/useVaultHealth";
 import { useNavigate } from "react-router-dom";
 import { formatCurrency, formatNumber, formatPercent } from "../lib/formatters";
@@ -139,9 +139,10 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
           });
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        // Always clear the loading flag. Skipping this when the effect was
+        // cleaned up (React Strict Mode) can leave a remounted tree stuck on
+        // skeletons if a subsequent load is delayed.
+        setIsLoading(false);
       }
     };
 
@@ -346,7 +347,6 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
                   variant: "cyan" as const,
                 },
                 {
-                  label: isLoading ? "Syncing..." : "Live",
                   label: isLoading ? t("portfolio.syncingLabel") : t("portfolio.liveLabel"),
                   variant: isLoading ? "warning" : "success",
                 },
@@ -403,6 +403,13 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
               </div>
 
               <div className="portfolio-toolbar-controls">
+                {walletAddress && (
+                  <AccountStatementExport
+                    walletAddress={walletAddress}
+                    holdings={holdings}
+                  />
+                )}
+
                 <label className="input-group" style={{ minWidth: "180px" }}>
                   <span className="text-body-sm">Status Filter</span>
                   <div className="input-wrapper">

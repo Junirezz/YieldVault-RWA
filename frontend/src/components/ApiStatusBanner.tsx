@@ -15,24 +15,6 @@ const ApiStatusBanner: FC<ApiStatusBannerProps> = ({ error }) => {
       : `Failed to load vault data. ${error.userMessage}`;
 
   return (
-    <div
-      role="alert"
-      className="glass-panel"
-      style={{
-        padding: "16px 18px",
-        marginBottom: "20px",
-        background: "rgba(255, 107, 107, 0.12)",
-        border: "1px solid rgba(255, 107, 107, 0.25)",
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: "4px" }}>
-        {t("apiBanner.title")}
-      </div>
-      <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-        {error.userMessage}
-      </div>
-      <div style={{ display: "none" }}>Failed to load vault data</div>
-    </div>
     <EmptyState
       kind="error"
       title={t("apiBanner.title")}

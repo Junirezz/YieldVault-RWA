@@ -18,18 +18,8 @@ import { ApiError } from "../lib/api/error";
 import { ValidationError } from "../lib/api/validation";
 
 const { mockDepositMutateAsync, mockWithdrawMutateAsync } = vi.hoisted(() => ({
-  mockDepositMutateAsync: vi.fn(),
-  mockWithdrawMutateAsync: vi.fn(),
-}));
-
-const { mockDepositMutateAsync, mockWithdrawMutateAsync } = vi.hoisted(() => ({
   mockDepositMutateAsync: vi.fn().mockResolvedValue({}),
   mockWithdrawMutateAsync: vi.fn().mockResolvedValue({}),
-}));
-
-const { mockDepositMutateAsync, mockWithdrawMutateAsync } = vi.hoisted(() => ({
-  mockDepositMutateAsync: vi.fn(),
-  mockWithdrawMutateAsync: vi.fn(),
 }));
 
 vi.mock("canvas-confetti", () => ({
@@ -52,11 +42,6 @@ vi.mock("../hooks/usePortfolioData", () => ({
 vi.mock("../hooks/useVaultData", () => ({
   useVaultSummary: vi.fn(),
   useVaultHistory: vi.fn(),
-}));
-
-const { mockDepositMutateAsync, mockWithdrawMutateAsync } = vi.hoisted(() => ({
-  mockDepositMutateAsync: vi.fn().mockResolvedValue({}),
-  mockWithdrawMutateAsync: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("../hooks/useVaultMutations", () => ({
@@ -162,7 +147,8 @@ function renderDashboard(
 describe("VaultDashboard", () => {
   beforeEach(() => {
     vi.useRealTimers();
-    vi.clearAllMocks();
+    mockDepositMutateAsync.mockReset();
+    mockWithdrawMutateAsync.mockReset();
     mockDepositMutateAsync.mockResolvedValue({});
     mockWithdrawMutateAsync.mockResolvedValue({});
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -199,9 +185,6 @@ describe("VaultDashboard", () => {
       approve: vi.fn().mockResolvedValue(undefined),
       resetApproval: vi.fn(),
     });
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      media: "",
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -211,13 +194,12 @@ describe("VaultDashboard", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
-    } as MediaQueryList);
-    }));
+    } as MediaQueryList));
     localStorage.clear();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.mocked(console.error).mockRestore?.();
   });
 
   it("renders the connect overlay when wallet is not connected", async () => {
@@ -239,7 +221,7 @@ describe("VaultDashboard", () => {
     expect(screen.getByText(/Global RWA Yield Fund/i)).toBeInTheDocument();
     expect(screen.getByText(/Current APY/i)).toBeInTheDocument();
     expect(screen.getAllByText(/^Live$|^Fresh/i).length).toBeGreaterThan(0);
-    expect(await screen.findByText(/Fresh just now|Live|Fresh/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Fresh just now|Live|Fresh/i)).length).toBeGreaterThan(0);
 
     expect(await screen.findByText(/Sovereign Debt/i)).toBeInTheDocument();
     expect(screen.getByText(/Strategy ID:/i)).toBeInTheDocument();
@@ -519,16 +501,11 @@ describe("VaultDashboard", () => {
         userMessage: "We could not reach the server. Check your connection and try again.",
         retryable: true,
       });
-      const mutateAsync = vi
-        .fn()
+      mockDepositMutateAsync
         .mockRejectedValueOnce(networkError)
         .mockResolvedValueOnce({});
-      vi.mocked(vaultMutations.useDepositMutation).mockReturnValue({
-        mutateAsync,
-        isPending: false,
-      } as unknown as ReturnType<typeof vaultMutations.useDepositMutation>);
 
-      renderDashboard("GABC123");
+      renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
       const input = await screen.findByPlaceholderText("0.00");
       fireEvent.change(input, { target: { value: "100" } });
@@ -536,14 +513,14 @@ describe("VaultDashboard", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
 
       await screen.findByRole("heading", { name: "Transaction Failed" });
-      expect(mutateAsync).toHaveBeenCalledTimes(1);
+      expect(mockDepositMutateAsync).toHaveBeenCalledTimes(1);
 
       const retryButton = await screen.findByRole("button", { name: "Retry" });
       expect(input).toHaveValue(100);
       fireEvent.click(retryButton);
 
       await waitFor(() => {
-        expect(mutateAsync).toHaveBeenCalledTimes(2);
+        expect(mockDepositMutateAsync).toHaveBeenCalledTimes(2);
       });
       await screen.findByRole("heading", { name: "Transaction Successful" });
     }, 15000);
@@ -554,13 +531,9 @@ describe("VaultDashboard", () => {
         userMessage: "Please review the amount and try again.",
         details: [{ field: "amount", message: "Amount exceeds vault cap" }],
       });
-      const mutateAsync = vi.fn().mockRejectedValue(validationError);
-      vi.mocked(vaultMutations.useDepositMutation).mockReturnValue({
-        mutateAsync,
-        isPending: false,
-      } as unknown as ReturnType<typeof vaultMutations.useDepositMutation>);
+      mockDepositMutateAsync.mockRejectedValue(validationError);
 
-      renderDashboard("GABC123");
+      renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
       const input = await screen.findByPlaceholderText("0.00");
       fireEvent.change(input, { target: { value: "100" } });
@@ -579,13 +552,9 @@ describe("VaultDashboard", () => {
         userMessage: "We could not reach the server. Check your connection and try again.",
         retryable: true,
       });
-      const mutateAsync = vi.fn().mockRejectedValue(networkError);
-      vi.mocked(vaultMutations.useDepositMutation).mockReturnValue({
-        mutateAsync,
-        isPending: false,
-      } as unknown as ReturnType<typeof vaultMutations.useDepositMutation>);
+      mockDepositMutateAsync.mockRejectedValue(networkError);
 
-      renderDashboard("GABC123");
+      renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
       const input = await screen.findByPlaceholderText("0.00");
       fireEvent.change(input, { target: { value: "100" } });
@@ -598,7 +567,7 @@ describe("VaultDashboard", () => {
         const retryButton = await screen.findByRole("button", { name: "Retry" });
         fireEvent.click(retryButton);
         await waitFor(() => {
-          expect(mutateAsync).toHaveBeenCalledTimes(attempt + 2);
+          expect(mockDepositMutateAsync).toHaveBeenCalledTimes(attempt + 2);
         });
         await screen.findByRole("heading", { name: "Transaction Failed" });
       }

@@ -143,7 +143,6 @@ describe("ApiClient", () => {
     });
 
     const error = (await client.get("/missing").catch((e) => e)) as ApiError;
-    const error: unknown = await client.get("/missing").catch((e) => e);
 
     expect(error).toBeInstanceOf(ApiError);
     if (error instanceof ApiError) {

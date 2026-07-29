@@ -113,6 +113,8 @@ export function classifyWalletConnectionError(
   if (
     lower.includes("freighter is not installed") ||
     lower.includes("not installed") ||
+    lower.includes("not found") ||
+    lower.includes("not detected") ||
     lower.includes("no freighter") ||
     lower.includes("cannot find module")
   ) {

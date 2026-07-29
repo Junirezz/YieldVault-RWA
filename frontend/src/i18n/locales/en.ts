@@ -225,6 +225,21 @@ export const en = {
     appRequires: "but this app requires",
     switchInstructions: "Open Freighter → Settings → Network and switch to {{network}} to continue.",
   },
+  accountStatement: {
+    trigger: "Export Statement",
+    title: "Download Account Statement",
+    description:
+      "Export a downloadable statement of your holdings and transactions for the selected date range.",
+    walletLabel: "Wallet",
+    formatLabel: "File format",
+    startDate: "Start date",
+    endDate: "End date",
+    cancel: "Cancel",
+    download: "Download statement",
+    preparing: "Preparing…",
+    downloaded: "Downloaded",
+    failed: "Unable to export statement",
+  },
   sessionExpired: {
     title: "Session Expired",
     message: "Your wallet session is no longer authorised. Please reconnect Freighter to continue where you left off.",
