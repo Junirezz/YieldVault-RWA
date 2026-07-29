@@ -35,34 +35,44 @@ For a comprehensive overview of the smart contract architecture, module responsi
 
 ## Getting Started
 
-**For complete local development setup with service dependencies, startup order, and troubleshooting, see:**
+**For complete local development setup, startup order, and troubleshooting, see:**
 
-- **[Local Development Quickstart](./docs/LOCAL_DEVELOPMENT_QUICKSTART.md)** – Complete setup guide with step-by-step instructions
-- **[Service Dependency Matrix](./docs/SERVICE_DEPENDENCY_MATRIX.md)** – Visual dependency graph and service specifications
+- **[Local Development Quickstart](./docs/LOCAL_DEVELOPMENT_QUICKSTART.md)** - Backend, contracts, and frontend bootstrap
+- **[Service Dependency Matrix](./docs/SERVICE_DEPENDENCY_MATRIX.md)** - Service relationships and operational notes
 
-### Quick Start (5 minutes)
+### Quick Start
 
-1. **Start infrastructure** (PostgreSQL + Redis):
-
-   ```bash
-   docker-compose up -d postgres redis
-   ```
-
-2. **Start backend API** (in one terminal):
+1. Start the backend:
 
    ```bash
-   cd backend && npm install && npx prisma migrate dev && npm run dev
+   cd backend
+   cp .env.example .env
+   npm install
+   npx prisma migrate dev
+   npm run dev
    ```
 
-3. **Start frontend** (in another terminal):
+2. Start the frontend in a second terminal:
 
    ```bash
-   cd frontend && npm install && npm run dev
+   cd frontend
+   cp .env.example .env
+   npm install
+   npm run dev
    ```
 
-4. **Open browser**: http://localhost:5173
+3. Optional: run contract tests from the repo root:
 
-For detailed setup instructions, prerequisites, and troubleshooting, see **[Local Development Quickstart](./docs/LOCAL_DEVELOPMENT_QUICKSTART.md)**.
+   ```bash
+   rustup target add wasm32-unknown-unknown
+   cargo test
+   ```
+
+4. Open the app at `http://localhost:5173`
+
+The default local workflow uses Prisma's SQLite database and in-memory fallbacks for Redis-backed features unless you explicitly configure additional infrastructure.
+
+For detailed setup instructions, prerequisites, validation steps, and troubleshooting, see **[Local Development Quickstart](./docs/LOCAL_DEVELOPMENT_QUICKSTART.md)**.
 
 For a complete environment variable reference with defaults, required flags, and production recommendations, see **[Environment Variable Matrix](./docs/ENV_VARIABLE_MATRIX.md)**.
 

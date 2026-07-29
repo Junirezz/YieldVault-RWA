@@ -5,6 +5,8 @@ export type TransactionEventType =
   | 'transaction.deposit.created'
   | 'transaction.withdrawal.created';
 
+export const WEBHOOK_SCHEMA_VERSION = 1;
+
 export interface TransactionEventPayload {
   transactionId: string;
   amount: string;
@@ -521,6 +523,7 @@ export function createWebhookSignature(secret: string, payload: unknown): string
 }
 
 export interface WebhookSignedEnvelope {
+  schemaVersion: number;
   eventType: TransactionEventType;
   sentAt: string;
   payload: TransactionEventPayload;
@@ -566,6 +569,7 @@ export function buildWebhookSignedEnvelope(
   payload: TransactionEventPayload,
 ): WebhookSignedEnvelope {
   return {
+    schemaVersion: WEBHOOK_SCHEMA_VERSION,
     eventType: delivery.eventType,
     sentAt: new Date().toISOString(),
     payload,

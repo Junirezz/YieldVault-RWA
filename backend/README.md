@@ -25,6 +25,9 @@ npm install
 
 # Create environment file
 cp .env.example .env
+
+# Create/update the local Prisma database
+npx prisma migrate dev
 ```
 
 ### Development
@@ -35,6 +38,23 @@ npm run dev
 ```
 
 The server will start on `http://localhost:3000`.
+
+For the default local workflow, PostgreSQL and Redis are optional:
+
+- Prisma uses the SQLite datasource in [`prisma/schema.prisma`](/Users/macbook/stellar/YieldVault-RWA/backend/prisma/schema.prisma:1) when `DATABASE_URL` is not set.
+- Redis-backed features fall back to in-memory behavior when `REDIS_URL` is not configured.
+
+Minimum local environment values:
+
+```env
+PORT=3000
+NODE_ENV=development
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+VAULT_CONTRACT_ID=
+```
+
+For the full monorepo bootstrap order, see [`docs/LOCAL_DEVELOPMENT_QUICKSTART.md`](/Users/macbook/stellar/YieldVault-RWA/docs/LOCAL_DEVELOPMENT_QUICKSTART.md:1).
 
 ### Production
 
