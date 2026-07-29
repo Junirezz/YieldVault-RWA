@@ -20,6 +20,12 @@ process.env.OTEL_LOG_LEVEL = 'error';
 process.env.STELLAR_RPC_URL = process.env.STELLAR_RPC_URL || 'https://test-rpc.stellar.local';
 process.env.ALLOWLIST_ENABLED = process.env.ALLOWLIST_ENABLED || 'false';
 
+// Disable rate limiting for RBAC/security tests by using very high limits.
+// The admin limiter defaults to 20 req/min which is too low for comprehensive
+// endpoint-level security tests that fire 100+ requests in rapid succession.
+process.env.RATE_LIMIT_ADMIN_MAX = process.env.RATE_LIMIT_ADMIN_MAX || '10000';
+process.env.RATE_LIMIT_WRITES_MAX = process.env.RATE_LIMIT_WRITES_MAX || '10000';
+
 // CRITICAL: Patch PrismaClient constructor BEFORE any code tries to instantiate it
 // This intercepts the instrumentation hooks and prevents the panic
 const PrismaClientModule = require('@prisma/client');
