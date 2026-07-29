@@ -1,5 +1,4 @@
 import React, { type ReactNode } from "react";
-import EmptyState from "./ui/EmptyState";
 import ErrorState from "./ui/ErrorState";
 
 export interface ViewStateProps {
@@ -37,8 +36,8 @@ export default function ViewState({
 
   return (
     <div
-      className={`view-state ${tone === "error" ? "view-state-error" : ""} ${className}`.trim()}
-      role={tone === "error" ? "alert" : "status"}
+      className={`view-state ${className}`.trim()}
+      role="status"
       aria-live="polite"
     >
       <h2 className="view-state-title">{title}</h2>

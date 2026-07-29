@@ -72,8 +72,17 @@ const WalletDisconnectRecoveryModal: React.FC<WalletDisconnectRecoveryModalProps
               {t("walletRecovery.draftLabel")}
             </div>
             <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-              {t(`walletRecovery.tab.${draft.tab}`)} · {draft.step} ·{" "}
-              {draft.amount ? `${draft.amount} USDC` : t("walletRecovery.noAmount")}
+              <span>{t(`walletRecovery.tab.${draft.tab}`)}</span>
+              {" · "}
+              <span>{draft.step}</span>
+              {" · "}
+              {draft.amount ? (
+                <>
+                  <span>{draft.amount}</span> USDC
+                </>
+              ) : (
+                <span>{t("walletRecovery.noAmount")}</span>
+              )}
             </div>
           </div>
         </div>

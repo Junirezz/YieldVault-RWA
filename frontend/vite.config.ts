@@ -50,6 +50,9 @@ export default defineConfig(({ mode }) => {
       css: true,
       include: ["src/**/*.{test,spec}.{ts,tsx}"],
       exclude: ["e2e/**", "node_modules/**", "dist/**"],
+      // Fork isolation prevents vi.mock leakage between Portfolio / VaultDashboard suites.
+      pool: "forks",
+      isolate: true,
     },
   };
 });

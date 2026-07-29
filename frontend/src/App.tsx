@@ -1,5 +1,3 @@
-import { lazy, Suspense, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import * as Sentry from "@sentry/react";
@@ -146,55 +144,6 @@ function AppContent() {
   }, [clearSessionExpired]);
 
   return (
-    <KeyboardShortcutProvider>
-      <a className="skip-link" href="#main-content">
-        Skip to main content
-      </a>
-      <div className="app-container">
-        <Navbar
-          walletAddress={walletAddress}
-          usdcBalance={usdcBalance}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-        />
-        <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
-          <Suspense fallback={<LoadingPage />}>
-            <SentryRoutes>
-              <Route
-                path="/"
-                element={
-                  <Home
-                    walletAddress={walletAddress}
-                    usdcBalance={usdcBalance}
-                  />
-                }
-              />
-              <Route
-                path="/portfolio"
-                element={
-                  <Portfolio
-                    walletAddress={walletAddress}
-                  />
-                }
-              />
-              <Route
-                path="/analytics"
-                element={
-                  <FeatureGate flag="ANALYTICS_PAGE">
-                    <Analytics />
-                  </FeatureGate>
-                }
-              />
-              <Route path="/transactions" element={<TransactionHistory walletAddress={walletAddress} />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/ui-kit" element={<UIPreview />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </SentryRoutes>
-          </Suspense>
-        </main>
-        <ShortcutHelpModal />
-      </div>
-    </KeyboardShortcutProvider>
     <PreferencesProvider walletAddress={walletAddress}>
       <KeyboardShortcutProvider walletAddress={walletAddress}>
         <a className="skip-link" href="#main-content">

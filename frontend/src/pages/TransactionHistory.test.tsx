@@ -353,8 +353,10 @@ describe("TransactionHistory", () => {
 
     fireEvent.change(searchInput, { target: { value: "" } });
 
-    expect(await screen.findByText("USDC")).toBeInTheDocument();
-    expect(await screen.findByText("EURC")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(table).getByText("USDC")).toBeInTheDocument();
+      expect(within(table).getByText("EURC")).toBeInTheDocument();
+    });
     expect(mockGetTransactions).toHaveBeenCalledTimes(1);
   });
 
@@ -634,7 +636,6 @@ describe("TransactionHistory — amount range filter", () => {
 
     await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
     const table = screen.getByRole("table");
-    const table = await screen.findByRole("table");
 
     // 50 should be hidden; 200 and 500 should be visible
     await waitFor(() =>

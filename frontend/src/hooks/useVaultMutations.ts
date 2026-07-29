@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "../lib/queryClient";
 import { submitDeposit, submitWithdrawal } from "../lib/vaultApi";
 import {
   applyOptimisticVaultPatch,

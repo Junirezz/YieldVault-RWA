@@ -1,38 +1,9 @@
-import React, { useMemo, useState } from "react";
 import React, { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import Badge from "../components/Badge";
 import EmptyState from "../components/ui/EmptyState";
 import { Check, Layers, ShieldCheck, TrendingUp } from "../components/icons";
-import {
-  MAX_VAULT_COMPARISON_SELECTION,
-  VAULT_STRATEGIES,
-  type VaultStrategyOption,
-} from "../data/vaultStrategies";
-
-const STRATEGIES_PARAM = "strategies";
-
-function parseStrategiesParam(raw: string | null): string[] {
-  if (!raw) return [];
-  const validIds = new Set(VAULT_STRATEGIES.map((strategy) => strategy.id));
-  const seen = new Set<string>();
-  const ids: string[] = [];
-  for (const value of raw.split(",")) {
-    const id = value.trim();
-    if (validIds.has(id) && !seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
-  }
-  return ids.slice(0, MAX_VAULT_COMPARISON_SELECTION);
-}
-
-function parseApy(apy: string): number {
-  const parsed = Number.parseFloat(apy.replace(/[^\d.-]/g, ""));
-  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
-}
-
 import {
   COMPARISON_METRICS,
   MAX_COMPARISON_SELECTION,
@@ -43,7 +14,6 @@ import {
   SORT_PARAM,
   VAULT_STRATEGIES,
   findBestStrategyIds,
-  findStrategy,
   formatLiquidityCadence,
   getApySpread,
   getComparisonMetric,
@@ -55,7 +25,6 @@ import {
 } from "../lib/vaultStrategies";
 import type {
   ComparisonMetric,
-  ComparisonMetricId,
   SortDirection,
   VaultStrategy,
 } from "../lib/vaultStrategies";
@@ -73,10 +42,6 @@ function flipDirection(direction: SortDirection): SortDirection {
 const VaultComparison: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
-    const fromUrl = parseStrategiesParam(searchParams.get(STRATEGIES_PARAM));
-    return fromUrl.length > 0 ? fromUrl : [VAULT_STRATEGIES[0].id, VAULT_STRATEGIES[1].id];
-  });
   const [announcement, setAnnouncement] = useState("");
 
   // The URL is the single source of truth for selection and ordering, so a
@@ -93,58 +58,11 @@ const VaultComparison: React.FC = () => {
     sortMetric ? bestFirstDirection(sortMetric) : "desc",
   );
 
-  // `parseSelectionParam` already dropped unknown ids; the type guard keeps the
-  // array typed without a non-null assertion.
   const selectedStrategies = useMemo(
-    () => VAULT_STRATEGIES.filter((strategy) => selectedIds.includes(strategy.id)),
-    [selectedIds],
-  );
-
-  const atMaxSelection = selectedIds.length >= MAX_VAULT_COMPARISON_SELECTION;
-
-  const bestApyId = useMemo(() => {
-    if (selectedStrategies.length === 0) return null;
-    return selectedStrategies.reduce((best, strategy) =>
-      parseApy(strategy.apy) > parseApy(best.apy) ? strategy : best,
-    ).id;
-  }, [selectedStrategies]);
-
-  const toggleStrategy = (id: string) => {
-    let next: string[];
-    if (selectedIds.includes(id)) {
-      next = selectedIds.filter((value) => value !== id);
-    } else if (atMaxSelection) {
-      return;
-    } else {
-      next = [...selectedIds, id];
-    }
-
-    setSelectedIds(next);
-    setSearchParams(
-      (params) => {
-        const nextParams = new URLSearchParams(params);
-        if (next.length > 0) {
-          nextParams.set(STRATEGIES_PARAM, next.join(","));
-        } else {
-          nextParams.delete(STRATEGIES_PARAM);
-        }
-        return nextParams;
-      },
-      { replace: true },
-    );
-  };
-
-  const comparisonRows = [
-    { label: "APY", value: (strategy: VaultStrategyOption) => strategy.apy },
-    { label: "Liquidity", value: (strategy: VaultStrategyOption) => strategy.liquidity },
-    { label: "Lockup", value: (strategy: VaultStrategyOption) => strategy.lockup },
-    { label: "Risk", value: (strategy: VaultStrategyOption) => strategy.risk },
-    { label: "Settlement", value: (strategy: VaultStrategyOption) => strategy.settlement },
-  ];
     () =>
       selectedIds
-        .map((id) => findStrategy(id))
-        .filter((strategy): strategy is VaultStrategy => strategy !== undefined),
+        .map((id) => VAULT_STRATEGIES.find((strategy) => strategy.id === id))
+        .filter((strategy): strategy is VaultStrategy => Boolean(strategy)),
     [selectedIds],
   );
 
@@ -154,7 +72,7 @@ const VaultComparison: React.FC = () => {
   );
 
   const bestByMetric = useMemo(() => {
-    const map = new Map<ComparisonMetricId, string[]>();
+    const map = new Map<string, string[]>();
     COMPARISON_METRICS.forEach((metric) => {
       map.set(metric.id, findBestStrategyIds(comparedStrategies, metric));
     });
@@ -179,8 +97,6 @@ const VaultComparison: React.FC = () => {
     (strategy: VaultStrategy) => {
       const next = toggleStrategySelection(selectedIds, strategy.id);
 
-      // `toggleStrategySelection` hands back the same array when the cap blocks
-      // the change. Announce it instead of dropping the click on the floor.
       if (next === selectedIds) {
         setAnnouncement(
           `Comparison limit of ${MAX_COMPARISON_SELECTION} reached. Deselect a strategy before adding ${strategy.name}.`,
@@ -254,7 +170,6 @@ const VaultComparison: React.FC = () => {
         ]}
       />
 
-      <div style={{ display: "grid", gap: "20px", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: "24px" }}>
       {/* Selection and ordering changes are non-visual for screen readers, so
           every mutation is mirrored here. */}
       <p
@@ -286,7 +201,6 @@ const VaultComparison: React.FC = () => {
               type="button"
               onClick={() => handleToggle(strategy)}
               aria-pressed={selected}
-              aria-disabled={!selected && atMaxSelection ? true : undefined}
               aria-disabled={blocked || undefined}
               title={
                 blocked
@@ -304,8 +218,6 @@ const VaultComparison: React.FC = () => {
                   ? "rgba(0, 240, 255, 0.08)"
                   : "rgba(255, 255, 255, 0.03)",
                 color: "inherit",
-                cursor: !selected && atMaxSelection ? "not-allowed" : "pointer",
-                opacity: !selected && atMaxSelection ? 0.6 : 1,
                 cursor: blocked ? "not-allowed" : "pointer",
                 display: "flex",
                 flexDirection: "column",
@@ -436,15 +348,16 @@ const VaultComparison: React.FC = () => {
                 row are marked.
               </p>
             </div>
-            <div className="flex items-center gap-sm">
-              <button type="button" className="btn btn-secondary" onClick={() => navigate("/")}>Back to vault</button>
-              <button type="button" className="btn btn-primary" onClick={() => navigate("/?tab=deposit")}>
-                Allocate to selected
-              </button>
-            </div>
             <div className="flex items-center gap-sm" style={{ flexWrap: "wrap" }}>
               <button type="button" className="btn btn-secondary" onClick={handleReset}>
                 Reset
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => navigate("/?tab=deposit")}
+              >
+                Allocate to selected
               </button>
               <button
                 type="button"
@@ -503,36 +416,6 @@ const VaultComparison: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {comparisonRows.map((row) => (
-                  <tr key={row.label}>
-                    <th scope="row" style={{ textAlign: "left", padding: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>
-                      {row.label}
-                    </th>
-                    {selectedStrategies.map((strategy) => {
-                      const isBestApy = row.label === "APY" && strategy.id === bestApyId;
-
-                      return (
-                        <td
-                          key={`${strategy.id}-${row.label}`}
-                          data-best={isBestApy ? "true" : undefined}
-                          style={{
-                            padding: "12px",
-                            borderTop: "1px solid var(--border-glass)",
-                            ...(isBestApy
-                              ? {
-                                  color: "var(--accent-green)",
-                                  fontWeight: 700,
-                                  background: "rgba(0, 255, 163, 0.08)",
-                                }
-                              : {}),
-                          }}
-                        >
-                          {row.value(strategy)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
                 {COMPARISON_METRICS.map((metric) => {
                   const isSorted = sortMetric?.id === metric.id;
                   const bestIds = bestByMetric.get(metric.id) ?? [];
@@ -583,6 +466,7 @@ const VaultComparison: React.FC = () => {
                         return (
                           <td
                             key={`${strategy.id}-${metric.id}`}
+                            data-best={isBest ? "true" : undefined}
                             style={{
                               padding: "12px",
                               borderTop: "1px solid var(--border-glass)",
@@ -591,8 +475,6 @@ const VaultComparison: React.FC = () => {
                             }}
                           >
                             {metric.format(strategy)}
-                            {/* Colour alone would fail WCAG 1.4.1, so the
-                                winner also carries a glyph and a text cue. */}
                             {isBest && (
                               <>
                                 <span aria-hidden="true"> ★</span>

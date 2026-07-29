@@ -213,6 +213,21 @@ export const es = {
     appRequires: "pero esta app requiere",
     switchInstructions: "Abre Freighter → Configuración → Red y cambia a {{network}} para continuar.",
   },
+  accountStatement: {
+    trigger: "Exportar extracto",
+    title: "Descargar extracto de cuenta",
+    description:
+      "Exporte un extracto descargable de sus posiciones y transacciones para el rango de fechas seleccionado.",
+    walletLabel: "Billetera",
+    formatLabel: "Formato de archivo",
+    startDate: "Fecha de inicio",
+    endDate: "Fecha de fin",
+    cancel: "Cancelar",
+    download: "Descargar extracto",
+    preparing: "Preparando…",
+    downloaded: "Descargado",
+    failed: "No se pudo exportar el extracto",
+  },
   sessionExpired: {
     title: "Sesión expirada",
     message: "Tu sesión de billetera ya no está autorizada. Por favor, reconecta Freighter para continuar donde lo dejaste.",

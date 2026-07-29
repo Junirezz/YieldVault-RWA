@@ -253,10 +253,10 @@ describe('WalletConnect', () => {
     });
 
     it('handles wallet disconnects gracefully during polling', async () => {
-        vi.useFakeTimers({ shouldAdvanceTime: false });
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        mockedFreighter.isConnected.mockResolvedValue({ isConnected: true });
         mockedFreighter.isAllowed
             .mockResolvedValueOnce({ isAllowed: true })
-            .mockResolvedValueOnce({ isAllowed: false })
             .mockResolvedValue({ isAllowed: false });
         mockedFreighter.getAddress.mockResolvedValue({ address: 'GABC123' });
 
@@ -268,11 +268,11 @@ describe('WalletConnect', () => {
             />
         );
 
-        act(() => {
-            vi.advanceTimersByTime(10000);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
         });
 
-        expect(mockedFreighter.isAllowed.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(mockOnDisconnect).toHaveBeenCalledWith('connection-lost');
         
         vi.useRealTimers();
     });

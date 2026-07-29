@@ -1,5 +1,4 @@
 import { useCallback, useState } from 'react';
-import type { UseQueryResult } from '@tanstack/react-query';
 import type { UseQueryResult } from "@tanstack/react-query";
 import { usePolling } from './usePolling';
 

@@ -15,12 +15,6 @@ import { getRoutePrefetchHandlers } from "../lib/routePrefetch";
 import type { UserRole } from "../lib/roles";
 
 interface NavbarProps {
-    currentPath?: '/' | '/analytics' | '/portfolio';
-    onNavigate?: (path: '/' | '/analytics' | '/portfolio') => void;
-    walletAddress: string | null;
-    usdcBalance?: number;
-    onConnect: (address: string) => void;
-    onDisconnect: () => void;
   currentPath?: "/" | "/analytics" | "/portfolio";
   onNavigate?: (path: "/" | "/analytics" | "/portfolio") => void;
   walletAddress: string | null;
