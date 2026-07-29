@@ -619,7 +619,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
 
   const normalizedAddress = normalizeWalletAddress(walletAddress.trim());
   const identitySource = typeof source === 'string' && source.trim() ? source : 'stellar';
-  const mapping = walletAliasMappingService.registerAlias(normalizedAddress, identitySource);
+  const mapping = await walletAliasMappingService.registerAlias(normalizedAddress, identitySource);
 
   if (
     typeof providerAlias === 'string' &&
@@ -627,10 +627,10 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
     typeof providerSource === 'string' &&
     providerSource.trim()
   ) {
-    walletAliasMappingService.registerAlias(providerAlias, providerSource, mapping.canonicalId);
+    await walletAliasMappingService.registerAlias(providerAlias, providerSource, mapping.canonicalId);
   }
 
-  const canonicalWallet = walletAliasMappingService.resolveCanonicalWallet(
+  const canonicalWallet = await walletAliasMappingService.resolveCanonicalWallet(
     normalizedAddress,
     identitySource,
   );

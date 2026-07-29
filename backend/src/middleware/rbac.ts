@@ -91,6 +91,7 @@ const ADMIN_ROUTE_RULES: RouteRule[] = [
   { methods: ['POST'], pattern: /^\/admin\/cache\/invalidate$/, permission: Permission.CONFIG_WRITE },
   { methods: ['DELETE'], pattern: /^\/admin\/cache$/, permission: Permission.CONFIG_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/withdrawal-limits\/override$/, permission: Permission.CONFIG_WRITE },
+  { methods: ['DELETE'], pattern: /^\/admin\/wallet-aliases\/[^/]+$/, permission: Permission.CONFIG_WRITE },
 
   // Allowlist
   { methods: ['POST'], pattern: /^\/admin\/allowlist\/add$/, permission: Permission.ALLOWLIST_WRITE },
