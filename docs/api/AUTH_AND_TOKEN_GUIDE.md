@@ -53,9 +53,9 @@ The backend supports three authentication schemes plus wallet-signed action veri
 | **Wallet Signature** | Body: `{ walletAddress, nonce, signature }` | 5 min (nonce) | Redis / in-memory | Login/write actions when enforcement is strict |
 
 The backend inspects the `Authorization` header to determine the scheme:
-- `Bearer` prefix with standard JWT format (`header.payload.signature`) â†’ JWT access token via `requireAuth`
-- `Bearer` prefix with `yv_`-prefixed keyId â†’ scoped admin token via `scopedAdminTokenStore.authenticate`
-- `ApiKey` prefix â†’ validated against the Prisma-backed API key registry via `validateApiKey`
+- `Bearer` prefix with standard JWT format (`header.payload.signature`) → JWT access token via `requireAuth`
+- `Bearer` prefix with `yv_`-prefixed keyId → scoped admin token via `scopedAdminTokenStore.authenticate`
+- `ApiKey` prefix → validated against the Prisma-backed API key registry via `validateApiKey`
 
 All auth-protected routes return `401 Unauthorized` for missing, malformed, or expired credentials. RBAC violations return `403 Forbidden`.
 
@@ -67,36 +67,36 @@ All auth-protected routes return `401 Unauthorized` for missing, malformed, or e
 
 ```
 Client                          Server
-  â”‚                               â”‚
-  â”‚  POST /api/v1/auth/login      â”‚
-  â”‚  { walletAddress }            â”‚
-  â”‚ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¶
-  â”‚                               â”‚ 1. Normalize wallet address
-  â”‚                               â”‚ 2. Register wallet alias mapping
-  â”‚                               â”‚ 3. Issue token pair
-  â”‚  { accessToken,               â”‚
-  â”‚    refreshToken,               â”‚
-  â”‚    accessTokenExpiresAt,       â”‚
-  â”‚    tokenType: "Bearer",        â”‚
-  â”‚    expiresIn: 900,             â”‚
-  â”‚    canonicalWallet }           â”‚
-  â”‚ â—€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-  â”‚                               â”‚
+  │                               │
+  │  POST /api/v1/auth/login      │
+  │  { walletAddress }            │
+  │ ──────────────────────────────▶
+  │                               │ 1. Normalize wallet address
+  │                               │ 2. Register wallet alias mapping
+  │                               │ 3. Issue token pair
+  │  { accessToken,               │
+  │    refreshToken,               │
+  │    accessTokenExpiresAt,       │
+  │    tokenType: "Bearer",        │
+  │    expiresIn: 900,             │
+  │    canonicalWallet }           │
+  │ ◀──────────────────────────────│
+  │                               │
 ```
 
 **When wallet signature enforcement is on** (production default), the login flow requires a server-issued nonce first:
 
 ```
-1. POST /api/v1/auth/nonce  â†’  { nonce, message, expiresAt }
+1. POST /api/v1/auth/nonce  →  { nonce, message, expiresAt }
 2. Sign the message with the wallet private key
-3. POST /api/v1/auth/login  â†’  { walletAddress, nonce, signature }
+3. POST /api/v1/auth/login  →  { walletAddress, nonce, signature }
 ```
 
 All auth endpoints are rate-limited to 5 requests per minute per IP via `authLimiter`.
 
 ### Token Structure
 
-**Access Token** â€” HS256-signed JWT, no external library required:
+**Access Token** — HS256-signed JWT, no external library required:
 
 ```json
 // Header
@@ -116,11 +116,11 @@ All auth endpoints are rate-limited to 5 requests per minute per IP via `authLim
 - **Secret**: `JWT_SECRET` env var (minimum 32 chars, 3+ character classes in production)
 - **Startup validation**: The server fails fast in production if `JWT_SECRET` is absent, too short, or lacks entropy (see `auth.ts:assertJwtSecretValid`)
 
-**Refresh Token** â€” 80-character hex string (cryptographically random, opaque):
+**Refresh Token** — 80-character hex string (cryptographically random, opaque):
 
 - **TTL**: 7 days (configurable via `JWT_REFRESH_TTL_SECONDS`)
 - **Storage**: Redis (multi-instance) or in-memory `Map` (single-instance)
-- **Format**: 40 random bytes â†’ hex (no JWT library needed)
+- **Format**: 40 random bytes → hex (no JWT library needed)
 - **Hash**: Stored as SHA-256 hash; plaintext returned to client exactly once
 
 ### Refresh Token Rotation
@@ -144,15 +144,15 @@ Response:
 **Rotation lifecycle:**
 
 ```
-Rotation #1:  RTâ‚ issued â†’ RTâ‚‚ issued, RTâ‚ revoked
-Rotation #2:  RTâ‚‚ issued â†’ RTâ‚ƒ issued, RTâ‚‚ revoked
-     â‹®
-Rotation #n:  RTâ‚™ issued â†’ RTâ‚™â‚Šâ‚ issued, RTâ‚™ revoked
+Rotation #1:  RT₁ issued → RT₂ issued, RT₁ revoked
+Rotation #2:  RT₂ issued → RT₃ issued, RT₂ revoked
+     ⋮
+Rotation #n:  RTₙ issued → RTₙ₊₁ issued, RTₙ revoked
 ```
 
 All tokens in a rotation chain share a common **family ID** (UUID). This enables the server to detect stale or replayed tokens across the entire session. The family ID is generated on first login and preserved across all rotations.
 
-**Atomicity**: The old token is marked revoked (`entry.revoked = true`) before the new token is issued. If the server crashes between revocation and issuance, the old token is already marked as used and the client must log in again â€” no orphan tokens are left valid.
+**Atomicity**: The old token is marked revoked (`entry.revoked = true`) before the new token is issued. If the server crashes between revocation and issuance, the old token is already marked as used and the client must log in again — no orphan tokens are left valid.
 
 ### Replay Detection & Theft Protection
 
@@ -231,8 +231,8 @@ model ApiKey {
 ```
 
 Key properties:
-- **Only SHA-256 hashes are stored** â€” plaintext key values are never persisted
-- **Keys are scoped to a Tenant** â€” multi-tenant isolation is baked in
+- **Only SHA-256 hashes are stored** — plaintext key values are never persisted
+- **Keys are scoped to a Tenant** — multi-tenant isolation is baked in
 - **Role and scopes** control access level and granular permissions
 - **`isActive` flag** allows soft revocation without data loss
 - **`expiresAt`** supports time-bound keys for temporary access
@@ -260,12 +260,12 @@ if (!apiKey || !apiKey.isActive) {
 RBAC is enforced by `adminRbacMiddleware` (`middleware/rbac.ts`) which resolves the required permission for each admin route:
 
 ```
-POST   /admin/api-keys/register           â†’ admin.api_keys.write
-POST   /admin/api-keys/rotate             â†’ admin.api_keys.write
-POST   /admin/api-keys/revoke             â†’ admin.api_keys.write
-POST   /admin/scoped-tokens               â†’ admin.api_keys.super
-POST   /admin/scoped-tokens/:id/rotate    â†’ admin.api_keys.super
-POST   /admin/impersonate/sessions        â†’ admin.impersonate
+POST   /admin/api-keys/register           → admin.api_keys.write
+POST   /admin/api-keys/rotate             → admin.api_keys.write
+POST   /admin/api-keys/revoke             → admin.api_keys.write
+POST   /admin/scoped-tokens               → admin.api_keys.super
+POST   /admin/scoped-tokens/:id/rotate    → admin.api_keys.super
+POST   /admin/impersonate/sessions        → admin.impersonate
 ```
 
 **Role hierarchy rule**: A key can create another key at its own role level or lower. Only a `super-admin` key can register a new `super-admin` key or create scoped admin tokens.
@@ -301,8 +301,8 @@ curl -X POST http://localhost:3000/admin/api-keys/register \
 ```
 
 **Key value requirements:**
-- Generate with `crypto.randomBytes(32).toString('hex')` â€” 64 hex characters, 256 bits of entropy
-- Must be kept secret â€” only the SHA-256 hash is stored
+- Generate with `crypto.randomBytes(32).toString('hex')` — 64 hex characters, 256 bits of entropy
+- Must be kept secret — only the SHA-256 hash is stored
 - Plaintext is never returned after creation; store immediately in a secrets manager
 - Optional `expiresInDays` for time-bound keys
 
@@ -338,7 +338,7 @@ curl -X POST http://localhost:3000/admin/api-keys/rotate \
 ### Revoking & Restoring Keys
 
 ```bash
-# Revoke a key by its ID (soft delete â€” sets isActive = false)
+# Revoke a key by its ID (soft delete — sets isActive = false)
 curl -X POST http://localhost:3000/admin/api-keys/revoke \
   -H "Authorization: ApiKey <admin-key>" \
   -H "Content-Type: application/json" \
@@ -348,9 +348,9 @@ curl -X POST http://localhost:3000/admin/api-keys/revoke \
 { "success": true, "revokedAt": "2026-07-26T14:00:00.000Z" }
 ```
 
-**Revocation is persistent** â€” the `isActive` flag is set to `false` in the database. Unlike the legacy in-memory store, revocation survives server restarts and is visible to all backend instances.
+**Revocation is persistent** — the `isActive` flag is set to `false` in the database. Unlike the legacy in-memory store, revocation survives server restarts and is visible to all backend instances.
 
-**Restoring** requires direct database manipulation (no admin endpoint currently exposed) â€” set `isActive = true` and clear `revokedAt`.
+**Restoring** requires direct database manipulation (no admin endpoint currently exposed) — set `isActive = true` and clear `revokedAt`.
 
 ### API Key Audit Trail
 
@@ -404,7 +404,7 @@ type AdminPermission =
   | 'read:exports'      | 'write:exports'
   | 'read:allowlist'    | 'write:allowlist'
   | 'read:users'        | 'write:users'
-  | 'admin:*';           // wildcard â€” grants all permissions
+  | 'admin:*';           // wildcard — grants all permissions
 ```
 
 Tokens are stored in the `ScopedAdminToken` Prisma model with JSON-serialized permissions:
@@ -489,9 +489,9 @@ curl -X POST http://localhost:3000/admin/scoped-tokens/yv_a1b2c3d4e5f6g7h8/rotat
 
 **Rotation behavior:**
 - A new 64-char hex secret is generated (`crypto.randomBytes(32)`)
-- The old secret is **immediately invalidated** â€” the SHA-256 hash is replaced in the DB
+- The old secret is **immediately invalidated** — the SHA-256 hash is replaced in the DB
 - An immutable `ScopedAdminTokenRotationEvent` row is written for audit
-- The `keyId`, permissions, and label remain unchanged â€” no downstream config updates needed
+- The `keyId`, permissions, and label remain unchanged — no downstream config updates needed
 - The rotation is performed in a Prisma `$transaction` for atomicity
 - Rotation of a revoked or non-existent token returns `null`
 
@@ -543,7 +543,7 @@ model AdminImpersonationSession {
   actor        String
   apiKeyHash   String
   targetWallet String
-  reason       String    // Required â€” documented reason for impersonation
+  reason       String    // Required — documented reason for impersonation
   startedAt    DateTime  @default(now())
   expiresAt    DateTime
   endedAt      DateTime?
@@ -607,7 +607,6 @@ For high-security operations (login, deposits, withdrawals), the backend support
 | `NonceActionMismatchError` | 401 | `NONCE_ACTION_MISMATCH` | Wrong action type |
 | `NonceWalletMismatchError` | 401 | `NONCE_WALLET_MISMATCH` | Wrong wallet address |
 
-
 ### Signature Modes
 
 | Mode | Env Var | Algorithm | Use |
@@ -616,8 +615,8 @@ For high-security operations (login, deposits, withdrawals), the backend support
 | `hmac` | `WALLET_SIGNATURE_MODE=hmac` | HMAC-SHA256 (dev secret) | Development / testing |
 
 **Enforcement levels (via `WALLET_NONCE_ENFORCEMENT`):**
-- `off` / `false` â€” skip signature checks (not recommended for production)
-- `strict` / `on` â€” require valid nonce + signature on every write operation
+- `off` / `false` — skip signature checks (not recommended for production)
+- `strict` / `on` — require valid nonce + signature on every write operation
 - Default in `NODE_ENV=production`: `strict`
 
 **Canonical payload format:**
@@ -664,7 +663,7 @@ For production deployments with multiple backend instances, Redis is **required*
 
 1. **Refresh token store** (`auth.ts`): Set `REDIS_URL` to a TLS-enabled Redis instance. All instances share the same token state.
 2. **Wallet nonce store** (`walletNonce.ts`): Same Redis instance handles nonce deduplication across instances.
-3. **Family revocation set**: Revoked token families are globally visible â€” replay protection works cluster-wide.
+3. **Family revocation set**: Revoked token families are globally visible — replay protection works cluster-wide.
 
 **Startup validation**: The production environment should enforce `REDIS_URL` via startup check. Without Redis, each instance has its own in-memory store and cannot see tokens issued by other instances.
 
@@ -679,7 +678,7 @@ For production deployments with multiple backend instances, Redis is **required*
 
 ### Session Affinity
 
-JWT access tokens are self-contained (signed with `JWT_SECRET`) â€” no session affinity needed. Refresh token rotation lookup goes to Redis/DB. No instance-local state is required for auth beyond the shared store.
+JWT access tokens are self-contained (signed with `JWT_SECRET`) — no session affinity needed. Refresh token rotation lookup goes to Redis/DB. No instance-local state is required for auth beyond the shared store.
 
 ---
 
@@ -697,7 +696,7 @@ JWT access tokens are self-contained (signed with `JWT_SECRET`) â€” no sess
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ADMIN_API_KEY` | â€” | Pre-registered admin key for bootstrap (test environments) |
+| `ADMIN_API_KEY` | — | Pre-registered admin key for bootstrap (test environments) |
 | `ADMIN_API_KEY_ROLE` | `super-admin` | Role for the bootstrap key |
 
 ### Wallet Signature Configuration
@@ -709,13 +708,12 @@ JWT access tokens are self-contained (signed with `JWT_SECRET`) â€” no sess
 | `WALLET_NONCE_TTL_SECONDS` | `300` | Nonce timeout in seconds |
 | `WALLET_NONCE_MAX_ACTIVE_PER_WALLET` | `10` | Max pending nonces per wallet |
 | `WALLET_ACTION_HMAC_SECRET` | Falls back to `JWT_SECRET` | HMAC secret when in `hmac` mode |
-| `REDIS_URL` | â€” | Shared nonce store required for replay protection across backend replicas |
 
 ### Backend Store Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REDIS_URL` | â€” | Redis connection URL. When set, refresh tokens and nonces are persisted in Redis. Required for multi-instance deployments. |
+| `REDIS_URL` | — | Redis connection URL. When set, refresh tokens and nonces are persisted in Redis. Required for multi-instance deployments. |
 | `DATABASE_URL` | `file:./dev.db` | Prisma database connection string (SQLite in dev, Postgres in prod) |
 
 ### Rate Limiting (Auth Tier)
@@ -745,7 +743,7 @@ JWT access tokens are self-contained (signed with `JWT_SECRET`) â€” no sess
 |----------|---------|-------------|
 | `ADMIN_AUDIT_LOG_STORAGE` | `hybrid` | Audit log backend: `db`, `redis`, or `hybrid` |
 | `AUDIT_LOG_RETENTION` | `500` | Max audit log entries before rotation |
-| `ADMIN_ACTION_RECEIPT_SECRET` | â€” | Secret for signing admin action receipts |
+| `ADMIN_ACTION_RECEIPT_SECRET` | — | Secret for signing admin action receipts |
 
 ---
 
@@ -754,68 +752,68 @@ JWT access tokens are self-contained (signed with `JWT_SECRET`) â€” no sess
 ### 1. JWT Secret Management
 
 ```
-âœ… DO:   Use a strong, randomly generated secret â‰¥ 32 chars with 3+ character classes
-âœ… DO:   Rotate the JWT_SECRET on a schedule (invalidates all existing tokens)
-âœ… DO:   Store JWT_SECRET in a secrets manager (Vault, AWS Secrets Manager, etc.)
-âœ… DO:   Use a different JWT_SECRET per environment (dev/staging/prod)
-âŒ DON'T: Hardcode secrets in source code or config files
-âŒ DON'T: Use the default development secret in production
-âŒ DON'T: Log or expose JWT_SECRET in error messages
+✅ DO:   Use a strong, randomly generated secret ≥ 32 chars with 3+ character classes
+✅ DO:   Rotate the JWT_SECRET on a schedule (invalidates all existing tokens)
+✅ DO:   Store JWT_SECRET in a secrets manager (Vault, AWS Secrets Manager, etc.)
+✅ DO:   Use a different JWT_SECRET per environment (dev/staging/prod)
+❌ DON'T: Hardcode secrets in source code or config files
+❌ DON'T: Use the default development secret in production
+❌ DON'T: Log or expose JWT_SECRET in error messages
 ```
 
-The server performs **startup validation** in production â€” it will refuse to start if `JWT_SECRET` is missing, too short, or lacks character-class diversity (`auth.ts:assertJwtSecretValid`).
+The server performs **startup validation** in production — it will refuse to start if `JWT_SECRET` is missing, too short, or lacks character-class diversity (`auth.ts:assertJwtSecretValid`).
 
 ### 2. Access Token Lifetime
 
-- **15 minutes** is the recommended default â€” short enough to limit blast radius of a stolen token, long enough to avoid excessive refresh calls
+- **15 minutes** is the recommended default — short enough to limit blast radius of a stolen token, long enough to avoid excessive refresh calls
 - Extending the TTL increases the window for token misuse before expiry
-- Access tokens are **not stored server-side** â€” they are self-contained JWTs verified by signature
+- Access tokens are **not stored server-side** — they are self-contained JWTs verified by signature
 
 ### 3. Refresh Token Storage (Client Side)
 
 ```
-âœ… DO:   Store refresh tokens in httpOnly, Secure, SameSite cookies
-âœ… DO:   Store access tokens in memory (not localStorage)
-âŒ DON'T: Store refresh tokens in localStorage or sessionStorage
-âŒ DON'T: Expose refresh tokens in URL parameters or logs
-âŒ DON'T: Send refresh tokens in GET requests
+✅ DO:   Store refresh tokens in httpOnly, Secure, SameSite cookies
+✅ DO:   Store access tokens in memory (not localStorage)
+❌ DON'T: Store refresh tokens in localStorage or sessionStorage
+❌ DON'T: Expose refresh tokens in URL parameters or logs
+❌ DON'T: Send refresh tokens in GET requests
 ```
 
 ### 4. API Key Management
 
 ```
-âœ… DO:   Generate keys with crypto.randomBytes(32).toString('hex')
-âœ… DO:   Rotate keys every 90 days
-âœ… DO:   Use the least-privileged role for each integration
-âœ… DO:   Revoke keys immediately when a team member leaves
-âœ… DO:   Set expiresAt for temporary or trial integrations
-âœ… DO:   Store keys in a secrets manager at creation time
-âŒ DON'T: Share API keys across teams or services
-âŒ DON'T: Commit API keys to source control
-âŒ DON'T: Log plaintext API keys anywhere
+✅ DO:   Generate keys with crypto.randomBytes(32).toString('hex')
+✅ DO:   Rotate keys every 90 days
+✅ DO:   Use the least-privileged role for each integration
+✅ DO:   Revoke keys immediately when a team member leaves
+✅ DO:   Set expiresAt for temporary or trial integrations
+✅ DO:   Store keys in a secrets manager at creation time
+❌ DON'T: Share API keys across teams or services
+❌ DON'T: Commit API keys to source control
+❌ DON'T: Log plaintext API keys anywhere
 ```
 
 ### 5. Scoped Admin Tokens
 
 ```
-âœ… DO:   Prefer scoped tokens over long-lived API keys for automated systems
-âœ… DO:   Set short expiration times for CI/CD tokens (e.g., 1 hour)
-âœ… DO:   Rotate secrets after incidents or suspicious activity
-âœ… DO:   Monitor rotation events via the audit trail
-âœ… DO:   Use descriptive labels for tracking token ownership
-âŒ DON'T: Grant admin:* unless absolutely necessary
-âŒ DON'T: Share a single scoped token across multiple pipelines
+✅ DO:   Prefer scoped tokens over long-lived API keys for automated systems
+✅ DO:   Set short expiration times for CI/CD tokens (e.g., 1 hour)
+✅ DO:   Rotate secrets after incidents or suspicious activity
+✅ DO:   Monitor rotation events via the audit trail
+✅ DO:   Use descriptive labels for tracking token ownership
+❌ DON'T: Grant admin:* unless absolutely necessary
+❌ DON'T: Share a single scoped token across multiple pipelines
 ```
 
 ### 6. Multi-Instance Considerations
 
 ```
-âœ… DO:   Set REDIS_URL in production for shared token state
-âœ… DO:   Use TLS for all Redis connections
-âœ… DO:   Configure Redis ACLs to restrict key access
-âœ… DO:   Set appropriate TTLs on Redis keys to avoid stale state
-âŒ DON'T: Rely on in-memory stores in multi-instance deployments
-âŒ DON'T: Use the same Redis instance for cache and token state without key prefix isolation
+✅ DO:   Set REDIS_URL in production for shared token state
+✅ DO:   Use TLS for all Redis connections
+✅ DO:   Configure Redis ACLs to restrict key access
+✅ DO:   Set appropriate TTLs on Redis keys to avoid stale state
+❌ DON'T: Rely on in-memory stores in multi-instance deployments
+❌ DON'T: Use the same Redis instance for cache and token state without key prefix isolation
 ```
 
 ### 7. General
@@ -826,7 +824,7 @@ The server performs **startup validation** in production â€” it will refuse
 - **Payload Limits**: Auth endpoints enforce a 4 KB body limit to prevent abuse
 - **Timing Attacks**: All secret comparisons use `crypto.timingSafeEqual`
 - **Wallet Address Normalization**: All addresses are normalized before storage and comparison to prevent malleability attacks
-- **Startup Validation**: Critical security configuration is validated at startup â€” the server fails fast rather than running with insecure defaults
+- **Startup Validation**: Critical security configuration is validated at startup — the server fails fast rather than running with insecure defaults
 
 ---
 
@@ -834,14 +832,14 @@ The server performs **startup validation** in production â€” it will refuse
 
 | Token Type | Recommended Rotation | Mechanism | Automation |
 |------------|---------------------|-----------|------------|
-| **JWT Access Token** | N/A (auto-expires 15 min) | â€” | Client auto-refresh |
+| **JWT Access Token** | N/A (auto-expires 15 min) | — | Client auto-refresh |
 | **JWT Refresh Token** | N/A (auto-rotated each use) | `POST /auth/refresh` | Client SDK |
 | **Admin API Key** | Every 90 days | `POST /admin/api-keys/rotate` | Cron or CI |
 | **Scoped Admin Token** | Every 30 days (or after incident) | `POST /admin/scoped-tokens/:id/rotate` | CI/CD pipeline |
 | **JWT_SECRET** | Every 6 months | Re-deploy with new env var | Manual (invalidates all sessions) |
 | **WALLET_NONCE_TTL_SECONDS** | N/A (config-driven) | Env var change | Config management |
 
-### Automated Rotation Script â€” Scoped Token
+### Automated Rotation Script — Scoped Token
 
 ```bash
 #!/bin/bash
@@ -877,11 +875,11 @@ fi
 # Example: GitLab CI
 # glab variable update SCOPED_ADMIN_TOKEN "$NEW_SECRET"
 
-echo "âœ“ Rotated token ${KEY_ID} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "â„¹ Store the new secret in your secrets manager immediately."
+echo "✓ Rotated token ${KEY_ID} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "ℹ Store the new secret in your secrets manager immediately."
 ```
 
-### Automated Rotation Script â€” API Key
+### Automated Rotation Script — API Key
 
 ```bash
 #!/bin/bash
@@ -907,7 +905,7 @@ RESPONSE=$(curl -s -X POST \
   -d "{\"id\": \"${KEY_ID}\", \"newKey\": \"${NEW_KEY}\"}")
 
 if echo "$RESPONSE" | jq -e '.hashedKey' > /dev/null 2>&1; then
-  echo "âœ“ Rotated API key ${KEY_ID} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "✓ Rotated API key ${KEY_ID} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "New key (save this securely): ${NEW_KEY}"
 else
   echo "ERROR: Rotation failed:"
@@ -964,11 +962,11 @@ action: "registered"            -> INFO: key lifecycle
 
 ### Recommended Alerts
 
-1. **Refresh token replay detected** â€” Pager-worthy alert. Indicates token theft or client bug.
-2. **Nonce replay rate > threshold** â€” Possible automated attack. Investigate source IP.
-3. **Auth endpoint rate limit saturation** â€” Brute-force attempt or misconfigured client.
-4. **Rapid API key rotations (>3 in 5 min)** â€” Possible compromise response or automated script loop.
-5. **Impersonation session creation** â€” Audit alert for compliance. Track who and why.
+1. **Refresh token replay detected** — Pager-worthy alert. Indicates token theft or client bug.
+2. **Nonce replay rate > threshold** — Possible automated attack. Investigate source IP.
+3. **Auth endpoint rate limit saturation** — Brute-force attempt or misconfigured client.
+4. **Rapid API key rotations (>3 in 5 min)** — Possible compromise response or automated script loop.
+5. **Impersonation session creation** — Audit alert for compliance. Track who and why.
 
 ---
 
@@ -976,9 +974,9 @@ action: "registered"            -> INFO: key lifecycle
 
 ### Compromised JWT Secret
 
-1. **Rotate `JWT_SECRET`** immediately â€” this invalidates all existing access and refresh tokens
+1. **Rotate `JWT_SECRET`** immediately — this invalidates all existing access and refresh tokens
 2. **Deploy** the new secret across all instances
-3. **All users must re-authenticate** â€” expect a spike in login traffic
+3. **All users must re-authenticate** — expect a spike in login traffic
 4. **Investigate** how the secret was compromised (access logs, secret store audit)
 5. **Rotate** any API keys or scoped tokens that may have been exposed alongside the secret
 
@@ -1059,7 +1057,7 @@ async function refreshAccessToken(): Promise<string> {
     return accessToken;
   } catch (error: any) {
     if (error.response?.data?.sessionRevoked) {
-      // Entire session revoked â€” possible theft detected
+      // Entire session revoked — possible theft detected
       clearAllTokens();
       redirectToLogin();
       throw new Error('Session revoked for security');
@@ -1137,7 +1135,7 @@ curl -s -X POST http://localhost:3000/admin/api-keys/register \
   -d "{\"key\": \"${NEW_KEY}\", \"role\": \"${ROLE}\", \"tenantId\": \"${TENANT_ID}\", \"expiresInDays\": ${EXPIRES_IN}}" | jq .
 
 echo ""
-echo "New key (save this securely â€” it will NOT be shown again):"
+echo "New key (save this securely — it will NOT be shown again):"
 echo "${NEW_KEY}"
 ```
 
@@ -1179,7 +1177,7 @@ try {
   // Proceed with the operation
 } catch (err) {
   if (err instanceof NonceReplayError) {
-    // This nonce was already used â€” client error or replay attack
+    // This nonce was already used — client error or replay attack
   }
 }
 
