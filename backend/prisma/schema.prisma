@@ -437,29 +437,57 @@ model ScopedAdminTokenRotationEvent {
 
 // Tenant model – represents a customer/organization
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
+  id             String    @id @default(uuid())
+  name           String    @unique
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+  deletedBy      String?
+  deletionReason String?
   // Relations
-  apiKeys   ApiKey[]
+  apiKeys        ApiKey[]
+
   @@index([name])
+  @@index([deletedAt])
 }
 
 // API key model – scoped per tenant with role and scopes
 model ApiKey {
-  id         String   @id @default(uuid())
-  tenantId   String
-  hashedKey  String   @unique
-  role       String
-  scopes     String   @default("[]")
-  createdAt  DateTime @default(now())
-  expiresAt  DateTime?
-  isActive   Boolean  @default(true)
+  id             String    @id @default(uuid())
+  tenantId       String
+  hashedKey      String    @unique
+  role           String
+  scopes         String    @default("[]")
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime?
+  isActive       Boolean   @default(true)
+  deletedAt      DateTime?
+  deletedBy      String?
+  deletionReason String?
 
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
+  @@index([tenantId, deletedAt])
   @@index([role])
+  @@index([deletedAt])
+}
+
+/// Immutable lifecycle history for critical control-plane entities.
+/// Application code may append records but must never update or delete them.
+model CriticalEntityAuditEvent {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String
+  action     String
+  actor      String
+  reason     String
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([action])
+  @@index([actor])
+  @@index([createdAt])
 }
 
 // Durable write-ahead audit log for admin configuration changes (Issue #707).

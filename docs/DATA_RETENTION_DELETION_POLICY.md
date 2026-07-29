@@ -1,6 +1,6 @@
 # Data Retention & Deletion Policy
 
-**Last Updated:** June 26, 2026
+**Last Updated:** July 29, 2026
 **Maintained By:** DevOps Team
 **Next Review:** September 26, 2026
 
@@ -26,6 +26,8 @@ This document defines the data retention periods, deletion workflows, and compli
 | **Admin Action Receipts** | `AdminActionReceipt` | 7 years | Non-repudiation & compliance | Hard delete after 7 years |
 | **Admin Impersonation** | `AdminImpersonationSession`, `AdminImpersonationLedgerEntry` | 3 years | Security monitoring; insider threat investigations | Hard delete after 3 years |
 | **API Key Audit** | `ApiKeyAuditEvent` | 3 years | Key usage tracking & abuse investigation | Hard delete after 3 years |
+| **Tenants and API Keys** | `Tenant`, `ApiKey` | Indefinite (active); deletion subject to contract and compliance policy | Access-control records and customer isolation | Audited soft-delete; hard delete only through approved retention cleanup |
+| **Critical Entity Lifecycle Audit** | `CriticalEntityAuditEvent` | 7 years | Reconstruction of tenant and credential deletion/restoration | Append-only; archive before retention cleanup |
 | **Export Jobs** | `ExportJob`, `BulkExportJob` | 90 days | Operational; cleanup to reduce DB size | Hard delete after 90 days |
 | **Event Processing** | `EventCursor`, `ProcessedEvent` | 30 days | Idempotency & replay; short-lived operational data | Hard delete after 30 days |
 | **Webhook Endpoints** | `WebhookEndpoint` | Indefinite (active); 90 days post-deletion | Webhook configuration; soft-delete with cleanup window | Soft-delete (`deletedAt`); hard delete after 90 days |
@@ -220,6 +222,12 @@ User Wallet Address
 ---
 
 ## Deletion Implementation Guidelines
+
+Critical control-plane entities must use the audited lifecycle service described
+in [Critical Entity Soft Deletion and Audit Trail](../backend/docs/CRITICAL_ENTITY_LIFECYCLE.md).
+Generic Prisma hard deletes are blocked outside tests. Tenant deletion
+atomically disables its API keys, and tenant restoration never restores those
+credentials automatically.
 
 ### Script Location
 

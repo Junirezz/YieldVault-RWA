@@ -55,10 +55,22 @@ function parseScopes(raw: unknown): string[] {
   return [];
 }
 
+export interface PersistedApiKeyStatus {
+  isActive: boolean;
+  deletedAt?: Date | null;
+  tenant?: { deletedAt?: Date | null };
+}
+
+export function isPersistedApiKeyUsable(
+  apiKey: PersistedApiKeyStatus | null
+): apiKey is PersistedApiKeyStatus {
+  return Boolean(apiKey && apiKey.isActive && !apiKey.deletedAt && !apiKey.tenant?.deletedAt);
+}
+
 export async function validateApiKey(
   req: Request,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> {
   const authHeader = req.get?.('Authorization') || '';
   const match = authHeader.match(/^ApiKey\s+(.+)$/i);
@@ -71,24 +83,42 @@ export async function validateApiKey(
 
   // Try Prisma first; fall back to in-memory store when the table doesn't exist
   // (e.g. in tests with an un-migrated SQLite database).
-  let apiKey: { hashedKey: string; role: string; tenantId: string; scopes: unknown; isActive: boolean } | null = null;
+  let apiKey: {
+    hashedKey: string;
+    role: string;
+    tenantId: string;
+    scopes: unknown;
+    isActive: boolean;
+    deletedAt?: Date | null;
+    tenant?: { deletedAt?: Date | null };
+  } | null = null;
   try {
-    apiKey = await prisma.apiKey.findUnique({ where: { hashedKey: hashed } });
+    apiKey = await prisma.apiKey.findUnique({
+      where: { hashedKey: hashed },
+      include: { tenant: { select: { deletedAt: true } } },
+    });
   } catch (err) {
     // Only fall back when the ApiKey table hasn't been created (tests / fresh DB).
     const isMissingTable =
       err instanceof Error &&
       (err.message.includes('does not exist in the current database') ||
-       (err as { code?: string }).code === 'P2021');
+        (err as { code?: string }).code === 'P2021');
     if (!isMissingTable) throw err;
   }
 
-  if (apiKey && apiKey.isActive) {
-    req.authApiKeyHash = apiKey.hashedKey;
-    req.authApiKeyRole = apiKey.role as ApiKeyRole;
-    req.authApiKeyTenantId = apiKey.tenantId;
-    req.authApiKeyScopes = parseScopes(apiKey.scopes);
-    next();
+  if (apiKey) {
+    if (isPersistedApiKeyUsable(apiKey)) {
+      req.authApiKeyHash = apiKey.hashedKey;
+      req.authApiKeyRole = apiKey.role as ApiKeyRole;
+      req.authApiKeyTenantId = apiKey.tenantId;
+      req.authApiKeyScopes = parseScopes(apiKey.scopes);
+      next();
+      return;
+    }
+
+    // A persisted-but-disabled credential must fail closed. Never let it fall
+    // through to the legacy in-memory store where an old duplicate could live.
+    res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
     return;
   }
 
@@ -112,7 +142,10 @@ export function hashApiKey(key: string): string {
 // Legacy helpers retained for compatibility – they operate on in‑memory map only.
 const IN_MEMORY_KEYS = new Map<string, ApiKeyMetadata>();
 
-export function registerApiKey(key: string, options?: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] }): string {
+export function registerApiKey(
+  key: string,
+  options?: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] }
+): string {
   const hash = hashApiKey(key);
   IN_MEMORY_KEYS.set(hash, {
     role: options?.role || 'admin',
@@ -132,7 +165,11 @@ export function revokeApiKey(hash: string): boolean {
   return IN_MEMORY_KEYS.delete(hash);
 }
 
-export function rotateApiKey(oldHash: string, newKey: string, options: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] } = {}): string | null {
+export function rotateApiKey(
+  oldHash: string,
+  newKey: string,
+  options: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] } = {}
+): string | null {
   const meta = IN_MEMORY_KEYS.get(oldHash);
   if (!meta) return null;
   IN_MEMORY_KEYS.delete(oldHash);
