@@ -23,7 +23,7 @@ export class ReferralService {
    */
   async recordDeposit(walletAddress: string, referralCode?: string): Promise<void> {
     const prisma = getPrisma();
-    const normalizedReferred = walletAliasMappingService.resolveCanonicalWallet(
+    const normalizedReferred = await walletAliasMappingService.resolveCanonicalWallet(
       walletAddress,
       'stellar',
     );

@@ -19,7 +19,18 @@ flowchart LR
   D --> E[Withdraw Shares for USDC]
 ```
 
-## 3. How to Deposit
+## 3. Wallet Connection States
+
+Connecting Freighter follows a clear status flow:
+
+1. **Disconnected** — choose **Connect Freighter**.
+2. **Connecting** — Freighter is prompting; wait for approval.
+3. **Connected** — your truncated address appears; you can disconnect any time.
+4. **Error** — a specific message explains what failed (missing extension, cancelled prompt, missing address, or Freighter dropped the session). Use **Try again** when shown.
+
+For implementers, see [Wallet connection state machine](./features/WALLET_CONNECTION_STATE.md).
+
+## 4. How to Deposit
 
 1. Connect your wallet.
 2. Enter the USDC amount in the deposit input.

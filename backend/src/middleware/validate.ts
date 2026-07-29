@@ -122,9 +122,7 @@ export const WebhookRegisterSchema = z
         { message: 'url must be a valid http or https URL' },
       ),
     eventTypes: z
-      .array(z.enum(WEBHOOK_EVENT_TYPES), {
-        invalid_type_error: 'eventTypes must be an array of valid event type strings',
-      })
+      .array(z.enum(WEBHOOK_EVENT_TYPES))
       .min(1, 'eventTypes must contain at least one event type')
       .optional(),
     enabled: z.boolean().optional(),

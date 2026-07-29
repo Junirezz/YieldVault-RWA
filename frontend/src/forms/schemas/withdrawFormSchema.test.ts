@@ -63,6 +63,50 @@ describe("Withdraw Form Schema", () => {
     });
   });
 
+  describe("amount format validation (API AmountSchema parity)", () => {
+    it("rejects scientific notation", () => {
+      const schema = createWithdrawFormSchema(1000);
+      const errors = validate(schema, { amount: "1e5" });
+      expect(errors.amount).toBe(
+        "Enter an amount using digits only, with up to 7 decimal places.",
+      );
+    });
+
+    it("rejects more than 7 decimal places", () => {
+      const schema = createWithdrawFormSchema(1000);
+      const errors = validate(schema, { amount: "1.12345678" });
+      expect(errors.amount).toBe(
+        "Enter an amount using digits only, with up to 7 decimal places.",
+      );
+    });
+
+    it("accepts exactly 7 decimal places", () => {
+      const schema = createWithdrawFormSchema(1000);
+      const errors = validate(schema, { amount: "1.1234567" });
+      expect(errors.amount).toBeUndefined();
+    });
+  });
+
+  describe("XLM fee validation", () => {
+    it("shows error when insufficient XLM for fees", () => {
+      const schema = createWithdrawFormSchema(100, 0.001, 0.01);
+      const errors = validate(schema, { amount: "10" });
+      expect(errors.amount).toContain("Insufficient XLM balance");
+    });
+
+    it("accepts valid amount when sufficient XLM", () => {
+      const schema = createWithdrawFormSchema(100, 1, 0.01);
+      const errors = validate(schema, { amount: "10" });
+      expect(errors.amount).toBeUndefined();
+    });
+
+    it("skips fee check when xlmBalance/feeXlm are defaulted", () => {
+      const schema = createWithdrawFormSchema(100);
+      const errors = validate(schema, { amount: "10" });
+      expect(errors.amount).toBeUndefined();
+    });
+  });
+
   describe("valid withdrawals", () => {
     it("accepts valid withdrawal amount", () => {
       const schema = createWithdrawFormSchema(1000);

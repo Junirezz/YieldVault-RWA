@@ -54,6 +54,12 @@ export interface BatchClientOptions {
   maxConcurrency?: number;
 }
 
+interface SimulationSourceAccount {
+  accountId(): string;
+  sequenceNumber(): string;
+  incrementSequenceNumber(): void;
+}
+
 // ── Semaphore ─────────────────────────────────────────────────────────────────
 
 /**
@@ -124,11 +130,11 @@ export const defaultRpcReader: RpcReader = async (
 
   // Build a dummy source account for simulation (sequence=0, no real funds needed)
   const dummyKeypair = Keypair.random();
-  const sourceAccount = {
+  const sourceAccount: SimulationSourceAccount = {
     accountId: () => dummyKeypair.publicKey(),
     sequenceNumber: () => '0',
     incrementSequenceNumber: () => {},
-  } as Parameters<typeof TransactionBuilder>[0];
+  };
 
   const scArgs = (args ?? []).map((a) =>
     nativeToScVal(a as Parameters<typeof nativeToScVal>[0]),
@@ -150,7 +156,7 @@ export const defaultRpcReader: RpcReader = async (
   }
 
   // Return the raw result for the caller to decode
-  return (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval ?? null;
+  return (sim as { result?: { retval?: unknown } }).result?.retval ?? null;
 };
 
 // ── SorobanBatchClient ────────────────────────────────────────────────────────

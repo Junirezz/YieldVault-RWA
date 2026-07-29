@@ -77,6 +77,7 @@ type RouteRule = {
 
 const ADMIN_ROUTE_RULES: RouteRule[] = [
   // Super-privileged
+  { methods: ['GET'], pattern: /^\/admin\/impersonate\/sessions$/, permission: Permission.IMPERSONATE },
   { methods: ['GET'], pattern: /^\/admin\/impersonate\/[^/]+$/, permission: Permission.IMPERSONATE },
   { methods: ['POST'], pattern: /^\/admin\/impersonate\/sessions$/, permission: Permission.IMPERSONATE },
   { methods: ['DELETE'], pattern: /^\/admin\/impersonate\/sessions\/[^/]+$/, permission: Permission.IMPERSONATE },
@@ -91,6 +92,7 @@ const ADMIN_ROUTE_RULES: RouteRule[] = [
   { methods: ['POST'], pattern: /^\/admin\/cache\/invalidate$/, permission: Permission.CONFIG_WRITE },
   { methods: ['DELETE'], pattern: /^\/admin\/cache$/, permission: Permission.CONFIG_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/withdrawal-limits\/override$/, permission: Permission.CONFIG_WRITE },
+  { methods: ['DELETE'], pattern: /^\/admin\/wallet-aliases\/[^/]+$/, permission: Permission.CONFIG_WRITE },
 
   // Allowlist
   { methods: ['POST'], pattern: /^\/admin\/allowlist\/add$/, permission: Permission.ALLOWLIST_WRITE },
@@ -101,7 +103,10 @@ const ADMIN_ROUTE_RULES: RouteRule[] = [
   { methods: ['POST'], pattern: /^\/admin\/events\/replay$/, permission: Permission.JOBS_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/emails\/replay\/[^/]+$/, permission: Permission.JOBS_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/jobs\/dead-letters\/.*$/, permission: Permission.JOBS_WRITE },
+  { methods: ['DELETE'], pattern: /^\/admin\/jobs\/dead-letters\/[^/]+$/, permission: Permission.JOBS_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/idempotency\/retention\/cleanup$/, permission: Permission.JOBS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/transactions\/backfill$/, permission: Permission.JOBS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/webhooks\/dead-letter\/[^/]+\/retry$/, permission: Permission.JOBS_WRITE },
 
   // API keys
   { methods: ['POST'], pattern: /^\/admin\/api-keys\/register$/, permission: Permission.API_KEYS_WRITE },
@@ -118,14 +123,19 @@ const ADMIN_ROUTE_RULES: RouteRule[] = [
 
   // Webhooks
   { methods: ['POST'], pattern: /^\/admin\/webhooks$/, permission: Permission.WEBHOOKS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/webhooks\/[^/]+\/verify$/, permission: Permission.WEBHOOKS_WRITE },
   { methods: ['PATCH'], pattern: /^\/admin\/webhooks\/[^/]+$/, permission: Permission.WEBHOOKS_WRITE },
   { methods: ['DELETE'], pattern: /^\/admin\/webhooks\/[^/]+$/, permission: Permission.WEBHOOKS_WRITE },
-  { methods: ['POST'], pattern: /^\/admin\/webhooks\/[^/]+\/restore$/, permission: Permission.WEBHOOKS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/webhooks\/[^/]+\/restore$/, permission: Permission.WEBHOOKS_WRITE },      // Webhook deduplication management
+      { methods: ['DELETE'], pattern: /^\/admin\/webhooks\/deduplication\/[^/]+$/, permission: Permission.WEBHOOKS_WRITE },
 
-  // Exports
+      // Exports
   { methods: ['POST'], pattern: /^\/admin\/exports\/bulk$/, permission: Permission.EXPORTS_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/exports\/bulk\/jobs\/[^/]+\/cancel$/, permission: Permission.EXPORTS_WRITE },
   { methods: ['POST'], pattern: /^\/admin\/exports\/jobs\/[^/]+\/verify$/, permission: Permission.EXPORTS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/governance\/snapshots\/export$/, permission: Permission.EXPORTS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/reports\/exports$/, permission: Permission.EXPORTS_WRITE },
+  { methods: ['POST'], pattern: /^\/admin\/reports\/exports\/manifests\/[^/]+\/verify$/, permission: Permission.EXPORTS_WRITE },
 
   // Idempotency (single-key delete)
   { methods: ['DELETE'], pattern: /^\/admin\/idempotency\/keys\/[^/]+$/, permission: Permission.IDEMPOTENCY_WRITE },

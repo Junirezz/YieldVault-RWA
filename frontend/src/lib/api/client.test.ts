@@ -142,7 +142,7 @@ describe("ApiClient", () => {
       getCorrelationId: () => correlationId,
     });
 
-    const error: unknown = await client.get("/missing").catch((e) => e);
+    const error = (await client.get("/missing").catch((e) => e)) as ApiError;
 
     expect(error).toBeInstanceOf(ApiError);
     if (error instanceof ApiError) {

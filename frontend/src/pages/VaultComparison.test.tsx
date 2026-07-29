@@ -50,7 +50,7 @@ function LocationProbe() {
 }
 
 function renderComparison(initialEntries: string | string[] = ["/compare"]) {
-  const entries = typeof initialEntries === "string" ? [initialEntries] : initialEntries;
+  const entries = Array.isArray(initialEntries) ? initialEntries : [initialEntries];
   return render(
     <MemoryRouter initialEntries={entries}>
       <Routes>
@@ -121,10 +121,6 @@ describe("VaultComparison", () => {
     expect(announcement()).toMatch(/Private Credit Income removed from the comparison/i);
   });
 
-  it("shows the empty state when fewer than two strategies are selected", () => {
-    renderComparison();
-  });
-
   it("blocks selection past the cap and explains why instead of ignoring the click", () => {
     renderComparison("/compare?strategies=benji,treasury-ladder,credit-income");
 
@@ -165,14 +161,14 @@ describe("VaultComparison", () => {
     renderComparison();
 
     fireEvent.click(screen.getByRole("button", { name: /Private Credit Income/i }));
-    expect(screen.getByText(/3 selected/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/3 of 3 selected/i).length).toBeGreaterThan(0);
 
     const fourthCard = screen.getByRole("button", { name: /Liquidity Buffer/i });
     expect(fourthCard).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(fourthCard);
 
-    expect(screen.getByText(/3 selected/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/3 of 3 selected/i).length).toBeGreaterThan(0);
     expect(fourthCard).toHaveAttribute("aria-pressed", "false");
   });
 
@@ -187,7 +183,7 @@ describe("VaultComparison", () => {
   it("restores the selection from the strategies URL param", () => {
     renderComparison(["/compare?strategies=benji,credit-income"]);
 
-    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/2 of 3 selected/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Franklin BENJI Connector/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Private Credit Income/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Tokenized Treasury Ladder/i })).toHaveAttribute("aria-pressed", "false");

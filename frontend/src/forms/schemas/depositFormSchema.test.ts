@@ -105,6 +105,38 @@ describe("Deposit Form Schema", () => {
     });
   });
 
+  describe("amount format validation (API AmountSchema parity)", () => {
+    it("rejects scientific notation", () => {
+      const schema = createDepositFormSchema(1000, false, 100, 0.01);
+      const errors = validate(schema, { amount: "1e5" });
+      expect(errors.amount).toBe(
+        "Enter an amount using digits only, with up to 7 decimal places.",
+      );
+    });
+
+    it("rejects more than 7 decimal places", () => {
+      const schema = createDepositFormSchema(1000, false, 100, 0.01);
+      const errors = validate(schema, { amount: "1.12345678" });
+      expect(errors.amount).toBe(
+        "Enter an amount using digits only, with up to 7 decimal places.",
+      );
+    });
+
+    it("rejects leading plus sign", () => {
+      const schema = createDepositFormSchema(1000, false, 100, 0.01);
+      const errors = validate(schema, { amount: "+10" });
+      expect(errors.amount).toBe(
+        "Enter an amount using digits only, with up to 7 decimal places.",
+      );
+    });
+
+    it("accepts exactly 7 decimal places", () => {
+      const schema = createDepositFormSchema(1000, false, 100, 0.01);
+      const errors = validate(schema, { amount: "1.1234567" });
+      expect(errors.amount).toBeUndefined();
+    });
+  });
+
   describe("valid deposits", () => {
     it("accepts valid deposit amount", () => {
       const schema = createDepositFormSchema(1000, false, 100, 0.01);

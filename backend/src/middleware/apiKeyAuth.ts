@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../prisma';
-import { ApiKeyRole } from '../middleware/apiKeyAuth'; // for type reuse
 
 export type ApiKeyRole = 'viewer' | 'operator' | 'admin' | 'super-admin';
 
@@ -25,6 +24,13 @@ declare global {
   }
 }
 
+const ROLE_PRECEDENCE: Record<ApiKeyRole, number> = {
+  viewer: 0,
+  operator: 1,
+  admin: 2,
+  'super-admin': 3,
+};
+
 export function normalizeApiKeyRole(raw: unknown): ApiKeyRole | null {
   if (typeof raw !== 'string') {
     return null;
@@ -36,10 +42,35 @@ export function normalizeApiKeyRole(raw: unknown): ApiKeyRole | null {
   return null;
 }
 
+function parseScopes(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw as string[];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export interface PersistedApiKeyStatus {
+  isActive: boolean;
+  deletedAt?: Date | null;
+  tenant?: { deletedAt?: Date | null };
+}
+
+export function isPersistedApiKeyUsable(
+  apiKey: PersistedApiKeyStatus | null
+): apiKey is PersistedApiKeyStatus {
+  return Boolean(apiKey && apiKey.isActive && !apiKey.deletedAt && !apiKey.tenant?.deletedAt);
+}
+
 export async function validateApiKey(
   req: Request,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> {
   const authHeader = req.get?.('Authorization') || '';
   const match = authHeader.match(/^ApiKey\s+(.+)$/i);
@@ -49,16 +80,58 @@ export async function validateApiKey(
   }
   const providedKey = match[1];
   const hashed = crypto.createHash('sha256').update(providedKey).digest('hex');
-  const apiKey = await prisma.apiKey.findUnique({ where: { hashedKey: hashed } });
-  if (!apiKey || !apiKey.isActive) {
+
+  // Try Prisma first; fall back to in-memory store when the table doesn't exist
+  // (e.g. in tests with an un-migrated SQLite database).
+  let apiKey: {
+    hashedKey: string;
+    role: string;
+    tenantId: string;
+    scopes: unknown;
+    isActive: boolean;
+    deletedAt?: Date | null;
+    tenant?: { deletedAt?: Date | null };
+  } | null = null;
+  try {
+    apiKey = await prisma.apiKey.findUnique({
+      where: { hashedKey: hashed },
+      include: { tenant: { select: { deletedAt: true } } },
+    });
+  } catch (err) {
+    // Only fall back when the ApiKey table hasn't been created (tests / fresh DB).
+    const isMissingTable =
+      err instanceof Error &&
+      (err.message.includes('does not exist in the current database') ||
+        (err as { code?: string }).code === 'P2021');
+    if (!isMissingTable) throw err;
+  }
+
+  if (apiKey) {
+    if (isPersistedApiKeyUsable(apiKey)) {
+      req.authApiKeyHash = apiKey.hashedKey;
+      req.authApiKeyRole = apiKey.role as ApiKeyRole;
+      req.authApiKeyTenantId = apiKey.tenantId;
+      req.authApiKeyScopes = parseScopes(apiKey.scopes);
+      next();
+      return;
+    }
+
+    // A persisted-but-disabled credential must fail closed. Never let it fall
+    // through to the legacy in-memory store where an old duplicate could live.
     res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
     return;
   }
-  // Attach to request for downstream middleware
-  req.authApiKeyHash = apiKey.hashedKey;
-  req.authApiKeyRole = apiKey.role as ApiKeyRole;
-  req.authApiKeyTenantId = apiKey.tenantId;
-  req.authApiKeyScopes = apiKey.scopes;
+
+  // Fallback: check the in-memory store (used by tests and legacy callers)
+  const meta = IN_MEMORY_KEYS.get(hashed);
+  if (!meta || meta.revokedAt) {
+    res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+    return;
+  }
+  req.authApiKeyHash = hashed;
+  req.authApiKeyRole = meta.role;
+  req.authApiKeyTenantId = meta.tenantId;
+  req.authApiKeyScopes = meta.scopes;
   next();
 }
 
@@ -69,7 +142,10 @@ export function hashApiKey(key: string): string {
 // Legacy helpers retained for compatibility – they operate on in‑memory map only.
 const IN_MEMORY_KEYS = new Map<string, ApiKeyMetadata>();
 
-export function registerApiKey(key: string, options?: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] }): string {
+export function registerApiKey(
+  key: string,
+  options?: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] }
+): string {
   const hash = hashApiKey(key);
   IN_MEMORY_KEYS.set(hash, {
     role: options?.role || 'admin',
@@ -89,7 +165,11 @@ export function revokeApiKey(hash: string): boolean {
   return IN_MEMORY_KEYS.delete(hash);
 }
 
-export function rotateApiKey(oldHash: string, newKey: string, options: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] } = {}): string | null {
+export function rotateApiKey(
+  oldHash: string,
+  newKey: string,
+  options: { role?: ApiKeyRole; tenantId?: string; scopes?: string[] } = {}
+): string | null {
   const meta = IN_MEMORY_KEYS.get(oldHash);
   if (!meta) return null;
   IN_MEMORY_KEYS.delete(oldHash);
@@ -131,180 +211,6 @@ export function authenticateApiKeyValue(value: string) {
   const meta = IN_MEMORY_KEYS.get(hash);
   if (!meta || meta.revokedAt) return null;
   return { hash, role: meta.role };
-}
-
-export function hasRequiredApiKeyRole(req: Request, requiredRole: ApiKeyRole): boolean {
-  const currentRole = req.authApiKeyRole || 'admin';
-  const order: Record<ApiKeyRole, number> = { viewer: 0, operator: 1, admin: 2, 'super-admin': 3 };
-  return order[currentRole] >= order[requiredRole];
-}
-import crypto from 'crypto';
-
-export type ApiKeyRole = 'viewer' | 'operator' | 'admin' | 'super-admin';
-
-interface ApiKeyMetadata {
-  role: ApiKeyRole;
-  createdAt: Date;
-  rotatedAt?: Date;
-  revokedAt?: Date;
-}
-
-const API_KEYS = new Map<string, ApiKeyMetadata>(); // hash -> key metadata
-const ROLE_ORDER: Record<ApiKeyRole, number> = {
-  viewer: 1,
-  operator: 2,
-  admin: 3,
-  'super-admin': 4,
-};
-
-declare global {
-  namespace Express {
-    interface Request {
-      authApiKeyHash?: string;
-      authApiKeyRole?: ApiKeyRole;
-    }
-  }
-}
-
-const ROLE_PRECEDENCE: Record<ApiKeyRole, number> = {
-  viewer: 0,
-  operator: 1,
-  admin: 2,
-  'super-admin': 3,
-};
-
-export function normalizeApiKeyRole(raw: unknown): ApiKeyRole | null {
-  if (typeof raw !== 'string') {
-    return null;
-  }
-
-  const value = raw.trim().toLowerCase();
-  if (value === 'viewer' || value === 'operator' || value === 'admin' || value === 'super-admin') {
-    return value;
-  }
-
-  return null;
-}
-
-export function validateApiKey(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): void {
-  const authHeader = req.get?.('Authorization') || '';
-  const match = authHeader.match(/^ApiKey\s+(.+)$/i);
-
-  if (!match) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Missing or invalid API key',
-    });
-    return;
-  }
-
-  const providedKey = match[1];
-  const authenticated = authenticateApiKeyValue(providedKey);
-
-  if (!authenticated) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid API key',
-    });
-    return;
-  }
-
-  req.authApiKeyHash = authenticated.hash;
-  req.authApiKeyRole = authenticated.role;
-
-  next();
-}
-
-export function hashApiKey(key: string): string {
-  return crypto.createHash('sha256').update(key).digest('hex');
-}
-
-export function registerApiKey(key: string, options?: { role?: ApiKeyRole }): string {
-  const hash = hashApiKey(key);
-  API_KEYS.set(hash, {
-    createdAt: new Date(),
-    role: options?.role || 'admin',
-  });
-  return hash;
-}
-
-export function revokeApiKey(hash: string): boolean {
-  const metadata = API_KEYS.get(hash);
-  if (metadata) {
-    metadata.revokedAt = new Date();
-    API_KEYS.set(hash, metadata);
-  }
-  return API_KEYS.delete(hash);
-}
-
-export function rotateApiKey(oldHash: string, newKey: string, options: { role?: ApiKeyRole } = {}): string | null {
-  const metadata = API_KEYS.get(oldHash);
-  if (!metadata) {
-    return null;
-  }
-
-  API_KEYS.delete(oldHash);
-
-  const newHash = hashApiKey(newKey);
-  const resolvedRole = normalizeApiKeyRole(options.role ?? metadata.role) ?? metadata.role;
-  API_KEYS.set(newHash, {
-    role: resolvedRole,
-    createdAt: metadata.createdAt,
-    rotatedAt: new Date(),
-  });
-
-  return newHash;
-}
-
-export function restoreApiKey(hash: string): boolean {
-  const metadata = API_KEYS.get(hash);
-  if (!metadata) {
-    return false;
-  }
-
-  metadata.revokedAt = undefined;
-  API_KEYS.set(hash, metadata);
-  return true;
-}
-
-export function getApiKeyMetadata(hash: string):
-  | {
-      hash: string;
-      role: ApiKeyRole;
-      createdAt: string;
-      rotatedAt?: string;
-      revokedAt?: string;
-    }
-  | null {
-  const metadata = API_KEYS.get(hash);
-  if (!metadata) {
-    return null;
-  }
-
-  return {
-    hash,
-    role: metadata.role,
-    createdAt: metadata.createdAt.toISOString(),
-    ...(metadata.rotatedAt ? { rotatedAt: metadata.rotatedAt.toISOString() } : {}),
-    ...(metadata.revokedAt ? { revokedAt: metadata.revokedAt.toISOString() } : {}),
-  };
-}
-
-export function authenticateApiKeyValue(value: string): { hash: string; role: ApiKeyRole } | null {
-  const hash = hashApiKey(value);
-  const metadata = API_KEYS.get(hash);
-  if (!metadata || metadata.revokedAt) {
-    return null;
-  }
-
-  return {
-    hash,
-    role: metadata.role,
-  };
 }
 
 export function hasRequiredApiKeyRole(req: Request, requiredRole: ApiKeyRole): boolean {

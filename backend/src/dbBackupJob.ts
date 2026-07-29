@@ -46,6 +46,14 @@ export interface BackupResult {
   deletedCount: number;
 }
 
+interface S3ListObjectsResponse {
+  Contents?: Array<{
+    Key?: string;
+    LastModified?: Date;
+  }>;
+  NextContinuationToken?: string;
+}
+
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
 function getRetentionDays(): number {
@@ -156,13 +164,13 @@ export async function pruneOldBackups(): Promise<number> {
   let continuationToken: string | undefined;
 
   do {
-    const listResp = await client.send(
+    const listResp = (await client.send(
       new ListObjectsV2Command({
         Bucket: bucket,
         Prefix: getS3Prefix(),
         ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
       }),
-    );
+    )) as S3ListObjectsResponse;
 
     for (const obj of listResp.Contents ?? []) {
       if (obj.LastModified && obj.Key && obj.LastModified < cutoff) {

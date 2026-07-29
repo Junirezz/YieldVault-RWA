@@ -7,6 +7,7 @@ const ASSET = __ENV.ASSET || 'USDC';
 const AMOUNT = __ENV.AMOUNT || '100.0';
 const METRICS_PATH = __ENV.METRICS_PATH || '/metrics';
 
+
 function buildIdempotencyKey(prefix) {
   return `${prefix}-${__VU}-${__ITER}-${Date.now()}`;
 }

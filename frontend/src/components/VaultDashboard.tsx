@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowDownUp, ArrowUpRight, Clock3, Menu, X } from "lucide-react";
+import { ArrowDownUp, ArrowUpRight, Clock3, Menu, X, AlertTriangle } from "lucide-react";
 import {
   Activity,
   AlertCircle,
-  AlertTriangle,
   Check,
   Share2,
   ShieldCheck,
@@ -21,15 +20,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
 import { isApiError, isValidationError } from "../lib/api";
 import { useForm } from "../forms/useForm";
-import type { ValidationSchema } from "../forms/validate";
+import { validate, type ValidationSchema } from "../forms/validate";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import { useTokenAllowance } from "../hooks/useTokenAllowance";
+import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import { createDepositFormSchema, MIN_DEPOSIT_AMOUNT } from "../forms/schemas/depositFormSchema";
 import { createWithdrawFormSchema } from "../forms/schemas/withdrawFormSchema";
 import { mapServerError } from "../lib/errorMappers";
 import confetti from "canvas-confetti";
 import CopyButton from "./CopyButton";
-import Badge from "./Badge";
 import { Button } from "./ui/Button";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
@@ -62,8 +61,8 @@ import {
 import type { StaleFieldChange } from "../lib/staleSubmissionDetection";
 import { t } from "../i18n";
 import { useTransactionHistory } from "../hooks/useTransactionData";
-import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import TransactionTimeline, { type TxTimelineStatus } from "./TransactionTimeline";
+import Badge from "./Badge";
 
 const FIRST_DEPOSIT_PREFIX = "yieldvault:first-deposit:";
 const MAX_TRANSACTION_RETRY_ATTEMPTS = 3;
@@ -224,7 +223,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   });
   const { isStale: statsIsStale, ageText: statsAgeText } = useStaleIndicator(lastUpdate);
 
-  const availableBalance = walletAddress ? usdcBalance : 0;
+  const { data: portfolioHoldings } = usePortfolioHoldings(walletAddress);
+
+  // Deposit balance comes from the connected wallet's USDC balance; withdraw
+  // balance is the user's current vault position (sum of holdings value).
+  const depositBalance = walletAddress ? usdcBalance : 0;
+  const withdrawBalance = walletAddress
+    ? (portfolioHoldings ?? []).reduce((sum, holding) => sum + holding.valueUsd, 0)
+    : 0;
+  const availableBalance =
+    dashboardUrl.state.tab === "deposit" ? depositBalance : withdrawBalance;
 
   // Wizard state
   const [transactionResult, setTransactionResult] = useState<{
@@ -271,11 +279,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   // Create validation schema based on transaction type and current state
   const transactionSchema = React.useMemo<ValidationSchema<{ amount: string }>>(() => {
     if (dashboardUrl.state.tab === "deposit") {
-      return createDepositFormSchema(availableBalance, isCapReached, xlmBalance, feeXlm);
+      return createDepositFormSchema(depositBalance, isCapReached, xlmBalance, feeXlm);
     } else {
-      return createWithdrawFormSchema(availableBalance);
+      return createWithdrawFormSchema(withdrawBalance, xlmBalance, feeXlm);
     }
-  }, [dashboardUrl.state.tab, availableBalance, isCapReached, xlmBalance, feeXlm]);
+  }, [dashboardUrl.state.tab, depositBalance, withdrawBalance, isCapReached, xlmBalance, feeXlm]);
 
   const {
     values,
@@ -286,7 +294,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     setValues,
     setFieldError,
     resetErrors,
+    validateAll,
   } = useForm({ amount: dashboardUrl.state.amount }, transactionSchema);
+
+  // Validation computed against the full schema regardless of touched state,
+  // so the primary CTA can be disabled proactively (before the user blurs
+  // the field) instead of only reacting to already-surfaced inline errors.
+  const liveValidationErrors = React.useMemo(
+    () => validate(transactionSchema, values),
+    [transactionSchema, values],
+  );
 
   const amount = values.amount;
   const activeTab = dashboardUrl.state.tab;
@@ -398,8 +415,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   const isSubmitDisabled =
     !walletAddress ||
     isBusy ||
-    Boolean(activeAmountError) ||
     !amount ||
+    Object.keys(liveValidationErrors).length > 0 ||
     (dashboardUrl.state.tab === "deposit" && isCapReached);
 
   const riskItems = React.useMemo<RiskAction[]>(() => {
@@ -466,9 +483,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     if (recentFailedTx) {
       next.push({
         id: "failed-tx",
-        title: t("vaultDashboard.riskSummary.failedTx.title", "Recent Transaction Failed"),
-        description: t("vaultDashboard.riskSummary.failedTx.desc", "A recent transaction failed. Review your history or retry."),
-        label: t("vaultDashboard.riskSummary.failedTx.cta", "View History"),
+        title: t("vaultDashboard.riskSummary.failedTx.title"),
+        description: t("vaultDashboard.riskSummary.failedTx.desc"),
+        label: t("vaultDashboard.riskSummary.failedTx.cta"),
         tone: "warning",
         onClick: () => navigate("/transactions"),
       });
@@ -481,9 +498,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     if (isHighExposure) {
       next.push({
         id: "high-exposure",
-        title: t("vaultDashboard.riskSummary.highExposure.title", "High Portfolio Exposure"),
-        description: t("vaultDashboard.riskSummary.highExposure.desc", "More than 80% of your portfolio is in this vault."),
-        label: t("vaultDashboard.riskSummary.highExposure.cta", "Review Allocation"),
+        title: t("vaultDashboard.riskSummary.highExposure.title"),
+        description: t("vaultDashboard.riskSummary.highExposure.desc"),
+        label: t("vaultDashboard.riskSummary.highExposure.cta"),
         tone: "info",
         onClick: () => navigate("/portfolio"),
       });
@@ -523,10 +540,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   };
 
   const goToReview = () => {
-    if (Object.keys(errors).length > 0) {
+    if (!validateAll()) {
       toast.warning({
         title: t("vaultDashboard.toast.validationErrorTitle"),
-        description: errors.amount || t("vaultDashboard.toast.invalidAmount"),
+        description: liveValidationErrors.amount || t("vaultDashboard.toast.invalidAmount"),
       });
       formFocus.focusFirstError();
       return;
@@ -1119,7 +1136,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
             <StepIndicator currentStep={dashboardUrl.state.step} />
 
-            {(["deposit", "withdraw"] as const).map((tab) => (
+            {(["deposit", "withdraw"] as const).map((tab) => {
+              const tabBalance = tab === "deposit" ? depositBalance : withdrawBalance;
+              return (
               <TabsContent key={tab} value={tab}>
                 {(isCapReached || isCapWarning) && tab === "deposit" && (
                   <VaultCapWarning utilization={utilization} isReached={isCapReached} />
@@ -1138,7 +1157,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                               {tab === "deposit" ? t("vaultDashboard.amountToDeposit") : t("vaultDashboard.amountToWithdraw")}
                             </div>
                             <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-                              {t("vaultDashboard.balanceLabel")} <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{availableBalance.toFixed(2)}</span>
+                              {t("vaultDashboard.balanceLabel")} <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{tabBalance.toFixed(2)}</span>
                             </div>
                           </div>
 
@@ -1154,7 +1173,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                             onBlur={handleBlur}
                             disabled={isBusy || (tab === "deposit" && isCapReached)}
                             error={showInlineError ? activeAmountError ?? undefined : undefined}
-                            helperText={tab === "deposit" ? t("vaultDashboard.minDeposit").replace("{{amount}}", MIN_DEPOSIT_AMOUNT.toFixed(2)) : t("vaultDashboard.maxWithdraw").replace("{{amount}}", availableBalance.toFixed(2))}
+                            helperText={tab === "deposit" ? t("vaultDashboard.minDeposit").replace("{{amount}}", MIN_DEPOSIT_AMOUNT.toFixed(2)) : t("vaultDashboard.maxWithdraw").replace("{{amount}}", tabBalance.toFixed(2))}
                             className={isValidAmount ? "input-valid" : ""}
                           />
 
@@ -1199,11 +1218,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                               id={`vault-${tab}-max`}
                               className="btn-max"
                               onClick={() => {
-                                setValues({ amount: availableBalance.toFixed(2) });
+                                const nextValues = { amount: tabBalance.toFixed(2) };
+                                setValues(nextValues);
+                                validateAll(nextValues);
                               }}
                               disabled={
                                 !walletAddress ||
-                                availableBalance <= 0 ||
+                                tabBalance <= 0 ||
                                 isBusy ||
                                 (tab === "deposit" && isCapReached)
                               }
@@ -1260,7 +1281,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                   />
                                 </span>
                                 <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--accent-cyan)" }}>
-                                  ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°Ãƒâ€¹Ã¢â‚¬Â  {estimatedNetAmount.toFixed(2)} yvUSDC
+                                  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â  {estimatedNetAmount.toFixed(2)} yvUSDC
                                 </span>
                               </div>
                             )}
@@ -1440,7 +1461,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                   userSelect: "none",
                                 }}
                               >
-                                <span style={{ fontSize: "1.2em" }}>ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â</span>
+                                <span style={{ fontSize: "1.2em" }}>ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â</span>
                                 Advanced Settings
                                 <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--text-secondary)" }}>
                                   Optional
@@ -1732,7 +1753,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                     )}
                   </div>
               </TabsContent>
-            ))}
+              );
+            })}
           </Tabs>
         </div>
         <div className="mobile-vault-actions">

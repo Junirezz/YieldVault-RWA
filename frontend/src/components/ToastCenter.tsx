@@ -14,7 +14,7 @@ function groupToasts(toasts: ToastItem[]): { toast: ToastItem; count: number }[]
       groups.set(key, { toast: t, count: 1 });
     }
   }
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map(({ toast, count }) => ({ ...toast, count }));
 }
 
 const ToastCenter: React.FC = () => {
@@ -125,8 +125,8 @@ const ToastCenter: React.FC = () => {
           ) : (
             grouped.map((g) => (
               <div
-                key={`${g.toast.id}--${g.count}`}
-                className={`toast toast-${g.toast.variant}`}
+                key={`${g.id}--${g.count}`}
+                className={`toast toast-${g.variant}`}
                 style={{
                   marginBottom: "8px",
                   display: "flex",
@@ -146,7 +146,7 @@ const ToastCenter: React.FC = () => {
                       color: "var(--text-primary)",
                     }}
                   >
-                    {g.toast.title}
+                    {g.title}
                     {g.count > 1 && (
                       <span
                         style={{
@@ -159,7 +159,7 @@ const ToastCenter: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  {g.toast.description && (
+                  {g.description && (
                     <div
                       style={{
                         fontSize: "0.8rem",
@@ -167,14 +167,14 @@ const ToastCenter: React.FC = () => {
                         marginTop: "2px",
                       }}
                     >
-                      {g.toast.description}
+                      {g.description}
                     </div>
                   )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => dismissToast(g.toast.id)}
-                  aria-label={`Dismiss ${g.toast.title}`}
+                  onClick={() => dismissToast(g.id)}
+                  aria-label={`Dismiss ${g.title}`}
                   style={{
                     background: "none",
                     border: "none",

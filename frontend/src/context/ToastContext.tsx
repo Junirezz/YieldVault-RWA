@@ -73,6 +73,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     ...options
   }: ToastOptions) => {
     const dedupeKey = generateDedupeKey({ ...options, variant });
+    // eslint-disable-next-line react-hooks/purity -- showToast runs on user/system events
+    // Timestamp is intentionally captured at toast creation time for dedupe windows.
+    // eslint-disable-next-line react-hooks/purity -- event-handler side effect, not render output
     const now = Date.now();
 
     const existingId = recentToasts.current.get(dedupeKey);

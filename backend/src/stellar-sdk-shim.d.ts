@@ -1,8 +1,15 @@
 declare module '@stellar/stellar-sdk' {
+  export interface Account {
+    accountId(): string;
+    sequenceNumber(): string;
+    incrementSequenceNumber(): void;
+  }
+
   export const BASE_FEE: string;
 
   export class Keypair {
     static fromSecret(secret: string): Keypair;
+    static random(): Keypair;
     publicKey(): string;
     sign(data: Buffer): Buffer;
   }
@@ -21,6 +28,11 @@ declare module '@stellar/stellar-sdk' {
     namespace Api {
       function isSimulationError(input: unknown): boolean;
       function isSimulationRestore(input: unknown): boolean;
+      interface SimulateTransactionSuccessResponse {
+        result?: {
+          retval?: unknown;
+        };
+      }
     }
 
     function assembleTransaction(tx: unknown, sim: unknown): { build(): { sign(kp: Keypair): void } };
@@ -41,7 +53,7 @@ declare module '@stellar/stellar-sdk' {
   }
 
   export class TransactionBuilder {
-    constructor(source: unknown, opts: unknown);
+    constructor(source: Account, opts: unknown);
     addOperation(op: unknown): TransactionBuilder;
     setTimeout(timeout: number): TransactionBuilder;
     build(): unknown;

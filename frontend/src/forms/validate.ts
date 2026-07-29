@@ -1,7 +1,14 @@
 /**
  * Lightweight schema-based validator used by frontend forms.
- * This project currently has no dedicated validation library dependency,
- * so rules are defined via plain objects and validated in-repo.
+ *
+ * The API layer (`packages/api-schemas`) validates requests with Zod, but
+ * that runtime isn't pulled into these forms — rules here are plain objects
+ * validated in-repo so fields can be checked on every keystroke without the
+ * overhead of parsing a Zod schema. Where a rule mirrors a server-side
+ * constraint (notably amount formatting, see
+ * `forms/schemas/amountValidation.ts`), it is kept in sync with the
+ * corresponding Zod schema so a value accepted here will not be rejected by
+ * the API, and vice versa.
  */
 export type ValidationRule<TValues extends object> = {
   required?: boolean | string;

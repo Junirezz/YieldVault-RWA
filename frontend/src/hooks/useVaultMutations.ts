@@ -1,9 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "../lib/queryClient";
-import type { PortfolioHolding } from "../lib/portfolioApi";
-import type { VaultSummary } from "../lib/vaultApi";
 import { submitDeposit, submitWithdrawal } from "../lib/vaultApi";
-import type { Transaction } from "../lib/transactionApi";
+import {
+  applyOptimisticVaultPatch,
+  cancelVaultOptimisticQueries,
+  captureVaultOptimisticSnapshot,
+  invalidateVaultOptimisticQueries,
+  rollbackVaultOptimisticSnapshot,
+  type VaultOptimisticSnapshot,
+} from "../lib/optimisticVaultCache";
 
 interface MutationParams {
   walletAddress: string;
@@ -12,49 +16,15 @@ interface MutationParams {
   idempotencyKey?: string;
 }
 
-interface OptimisticSnapshot {
-  balance?: number;
-  holdings?: PortfolioHolding[];
-  summary?: VaultSummary;
-  transactions?: Transaction[];
-}
-
-function buildPendingTransaction(
-  action: "deposit" | "withdrawal",
-  amount: number,
-): Transaction {
-  return {
-    id: `optimistic-${action}-${Date.now()}`,
-    type: action,
-    status: "pending",
-    amount: amount.toFixed(2),
-    asset: "USDC",
-    timestamp: new Date().toISOString(),
-    transactionHash: "pending-" + Date.now(),
-  };
-}
-
-function updateHoldings(
-  current: PortfolioHolding[] | undefined,
-  deltaUsd: number,
-): PortfolioHolding[] | undefined {
-  if (!current?.length) {
-    return current;
-  }
-
-  return current.map((holding, index) =>
-    index === 0
-      ? {
-          ...holding,
-          valueUsd: Math.max(holding.valueUsd + deltaUsd, 0),
-          status: "pending",
-        }
-      : holding,
-  );
-}
-
 /**
- * Deposit mutation with optimistic UI cache updates.
+ * Deposit mutation with production-hardened optimistic UI cache updates.
+ *
+ * Flow:
+ * 1. Cancel in-flight reads for related keys
+ * 2. Snapshot cache (including "never cached" vs "cached")
+ * 3. Apply optimistic wallet/holdings/TVL/tx patches
+ * 4. On failure: restore snapshot exactly, then invalidate to reconcile
+ * 5. On success: invalidate so server truth replaces optimistic rows
  */
 export function useDepositMutation() {
   const queryClient = useQueryClient();
@@ -72,83 +42,26 @@ export function useDepositMutation() {
       );
       return { walletAddress, amount, referralCode, idempotencyKey };
     },
-    onMutate: async ({ walletAddress, amount }) => {
-      const balanceKey = queryKeys.balance.usdc(walletAddress);
-      const holdingsKey = queryKeys.portfolio.holdings(walletAddress);
-      const summaryKey = queryKeys.vault.summary();
-      const txKey = queryKeys.transactions.list(walletAddress);
-
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: balanceKey }),
-        queryClient.cancelQueries({ queryKey: holdingsKey }),
-        queryClient.cancelQueries({ queryKey: summaryKey }),
-        queryClient.cancelQueries({ queryKey: txKey }),
-      ]);
-
-      const snapshot: OptimisticSnapshot = {
-        balance: queryClient.getQueryData<number>(balanceKey),
-        holdings: queryClient.getQueryData<PortfolioHolding[]>(holdingsKey),
-        summary: queryClient.getQueryData<VaultSummary>(summaryKey),
-        transactions: queryClient.getQueryData<Transaction[]>(txKey),
-      };
-
-      queryClient.setQueryData<number>(balanceKey, (current = 0) =>
-        Math.max(current - amount, 0),
-      );
-      queryClient.setQueryData<PortfolioHolding[] | undefined>(
-        holdingsKey,
-        (current) => updateHoldings(current, amount),
-      );
-      queryClient.setQueryData<VaultSummary | undefined>(summaryKey, (current) =>
-        current
-          ? {
-              ...current,
-              tvl: current.tvl + amount,
-              updatedAt: new Date().toISOString(),
-            }
-          : current,
-      );
-      queryClient.setQueryData<Transaction[] | undefined>(txKey, (current) => [
-        buildPendingTransaction("deposit", amount),
-        ...(current ?? []),
-      ]);
-
+    onMutate: async ({ walletAddress, amount }): Promise<VaultOptimisticSnapshot> => {
+      await cancelVaultOptimisticQueries(queryClient, walletAddress);
+      const snapshot = captureVaultOptimisticSnapshot(queryClient, walletAddress);
+      applyOptimisticVaultPatch(queryClient, walletAddress, "deposit", amount);
       return snapshot;
     },
     onError: (_error, variables, snapshot) => {
-      queryClient.setQueryData(
-        queryKeys.balance.usdc(variables.walletAddress),
-        snapshot?.balance,
-      );
-      queryClient.setQueryData(
-        queryKeys.portfolio.holdings(variables.walletAddress),
-        snapshot?.holdings,
-      );
-      queryClient.setQueryData(queryKeys.vault.summary(), snapshot?.summary);
-      queryClient.setQueryData(
-        queryKeys.transactions.list(variables.walletAddress),
-        snapshot?.transactions,
-      );
+      rollbackVaultOptimisticSnapshot(queryClient, variables.walletAddress, snapshot);
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.balance.usdc(variables.walletAddress),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.portfolio.holdings(variables.walletAddress),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.vault.summary(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.transactions.list(variables.walletAddress),
-      });
+    onSettled: (_data, _error, variables) => {
+      invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
     },
   });
 }
 
 /**
- * Withdrawal mutation with optimistic UI cache updates.
+ * Withdrawal mutation with production-hardened optimistic UI cache updates.
+ *
+ * Wallet USDC increases and vault holdings/TVL decrease immediately; any
+ * failure restores the pre-mutation snapshot and reconciles via invalidation.
  */
 export function useWithdrawMutation() {
   const queryClient = useQueryClient();
@@ -165,77 +78,17 @@ export function useWithdrawMutation() {
       );
       return { walletAddress, amount, idempotencyKey };
     },
-    onMutate: async ({ walletAddress, amount }) => {
-      const balanceKey = queryKeys.balance.usdc(walletAddress);
-      const holdingsKey = queryKeys.portfolio.holdings(walletAddress);
-      const summaryKey = queryKeys.vault.summary();
-      const txKey = queryKeys.transactions.list(walletAddress);
-
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: balanceKey }),
-        queryClient.cancelQueries({ queryKey: holdingsKey }),
-        queryClient.cancelQueries({ queryKey: summaryKey }),
-        queryClient.cancelQueries({ queryKey: txKey }),
-      ]);
-
-      const snapshot: OptimisticSnapshot = {
-        balance: queryClient.getQueryData<number>(balanceKey),
-        holdings: queryClient.getQueryData<PortfolioHolding[]>(holdingsKey),
-        summary: queryClient.getQueryData<VaultSummary>(summaryKey),
-        transactions: queryClient.getQueryData<Transaction[]>(txKey),
-      };
-
-      queryClient.setQueryData<number>(balanceKey, (current = 0) =>
-        Math.max(current - amount, 0),
-      );
-      queryClient.setQueryData<PortfolioHolding[] | undefined>(
-        holdingsKey,
-        (current) => updateHoldings(current, -amount),
-      );
-      queryClient.setQueryData<VaultSummary | undefined>(summaryKey, (current) =>
-        current
-          ? {
-              ...current,
-              tvl: Math.max(current.tvl - amount, 0),
-              updatedAt: new Date().toISOString(),
-            }
-          : current,
-      );
-      queryClient.setQueryData<Transaction[] | undefined>(txKey, (current) => [
-        buildPendingTransaction("withdrawal", amount),
-        ...(current ?? []),
-      ]);
-
+    onMutate: async ({ walletAddress, amount }): Promise<VaultOptimisticSnapshot> => {
+      await cancelVaultOptimisticQueries(queryClient, walletAddress);
+      const snapshot = captureVaultOptimisticSnapshot(queryClient, walletAddress);
+      applyOptimisticVaultPatch(queryClient, walletAddress, "withdrawal", amount);
       return snapshot;
     },
     onError: (_error, variables, snapshot) => {
-      queryClient.setQueryData(
-        queryKeys.balance.usdc(variables.walletAddress),
-        snapshot?.balance,
-      );
-      queryClient.setQueryData(
-        queryKeys.portfolio.holdings(variables.walletAddress),
-        snapshot?.holdings,
-      );
-      queryClient.setQueryData(queryKeys.vault.summary(), snapshot?.summary);
-      queryClient.setQueryData(
-        queryKeys.transactions.list(variables.walletAddress),
-        snapshot?.transactions,
-      );
+      rollbackVaultOptimisticSnapshot(queryClient, variables.walletAddress, snapshot);
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.balance.usdc(variables.walletAddress),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.portfolio.holdings(variables.walletAddress),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.vault.summary(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.transactions.list(variables.walletAddress),
-      });
+    onSettled: (_data, _error, variables) => {
+      invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
     },
   });
 }

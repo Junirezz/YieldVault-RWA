@@ -1,6 +1,6 @@
 # Vault UX Pattern Library
 
-> **Last Updated:** 2026-06-23
+> **Last Updated:** 2026-07-24
 
 This document defines the approved frontend UX patterns for vault-specific interactions in YieldVault-RWA. It is the source of truth for deposit, withdrawal, allowance approval, transaction confirmation, loading, and recovery states.
 
@@ -93,8 +93,10 @@ The amount step should contain:
 
 Rules:
 
-- Disable the primary CTA when the wallet is disconnected, input is empty, validation fails, or the vault cannot accept the action.
+- Disable the primary CTA when the wallet is disconnected, input is empty, validation fails, or the vault cannot accept the action. The CTA's disabled state must be computed against the full validation schema on every value change (live), not only from errors already surfaced by a blurred/touched field — the user should never be able to reach review with an invalid amount just because they haven't blurred the field yet.
+- Inline field errors appear once a field has been blurred (or once the user has attempted to advance), and continue to revalidate live as the user keeps typing so they clear as soon as the value becomes valid.
 - Validation messages should appear inline and also be summarized via toast only when the user tries to advance with invalid input.
+- Advancing to review must re-run full validation (`validateAll`) and block the transition if invalid, independent of whether the CTA happened to be enabled — this is a defense-in-depth check, not just a UI affordance.
 - If a deep link pre-fills the amount, the value may be hydrated from the URL, but the URL should not trap the user in a stale step.
 
 ### 3. Review Step
@@ -356,5 +358,8 @@ The current approved implementation lives in:
 - `frontend/src/components/VaultDashboard.tsx`
 - `frontend/src/components/TransactionConfirmationModal.tsx`
 - `frontend/src/hooks/useVaultMutations.ts`
+- `frontend/src/lib/optimisticVaultCache.ts` (snapshot / apply / rollback helpers)
+
+Optimistic deposit and withdrawal patches credit or debit wallet USDC in opposite directions, mark holdings and pending transaction rows as `pending`, and restore the pre-mutation snapshot when the network or contract call fails. Settled mutations always invalidate related React Query keys so the UI converges on server truth.
 
 If a future implementation intentionally diverges from this library, update this document in the same change set and explain the reason in the pull request.

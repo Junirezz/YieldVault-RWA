@@ -6,7 +6,7 @@ import { isProviderAvailable } from "../lib/walletSession";
 
 const SessionExpiryWarning: React.FC = () => {
   const { t } = useTranslation();
-  const { timeRemainingMs, dismissSessionWarning, renewSession } = useAuth();
+  const { sessionState, timeRemainingMs, dismissSessionWarning, renewSession } = useAuth();
   const minutesRemaining = Math.ceil(timeRemainingMs / 1000 / 60);
 
   useEffect(() => {
@@ -32,6 +32,12 @@ const SessionExpiryWarning: React.FC = () => {
   const handleDismiss = useCallback(() => {
     dismissSessionWarning();
   }, [dismissSessionWarning]);
+
+  // The banner owns its own visibility so it can be mounted unconditionally by
+  // callers that do not track session state themselves.
+  if (sessionState !== "warning") {
+    return null;
+  }
 
   return (
     <div

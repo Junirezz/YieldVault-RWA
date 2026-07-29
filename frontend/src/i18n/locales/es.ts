@@ -20,6 +20,13 @@ export const es = {
     compare: "Comparar",
     analytics: "Analica",
     transactions: "Transacciones",
+    admin: "Administración",
+  },
+  admin: {
+    title: "Consola de Administración",
+    description: "Herramientas operativas restringidas a billeteras administradoras.",
+    badge: "Acceso de Administrador",
+    accessGranted: "Su billetera conectada tiene acceso de administrador a este despliegue de la bóveda.",
   },
   theme: {
     toggleToDark: "Cambiar al modo oscuro",
@@ -33,6 +40,7 @@ export const es = {
     rpcCustom: "Personalizado",
     rpcDefault: "Predeterminado",
     disconnectAria: "Desconectar billetera",
+    retry: "Intentar de nuevo",
     usdcBalanceAria: "Saldo de USDC de la billetera",
     status: {
       connected: "Conectado",
@@ -204,6 +212,21 @@ export const es = {
     walletOn: "tu billetera está en",
     appRequires: "pero esta app requiere",
     switchInstructions: "Abre Freighter → Configuración → Red y cambia a {{network}} para continuar.",
+  },
+  accountStatement: {
+    trigger: "Exportar extracto",
+    title: "Descargar extracto de cuenta",
+    description:
+      "Exporte un extracto descargable de sus posiciones y transacciones para el rango de fechas seleccionado.",
+    walletLabel: "Billetera",
+    formatLabel: "Formato de archivo",
+    startDate: "Fecha de inicio",
+    endDate: "Fecha de fin",
+    cancel: "Cancelar",
+    download: "Descargar extracto",
+    preparing: "Preparando…",
+    downloaded: "Descargado",
+    failed: "No se pudo exportar el extracto",
   },
   sessionExpired: {
     title: "Sesión expirada",

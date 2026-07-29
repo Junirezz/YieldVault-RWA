@@ -2,6 +2,7 @@ import request from 'supertest';
 import app from '../index';
 import { getPrismaClient, disconnectPrismaClient } from '../prismaClient';
 import { referralService } from '../referralService';
+import { walletAliasMappingService } from '../walletAliasService';
 import { VALID_TEST_WALLET, SECOND_TEST_WALLET, THIRD_TEST_WALLET } from './setup';
 
 // Use the centralized Prisma Client instance
@@ -20,6 +21,7 @@ describe('Referral System Integration', () => {
     await prisma.referral.deleteMany();
     await prisma.referralCode.deleteMany();
     await prisma.transaction.deleteMany();
+    await walletAliasMappingService.resetForTests();
 
     // Setup referral code
     await referralService.createReferralCode(referrerWallet, referralCode);
@@ -155,6 +157,39 @@ describe('Referral System Integration', () => {
       
       expect(response.body.total_reward_earned).toBe('0.000001');
       expect(response.body.total_reward_earned).toMatch(/^\d+\.\d{6}$/);
+    });
+  });
+
+  describe('Persisted wallet alias referral attribution', () => {
+    it('uses persisted canonical wallet aliases after cache hydration', async () => {
+      const prisma = getPrisma();
+      await prisma.referral.deleteMany();
+      await prisma.referralCode.deleteMany();
+      await prisma.transaction.deleteMany();
+      await walletAliasMappingService.resetForTests();
+
+      const persistedReferralCode = 'ALIAS2026';
+      await referralService.createReferralCode(referrerWallet, persistedReferralCode);
+      await walletAliasMappingService.linkProviderIdentity(
+        referredWallet,
+        'stellar',
+        'wallet-connect-referred',
+        'walletconnect',
+      );
+
+      await walletAliasMappingService.loadFromDatabase(true);
+      await referralService.recordDeposit(referredWallet.toLowerCase(), persistedReferralCode);
+
+      const referral = await prisma.referral.findUnique({
+        where: { referredAddress: referredWallet },
+      });
+
+      expect(referral).toBeDefined();
+      expect(referral?.referrerAddress).toBe(referrerWallet);
+      expect(referral?.firstDepositAt).not.toBeNull();
+      expect(await walletAliasMappingService.resolveCanonicalWallet('wallet-connect-referred', 'walletconnect')).toBe(
+        referredWallet,
+      );
     });
   });
 });

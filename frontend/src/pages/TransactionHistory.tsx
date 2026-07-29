@@ -31,6 +31,8 @@ import {
   truncateHash,
   type Transaction,
 } from "../lib/transactionApi";
+import { buildCsvFromRows, downloadTextFile } from "../lib/exportDownload";
+import AccountStatementExport from "../components/AccountStatementExport";
 import { useDataTableState } from "../hooks/useDataTableState";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { useTransactionFilters } from "../hooks/useTransactionFilters";
@@ -377,49 +379,25 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   };
 
   // ── CSV export ──────────────────────────────────────────────────────────
-  const buildCsvContent = (transactionsToExport: Transaction[]) => {
-    const headers = ["date", "type", "status", "amount", "share price", "fee", "tx hash"];
-
-    const escapeCsvValue = (value: string) => `"${value.replace(/"/g, '""')}"`;
-
-    const csvRows = transactionsToExport.map((transaction) => [
-      formatTimestamp(transaction.timestamp),
-      transaction.type,
-      transaction.status,
-      formatAmount(transaction.amount, transaction.asset),
-      "",
-      "",
-      transaction.transactionHash,
-    ]);
-
-    return [headers, ...csvRows]
-      .map((columns) => columns.map(escapeCsvValue).join(","))
-      .join("\r\n");
-  };
-
   const handleExportCsv = () => {
-    const csvContent = buildCsvContent(sortedRows);
+    const csvContent = buildCsvFromRows(
+      ["date", "type", "status", "amount", "share price", "fee", "tx hash"],
+      sortedRows.map((transaction) => [
+        formatTimestamp(transaction.timestamp),
+        transaction.type,
+        transaction.status,
+        formatAmount(transaction.amount, transaction.asset),
+        "",
+        "",
+        transaction.transactionHash,
+      ]),
+    );
     const fileName = `transactions_${new Date().toISOString().slice(0, 10)}.csv`;
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url =
-      typeof URL !== "undefined" && URL.createObjectURL
-        ? URL.createObjectURL(blob)
-        : `data:text/csv;charset=utf-8,${encodeURIComponent(csvContent)}`;
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    if (
-      typeof URL !== "undefined" &&
-      URL.revokeObjectURL &&
-      url.startsWith("blob:")
-    ) {
-      URL.revokeObjectURL(url);
-    }
+    downloadTextFile({
+      content: csvContent,
+      fileName,
+      mimeType: "text/csv;charset=utf-8;",
+    });
   };
 
   // ── Empty state ─────────────────────────────────────────────────────────
@@ -710,6 +688,13 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                 >
                   Export CSV
                 </button>
+
+                {walletAddress && (
+                  <AccountStatementExport
+                    walletAddress={walletAddress}
+                    transactions={sortedRows}
+                  />
+                )}
               </div>
             </div>
 

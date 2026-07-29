@@ -100,8 +100,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const dismissSessionWarning = useCallback(() => {
+    // `warningHandledRef` stays set: the session is still inside the warning
+    // window, so re-arming it would immediately re-raise the banner the user
+    // just dismissed. Only renewing or clearing the session re-arms it.
     setSessionState("idle");
-    warningHandledRef.current = false;
   }, []);
 
   return (

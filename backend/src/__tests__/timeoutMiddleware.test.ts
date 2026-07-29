@@ -20,7 +20,9 @@ describe('timeoutMiddleware', () => {
       }),
       async (_req: Request, res: Response) => {
         await new Promise((resolve) => setTimeout(resolve, 50));
-        res.status(200).json({ ok: true });
+        if (!res.headersSent) {
+          res.status(200).json({ ok: true });
+        }
       },
     );
 

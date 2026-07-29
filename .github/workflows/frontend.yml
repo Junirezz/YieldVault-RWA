@@ -82,6 +82,12 @@ jobs:
           node-version: 20
       - name: Install root dependencies
         run: npm ci
+      - name: Build shared API schemas
+        run: npm ci && npm run build
+        working-directory: packages/api-schemas
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
       - name: Run frontend env validation unit tests
         run: npm run test:validate-frontend-env
 

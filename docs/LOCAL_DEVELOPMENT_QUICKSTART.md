@@ -1,682 +1,197 @@
-# Local Development Quickstart Guide
+# Local Development Quickstart
 
-This guide provides a complete walkthrough for setting up YieldVault RWA for local development, including service dependencies, startup order, and common troubleshooting steps.
+This guide documents the fastest supported way to boot the repository locally for backend, contract, and frontend development.
 
-## Service Dependency Matrix
+## What You Need
 
-```mermaid
-graph TD
-    A[Node.js 18+] --> B[Backend API]
-    A --> C[Frontend]
-    D[PostgreSQL] --> B
-    E[Redis] --> B
-    F[Rust/Cargo] --> G[Smart Contracts]
-    B --> H[Stellar Testnet RPC]
-    C --> H
-    C --> B
-    G --> H
-```
+- Node.js 18+ and npm
+- Rust and Cargo
+- `wasm32-unknown-unknown` Rust target for Soroban contract builds
 
-### Services Overview
+Optional:
 
-| Service             | Purpose                 | Default Port | Status Check                        | Dependency                     |
-| ------------------- | ----------------------- | ------------ | ----------------------------------- | ------------------------------ |
-| **PostgreSQL**      | Data persistence        | 5432         | `psql -c "SELECT 1"`                | None (external or Docker)      |
-| **Redis**           | Caching & rate limiting | 6379         | `redis-cli ping`                    | Backend                        |
-| **Backend API**     | Express.js REST API     | 3000         | `curl http://localhost:3000/health` | PostgreSQL, Redis, Stellar RPC |
-| **Frontend**        | React + Vite UI         | 5173         | `http://localhost:5173`             | Backend API, Stellar Testnet   |
-| **Smart Contracts** | Soroban Rust contracts  | N/A          | Build succeeds                      | Cargo + wasm32 target          |
-| **Stellar RPC**     | External service        | N/A          | Handled by SDK                      | None (external)                |
+- Freighter or another Stellar wallet for frontend testing
+- Docker, PostgreSQL, and Redis only if you want to test non-default infrastructure paths
 
-## Prerequisites
+## Repo Layout
 
-Before starting, ensure you have the following installed:
+- `backend/` - Express + TypeScript API with Prisma
+- `contracts/vault/` - main Soroban vault contract
+- `contracts/mock-strategy/` - mock contract used by tests
+- `frontend/` - React + Vite app
 
-### Core Requirements
+## Bootstrap Order
 
-- **Node.js 18+** – Check with `node --version`
-- **npm** or **pnpm** – Check with `npm --version` or `pnpm --version`
-- **Git** – For version control
-- **Rust 1.74+** – Check with `rustc --version` (needed for smart contracts)
-- **Docker & Docker Compose** – For PostgreSQL and Redis (or install them separately)
+Use this order for a clean first boot:
 
-### Optional Tools
+1. Install backend dependencies and create the local database
+2. Build or test contracts if you are changing on-chain code
+3. Install frontend dependencies and point it at your local backend
+4. Start backend and frontend in separate terminals
 
-- **Stellar CLI** – For contract deployments
-- **Foundry** – For advanced testing (optional)
-- **VS Code** – Recommended editor with Rust Analyzer extension
+## 1. Backend Bootstrap
 
-### System-Specific Installation
-
-#### Windows
-
-```powershell
-# Install Node.js from https://nodejs.org (LTS recommended)
-# Install Git from https://git-scm.com
-
-# Install Rust using rustup-init.exe (included in repo):
-./rustup-init.exe -y
-
-# Add wasm32 target
-rustc target add wasm32-unknown-unknown
-
-# Install Docker Desktop from https://www.docker.com/products/docker-desktop
-```
-
-#### macOS
-
-```bash
-# Install Homebrew if not already installed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install dependencies
-brew install node@18 git rustup docker
-
-# Install Rust
-rustup-init
-rustup target add wasm32-unknown-unknown
-
-# Start Docker Desktop (from Applications folder)
-```
-
-#### Linux (Ubuntu/Debian)
-
-```bash
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs git
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
-rustup target add wasm32-unknown-unknown
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
-```
-
-## Local Setup Order
-
-Follow these steps in order to ensure all dependencies are properly initialized:
-
-### Step 1: Clone Repository
-
-```bash
-git clone https://github.com/your-org/YieldVault-RWA.git
-cd YieldVault-RWA
-```
-
-### Step 2: Start Infrastructure Services
-
-Start PostgreSQL and Redis first (they have no dependencies).
-
-#### Using Docker Compose
-
-```bash
-# Start PostgreSQL and Redis containers
-docker-compose up -d postgres redis
-
-# Verify services are running
-docker ps
-
-# Expected output should show both 'postgres' and 'redis' containers
-```
-
-#### Or Manual Installation
-
-If Docker is not available, install and run services separately:
-
-```bash
-# PostgreSQL
-# Install from https://www.postgresql.org/download
-# Run: postgres -D /usr/local/var/postgres
-
-# Redis
-# Install from https://redis.io/download
-# Run: redis-server
-```
-
-**Verify PostgreSQL:**
-
-```bash
-psql -U postgres -d postgres -c "SELECT version();"
-```
-
-**Verify Redis:**
-
-```bash
-redis-cli ping
-# Expected: PONG
-```
-
-### Step 3: Setup Backend
+The default local backend path does not require PostgreSQL or Redis. Prisma falls back to the SQLite database defined in [`backend/prisma/schema.prisma`](/Users/macbook/stellar/YieldVault-RWA/backend/prisma/schema.prisma:1), and Redis-backed features fall back to in-memory behavior when `REDIS_URL` is not set.
 
 ```bash
 cd backend
-
-# Copy environment template
-cp .env.local.example .env.local
-
-# Install dependencies
+cp .env.example .env
 npm install
-
-# Initialize database
 npx prisma migrate dev
-
-# Verify database is ready
-npm run db:check-drift
-
-# Start development server
 npm run dev
-
-# In another terminal, verify health check
-curl http://localhost:3000/health
 ```
 
-**Expected output from health check:**
+Backend defaults:
 
-```json
-{
-  "status": "healthy",
-  "checks": {
-    "api": "up",
-    "cache": "up",
-    "stellarRpc": "up"
-  }
-}
-```
+- API base URL: `http://localhost:3000`
+- Health endpoint: `http://localhost:3000/health`
+- Readiness endpoint: `http://localhost:3000/ready`
+- Local Prisma DB: `backend/prisma/dev.db`
 
-### Step 4: Setup Frontend
-
-```bash
-cd ../frontend
-
-# Copy environment template
-cp .env.local.example .env.local
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Open in browser: http://localhost:5173
-```
-
-### Step 5: Setup Smart Contracts (Optional)
-
-Only needed if you plan to modify contracts:
-
-```bash
-cd ../contracts/vault
-
-# Install Rust dependencies (auto on first build)
-cargo build --target wasm32-unknown-unknown --release
-
-# Run contract tests
-cargo test
-
-# View generated docs
-cargo doc --open
-```
-
-## Complete Startup Sequence
-
-Once everything is set up, here's the recommended startup order for future development sessions:
-
-### Terminal 1: Infrastructure
-
-```bash
-docker-compose up -d postgres redis
-# Wait 5-10 seconds for services to be ready
-```
-
-### Terminal 2: Backend API
-
-```bash
-cd backend
-npm run dev
-# Wait for "Server running on port 3000" message
-```
-
-### Terminal 3: Frontend
-
-```bash
-cd frontend
-npm run dev
-# Wait for "Local: http://localhost:5173" message
-```
-
-### Terminal 4: Optional - Contract Development
-
-```bash
-cd contracts/vault
-cargo watch -x "test --target wasm32-unknown-unknown"
-```
-
-## Environment Configuration
-
-### Backend Environment Variables
-
-Create `backend/.env.local`:
+Recommended minimum local env updates in `backend/.env`:
 
 ```env
-# Server
 PORT=3000
 NODE_ENV=development
-
-# Database (must match Docker Compose or local installation)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/yieldvault_dev
-
-# Stellar Network
 STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
-STELLAR_NETWORK=testnet
-VAULT_CONTRACT_ID=your_testnet_contract_id_here
-
-# Cache
-REDIS_URL=redis://localhost:6379
-
-# API Configuration
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
-
-# Optional - Log verbosity
-LOG_LEVEL=debug
+VAULT_CONTRACT_ID=
 ```
 
-### Frontend Environment Variables
+Notes:
 
-Create `frontend/.env.local`:
+- Leave `DATABASE_URL` unset to keep the default SQLite workflow.
+- Leave `REDIS_URL` unset unless you are explicitly testing Redis-backed rate limiting or nonce storage.
+- Routes that invoke Soroban transactions need a real `VAULT_CONTRACT_ID`, and some flows also require backend signing credentials such as `STELLAR_SECRET_KEY`.
 
-```env
-# Vite configuration
-VITE_API_BASE_URL=http://localhost:3000
+## 2. Contract Bootstrap
 
-# Stellar Network
-VITE_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-VITE_STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+You only need this section if you are working on the smart contracts.
 
-# Contract
-VITE_VAULT_CONTRACT_ID=your_testnet_contract_id_here
-
-# Optional - Analytics & Error Tracking
-VITE_FF_DEBUG_MODE=true
-```
-
-## Health Checks
-
-After all services are started, verify everything is working:
+From the repo root:
 
 ```bash
-# Backend API health
-curl http://localhost:3000/health
-
-# Backend readiness
-curl http://localhost:3000/ready
-
-# Frontend (should see HTML)
-curl -I http://localhost:5173
-
-# Database connection
-cd backend && npm run db:check-drift
-
-# Redis connectivity
-redis-cli ping
+rustup target add wasm32-unknown-unknown
+cargo test
 ```
 
-## Troubleshooting Guide
-
-### PostgreSQL Connection Issues
-
-**Problem:** `Error: connect ECONNREFUSED 127.0.0.1:5432`
-
-**Solutions:**
+To build the main contract artifact directly:
 
 ```bash
-# Check if PostgreSQL is running
-docker ps | grep postgres
-
-# If not running, start it:
-docker-compose up -d postgres
-
-# Verify connection string in .env.local
-# Default: postgresql://postgres:postgres@localhost:5432/yieldvault_dev
-
-# Check PostgreSQL logs
-docker logs yieldvault_rwa-postgres-1
-
-# Test connection manually
-psql -U postgres -d yieldvault_dev -h localhost
+cargo build -p vault --target wasm32-unknown-unknown --release
 ```
 
-### Redis Connection Issues
+Useful paths:
 
-**Problem:** `Error: connect ECONNREFUSED 127.0.0.1:6379`
+- Main contract crate: [`contracts/vault`](/Users/macbook/stellar/YieldVault-RWA/contracts/vault)
+- Mock strategy crate: [`contracts/mock-strategy`](/Users/macbook/stellar/YieldVault-RWA/contracts/mock-strategy)
+- Deployment notes: [`contracts/vault/DEPLOYMENT.md`](/Users/macbook/stellar/YieldVault-RWA/contracts/vault/DEPLOYMENT.md:1)
 
-**Solutions:**
+## 3. Frontend Bootstrap
 
-```bash
-# Check if Redis is running
-docker ps | grep redis
-
-# If not running, start it:
-docker-compose up -d redis
-
-# Verify connection
-redis-cli ping  # Should return: PONG
-
-# Check Redis logs
-docker logs yieldvault_rwa-redis-1
-
-# Check REDIS_URL in backend .env.local
-# Default: redis://localhost:6379
-```
-
-### Database Migration Failures
-
-**Problem:** `Error: P1000 Authentication failed` or migration errors
-
-**Solutions:**
-
-```bash
-# Reset database (WARNING: Loses all data)
-cd backend
-npx prisma migrate reset --force
-
-# Or manually drop and recreate
-psql -U postgres -h localhost -c "DROP DATABASE yieldvault_dev;"
-psql -U postgres -h localhost -c "CREATE DATABASE yieldvault_dev;"
-npx prisma migrate deploy
-```
-
-### Backend Won't Start
-
-**Problem:** `Port 3000 already in use` or other startup errors
-
-**Solutions:**
-
-```bash
-# Check what's using port 3000
-# On Windows:
-netstat -ano | findstr :3000
-
-# On macOS/Linux:
-lsof -i :3000
-
-# Kill the process if needed (Windows):
-taskkill /PID <PID> /F
-
-# Or use different port:
-PORT=3001 npm run dev
-```
-
-### Frontend Build Issues
-
-**Problem:** `node_modules issues` or build failures
-
-**Solutions:**
+The frontend expects a local backend plus Stellar network settings.
 
 ```bash
 cd frontend
-
-# Clear node_modules and cache
-rm -rf node_modules package-lock.json
-npm install
-
-# Clear Vite cache
-rm -rf node_modules/.vite
-
-# Reinstall
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-### Stellar RPC Connection Issues
+Recommended minimum local env in `frontend/.env`:
 
-**Problem:** `Error: Network request failed` or `Stellar RPC timeout`
-
-**Solutions:**
-
-```bash
-# Test RPC endpoint directly
-curl https://soroban-testnet.stellar.org/health
-
-# Check your VITE_SOROBAN_RPC_URL in frontend/.env.local
-# Check STELLAR_RPC_URL in backend/.env.local
-
-# If testnet is down, try using soroban cli:
-soroban network list-known
-
-# Use a different RPC if available
-VITE_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org npm run dev
+```env
+VITE_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+VITE_STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+VITE_VAULT_CONTRACT_ID=
 ```
 
-### Docker Issues
+Frontend default:
 
-**Problem:** `docker: command not found` or `permission denied`
+- App URL: `http://localhost:5173`
 
-**Solutions:**
+Important:
 
-```bash
-# Verify Docker is installed and running
-docker --version
-docker ps
+- Set `VITE_VAULT_CONTRACT_ID` to the same contract ID used by the backend when you want the UI to target a deployed vault.
+- Some views can still boot without a contract ID, but transaction flows will not work end-to-end.
 
-# On Linux, add user to docker group:
-sudo usermod -aG docker $USER
-newgrp docker
+## Daily Startup
 
-# Restart Docker service if needed:
-# Windows: Restart Docker Desktop
-# macOS: Restart Docker Desktop
-# Linux: sudo systemctl restart docker
-```
+Once dependencies are installed, the normal dev loop is:
 
-### Dependency Version Conflicts
-
-**Problem:** `npm ERR! peer dep missing` or conflicting versions
-
-**Solutions:**
+Terminal 1:
 
 ```bash
-# Use exact versions from lock file
-rm -rf node_modules
-npm ci  # Use this instead of npm install
-
-# Update all dependencies carefully
-npm audit fix
-
-# For backend/frontend separately:
-cd backend && npm ci
-cd ../frontend && npm ci
-```
-
-### "Module not found" Errors
-
-**Problem:** `Cannot find module '@stellar/stellar-sdk'` or similar
-
-**Solutions:**
-
-```bash
-# Reinstall all dependencies
-npm install
-
-# For monorepo issues, install at project root too:
-cd ../.. && npm install
-cd frontend && npm install
-
-# Clear npm cache
-npm cache clean --force
-npm install
-```
-
-### Contract Build Failures
-
-**Problem:** `error: could not compile wasm artifact`
-
-**Solutions:**
-
-```bash
-cd contracts/vault
-
-# Check Rust version
-rustc --version  # Should be 1.74 or higher
-
-# Update Rust
-rustup update
-
-# Ensure wasm32 target is installed
-rustup target add wasm32-unknown-unknown
-
-# Clean and rebuild
-cargo clean
-cargo build --target wasm32-unknown-unknown --release
-
-# Check for compile errors
-cargo check
-```
-
-## Development Workflow
-
-### Running Tests
-
-```bash
-# Backend unit tests
 cd backend
-npm run test
+npm run dev
+```
 
-# Frontend unit tests
-cd ../frontend
-npm run test
+Terminal 2:
 
-# E2E tests
-npm run test:e2e
+```bash
+cd frontend
+npm run dev
+```
 
-# Contract tests
-cd ../contracts/vault
+Optional Terminal 3 for contract work:
+
+```bash
 cargo test
 ```
 
-### Code Quality
+## Validation Checklist
+
+Use these commands after bootstrapping:
 
 ```bash
-# Lint all code
-cd backend && npm run lint
-cd ../frontend && npm run lint
-
-# Format code
-cd backend && npm run format
-cd ../frontend && npm run format
-
-# Security audit
-cd backend && npm audit
-cd ../frontend && npm audit
-```
-
-### Database Changes
-
-```bash
-# Create new migration
 cd backend
-npx prisma migrate dev --name <migration_name>
-
-# Generate Prisma client after schema changes
-npx prisma generate
-
-# View database in Prisma Studio
-npx prisma studio
+npm test
 ```
 
-## Performance Optimization
-
-### Local Development Tips
-
-1. **Use `npm ci` instead of `npm install`** – Faster and more reproducible
-2. **Keep docker containers running** – Don't stop/start them repeatedly
-3. **Enable source maps for debugging** – Already enabled in dev config
-4. **Use VS Code extensions** – Prettier, ESLint, Rust Analyzer for better DX
-5. **Monitor ports** – Keep HTTP/2 enabled for Vite for faster reload
-
-### Memory Management
-
-If experiencing memory issues:
-
 ```bash
-# Backend with more memory
-NODE_OPTIONS="--max-old-space-size=4096" npm run dev
-
-# Frontend with more memory
-NODE_OPTIONS="--max-old-space-size=2048" npm run dev
+cd frontend
+npm run test:run
 ```
 
-## Common Development Tasks
-
-### Accessing Swagger API Docs
-
 ```bash
-# Docs available at:
-# http://localhost:3000/api-docs
+cd /Users/macbook/stellar/YieldVault-RWA
+cargo test
 ```
 
-### Viewing Database
+Manual checks:
+
+- Open `http://localhost:5173`
+- Verify `http://localhost:3000/health` returns a healthy response
+- Confirm the frontend can reach the backend without CORS errors
+
+## Troubleshooting
+
+### `VAULT_CONTRACT_ID environment variable is not set`
+
+Set the contract ID in both `backend/.env` and `frontend/.env` before testing real vault actions.
+
+### Prisma migration or DB issues
+
+Re-run:
 
 ```bash
-# Open Prisma Studio
 cd backend
-npx prisma studio
-
-# Opens http://localhost:5555 with database browser
+npx prisma migrate dev
 ```
 
-### Testing Webhook Events
+If you want a clean local SQLite reset, remove `backend/prisma/dev.db` and rerun the migration.
 
-```bash
-# Backend includes test endpoints:
-# POST http://localhost:3000/admin/test-webhook
-```
+### Redis warnings in backend logs
 
-### Debugging with VS Code
+Expected in the default local path. Redis is optional unless you are specifically testing Redis-backed behavior.
 
-1. Install **Debugger for Chrome** extension
-2. Create `.vscode/launch.json`:
+### Frontend points at the wrong backend
 
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "node",
-      "request": "launch",
-      "name": "Backend",
-      "skipFiles": ["<node_internals>/**"],
-      "program": "${workspaceFolder}/backend/src/index.ts",
-      "preLaunchTask": "npm: dev"
-    }
-  ]
-}
-```
+Check backend port `3000`, then verify any frontend API configuration in the app matches your local backend URL.
 
-## Additional Resources
+## Related Docs
 
-- **Architecture Overview** – See [docs/CONTRACTS_ARCHITECTURE.md](./CONTRACTS_ARCHITECTURE.md)
-- **Environment Setup** – See [ENVIRONMENT_SETUP_GUIDE.md](../ENVIRONMENT_SETUP_GUIDE.md)
-- **API Documentation** – See [docs/api/README.md](./api/README.md)
-- **Contributing Guide** – See [CONTRIBUTING.md](../CONTRIBUTING.md)
-- **Stellar Documentation** – https://developers.stellar.org/
-- **Soroban Documentation** – https://developers.stellar.org/docs/build/smart-contracts
-
-## Getting Help
-
-- **Check logs** – Always the first troubleshooting step
-- **Search issues** – Check GitHub issues for similar problems
-- **Review documentation** – Most common issues are covered above
-- **Ask in discussions** – Create a new discussion for help
-
----
-
-**Last Updated:** May 2026  
-**Maintained by:** Development Team  
-**Version:** 1.0.0
+- Root overview: [`README.md`](/Users/macbook/stellar/YieldVault-RWA/README.md:1)
+- Backend details: [`backend/README.md`](/Users/macbook/stellar/YieldVault-RWA/backend/README.md:1)
+- Frontend details: [`frontend/README.md`](/Users/macbook/stellar/YieldVault-RWA/frontend/README.md:1)
+- Environment matrix: [`docs/ENV_VARIABLE_MATRIX.md`](/Users/macbook/stellar/YieldVault-RWA/docs/ENV_VARIABLE_MATRIX.md:1)

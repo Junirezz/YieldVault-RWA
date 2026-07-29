@@ -20,6 +20,13 @@ export const en = {
     compare: "Compare",
     analytics: "Analytics",
     transactions: "Transactions",
+    admin: "Admin",
+  },
+  admin: {
+    title: "Admin Console",
+    description: "Operational tools restricted to admin wallets.",
+    badge: "Admin Access",
+    accessGranted: "Your connected wallet has admin access to this vault deployment.",
   },
   theme: {
     toggleToDark: "Toggle to dark mode",
@@ -33,6 +40,7 @@ export const en = {
     rpcCustom: "Custom",
     rpcDefault: "Default",
     disconnectAria: "Disconnect Wallet",
+    retry: "Try again",
     usdcBalanceAria: "USDC wallet balance",
     status: {
       connected: "Connected",
@@ -216,6 +224,21 @@ export const en = {
     walletOn: "your wallet is on",
     appRequires: "but this app requires",
     switchInstructions: "Open Freighter → Settings → Network and switch to {{network}} to continue.",
+  },
+  accountStatement: {
+    trigger: "Export Statement",
+    title: "Download Account Statement",
+    description:
+      "Export a downloadable statement of your holdings and transactions for the selected date range.",
+    walletLabel: "Wallet",
+    formatLabel: "File format",
+    startDate: "Start date",
+    endDate: "End date",
+    cancel: "Cancel",
+    download: "Download statement",
+    preparing: "Preparing…",
+    downloaded: "Downloaded",
+    failed: "Unable to export statement",
   },
   sessionExpired: {
     title: "Session Expired",

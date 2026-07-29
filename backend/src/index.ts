@@ -36,6 +36,7 @@ import { generateAdminReceipt, getAdminReceipt, listAdminReceipts, verifyReceipt
 import { startApySnapshotScheduler } from './apySnapshot';
 import { startDbBackupScheduler } from './dbBackupJob';
 import { startPositionReconciliationScheduler, startLedgerReconciliationScheduler } from './positionReconciliationJob';
+import { initializeJobGovernance } from './jobGovernance';
 import { setupSwagger } from './swagger';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
@@ -85,6 +86,7 @@ import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
 import walletAliasRouter from './walletAliasEndpoints';
+import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
 import {
   buildPortfolioHoldingsResponse,
@@ -227,6 +229,12 @@ const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CA
 
 // Configure logger
 logger.configure(logLevel);
+
+void walletAliasMappingService.loadFromDatabase().catch((error) => {
+  logger.log('error', 'Failed to warm wallet alias cache', {
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
 
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
@@ -1932,6 +1940,63 @@ app.get('/admin/allowlist', validateApiKey, (_req: Request, res: Response) => {
 });
 
 /**
+ * GET /admin/wallet-aliases
+ * Lists persisted wallet alias identity groups.
+ * Requires API key authentication.
+ */
+app.get('/admin/wallet-aliases', validateApiKey, async (_req: Request, res: Response) => {
+  const groups = await walletAliasMappingService.listIdentityLinks();
+  res.json({
+    groups,
+    count: groups.length,
+  });
+});
+
+/**
+ * DELETE /admin/wallet-aliases/:canonicalId
+ * Deletes a canonical wallet alias group and all linked aliases.
+ * Requires API key authentication.
+ */
+app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Request, res: Response) => {
+  const { canonicalId } = req.params;
+  const existing = await walletAliasMappingService.getIdentityLinks(canonicalId);
+
+  if (!existing) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Canonical identity not found',
+    });
+    return;
+  }
+
+  const deleted = await walletAliasMappingService.deleteIdentityGroup(canonicalId);
+  if (!deleted) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Canonical identity not found',
+    });
+    return;
+  }
+
+  const actor = resolveActingAdminAddress(req);
+  void recordAdminAuditLog(req, 'wallet-alias.delete', 200, {
+    actor,
+    canonicalId,
+    aliases: existing.aliases,
+    sources: existing.sources,
+  });
+
+  res.status(200).json({
+    message: 'Wallet alias group deleted',
+    canonicalId,
+    aliasesDeleted: existing.aliases.length,
+    sources: existing.sources,
+  });
+});
+
+/**
  * POST /admin/impersonate/sessions - start a time-bounded impersonation session
  * Requires super-admin API key.
  */
@@ -3470,11 +3535,23 @@ app.post('/admin/reports/exports/manifests/:id/verify', validateApiKey, async (r
 });
 
 /**
- * GET /admin/jobs/dashboard - lightweight HTML dashboard for operators
+ * GET /admin/jobs/dashboard - comprehensive HTML dashboard for operators to monitor jobs and DLQ
  */
-app.get('/admin/jobs/dashboard', validateApiKey, (_req: Request, res: Response) => {
+app.get('/admin/jobs/dashboard', validateApiKey, async (_req: Request, res: Response) => {
   const jobMetrics = getJobMetrics();
   const webhookMetrics = getWebhookDeliveryMetrics();
+  const dlqRecords = listDeadLetters({ status: 'dead-letter', limit: 10 });
+
+  const jobsByStatus = {
+    'dead-letter': dlqRecords.records.filter((r) => r.status === 'dead-letter').length,
+    'requeued': dlqRecords.records.filter((r) => r.status === 'requeued').length,
+    'resolved': dlqRecords.records.filter((r) => r.status === 'resolved').length,
+    'discarded': dlqRecords.records.filter((r) => r.status === 'discarded').length,
+  };
+
+  const recurringFailures = Object.entries(jobMetrics.recurringFailures || {})
+    .map(([jobName, count]) => `${jobName} (${count} failures)`)
+    .join(', ') || 'None';
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.status(200).send(`
@@ -3485,27 +3562,248 @@ app.get('/admin/jobs/dashboard', validateApiKey, (_req: Request, res: Response) 
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>YieldVault Job Dashboard</title>
         <style>
-          body { font-family: 'Segoe UI', sans-serif; margin: 2rem; background: #f6f8fa; color: #0f172a; }
-          h1 { margin-bottom: 1rem; }
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
-          .card { background: #ffffff; border: 1px solid #dbe3ec; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 10px rgba(15,23,42,0.05); }
-          .label { color: #64748b; font-size: 0.9rem; margin-bottom: 0.25rem; }
-          .value { font-size: 1.4rem; font-weight: 600; }
-          pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow: auto; }
+          * { box-sizing: border-box; }
+          body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
+            margin: 0; 
+            padding: 2rem; 
+            background: #f6f8fa; 
+            color: #0f172a; 
+          }
+          .container { max-width: 1400px; margin: 0 auto; }
+          h1 { margin: 0 0 1.5rem 0; font-size: 2rem; }
+          h2 { margin: 2rem 0 1rem 0; font-size: 1.3rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+          .card { 
+            background: #ffffff; 
+            border: 1px solid #dbe3ec; 
+            border-radius: 10px; 
+            padding: 1.25rem; 
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+            transition: box-shadow 0.2s;
+          }
+          .card:hover { box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15); }
+          .card.status-up { border-left: 4px solid #22c55e; }
+          .card.status-degraded { border-left: 4px solid #f59e0b; }
+          .card.status-down { border-left: 4px solid #ef4444; }
+          .label { color: #64748b; font-size: 0.875rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; }
+          .value { font-size: 2rem; font-weight: 700; }
+          .subvalue { color: #64748b; font-size: 0.9rem; margin-top: 0.25rem; }
+          .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+          }
+          .status-up { background: #d1fae5; color: #065f46; }
+          .status-degraded { background: #fef3c7; color: #92400e; }
+          .status-down { background: #fee2e2; color: #991b1b; }
+          .table-section { background: #ffffff; border: 1px solid #dbe3ec; border-radius: 10px; padding: 1.5rem; margin-bottom: 2rem; }
+          table { width: 100%; border-collapse: collapse; }
+          th { text-align: left; padding: 0.75rem; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #64748b; }
+          td { padding: 0.75rem; border-bottom: 1px solid #f1f5f9; }
+          tr:hover { background: #f9fafb; }
+          pre { 
+            background: #1e293b; 
+            color: #e2e8f0; 
+            padding: 1rem; 
+            border-radius: 8px; 
+            overflow: auto; 
+            font-size: 0.875rem;
+            line-height: 1.5;
+          }
+          .alert { 
+            padding: 1rem; 
+            border-radius: 8px; 
+            margin-bottom: 1rem; 
+          }
+          .alert-warning { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+          .alert-info { background: #dbeafe; border: 1px solid #93c5fd; color: #1e40af; }
+          .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+          a { color: #0066cc; text-decoration: none; }
+          a:hover { text-decoration: underline; }
+          button { 
+            padding: 0.5rem 1rem; 
+            border: 1px solid #dbe3ec; 
+            background: #ffffff; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 0.875rem;
+          }
+          button:hover { background: #f1f5f9; }
         </style>
       </head>
       <body>
-        <h1>Background Job Monitoring</h1>
-        <div class="grid">
-          <div class="card"><div class="label">Job Health</div><div class="value">${getJobHealthStatus()}</div></div>
-          <div class="card"><div class="label">Dead Letters</div><div class="value">${jobMetrics.totalDeadLetters}</div></div>
-          <div class="card"><div class="label">Webhook Endpoints</div><div class="value">${webhookMetrics.totalEndpoints}</div></div>
-          <div class="card"><div class="label">Webhook Failures</div><div class="value">${webhookMetrics.failed}</div></div>
+        <div class="container">
+          <h1>🎯 Background Job Monitoring Dashboard</h1>
+          
+          <div class="grid">
+            <div class="card status-${getJobHealthStatus() === 'up' ? 'up' : 'degraded'}">
+              <div class="label">Overall Health</div>
+              <div class="value"><span class="status-badge status-${getJobHealthStatus() === 'up' ? 'up' : 'degraded'}">${getJobHealthStatus().toUpperCase()}</span></div>
+            </div>
+            <div class="card">
+              <div class="label">Dead-Letter Records</div>
+              <div class="value">${jobMetrics.totalDeadLetters}</div>
+              <div class="subvalue">${dlqRecords.total} total (pending: ${jobsByStatus['dead-letter']})</div>
+            </div>
+            <div class="card">
+              <div class="label">Webhook Endpoints</div>
+              <div class="value">${webhookMetrics.totalEndpoints}</div>
+              <div class="subvalue">Failed: ${webhookMetrics.failed}</div>
+            </div>
+            <div class="card">
+              <div class="label">Recurring Failures</div>
+              <div class="value">${Object.keys(jobMetrics.recurringFailures || {}).length}</div>
+              <div class="subvalue" style="font-size: 0.8rem;">${recurringFailures}</div>
+            </div>
+          </div>
+
+          ${jobMetrics.totalDeadLetters > 0 ? `
+            <div class="alert alert-warning">
+              ⚠️ <strong>${jobMetrics.totalDeadLetters} dead-letter records pending</strong>. 
+              Review and retry failed jobs or mark them as resolved.
+            </div>
+          ` : ''}
+
+          <h2>📊 Job Runtime Metrics</h2>
+          <div class="table-section">
+            <table>
+              <thead>
+                <tr>
+                  <th>Job Name</th>
+                  <th>Total Runs</th>
+                  <th>Successful</th>
+                  <th>Failed</th>
+                  <th>In Flight</th>
+                  <th>Avg Duration (ms)</th>
+                  <th>Last Run</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${Object.entries(jobMetrics.runtime || {})
+                  .map(([jobName, metrics]) => `
+                    <tr>
+                      <td><strong>${jobName}</strong></td>
+                      <td>${metrics.totalRuns}</td>
+                      <td style="color: #16a34a;">${metrics.successfulRuns}</td>
+                      <td style="color: ${metrics.failedRuns > 0 ? '#dc2626' : '#64748b'};">${metrics.failedRuns}</td>
+                      <td>${metrics.inFlight}</td>
+                      <td>${metrics.averageDurationMs}</td>
+                      <td>${metrics.lastRunAt ? new Date(metrics.lastRunAt).toLocaleString() : 'Never'}</td>
+                    </tr>
+                  `)
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <h2>🔄 Recent Dead-Letter Records</h2>
+          <div class="table-section">
+            ${dlqRecords.records.length > 0 ? `
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Job</th>
+                    <th>Status</th>
+                    <th>Attempts</th>
+                    <th>Error</th>
+                    <th>Failed At</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${dlqRecords.records.slice(0, 10).map((record) => `
+                    <tr>
+                      <td><code style="font-size: 0.8rem;">${record.id}</code></td>
+                      <td>${record.jobName}</td>
+                      <td><span class="status-badge ${record.status === 'dead-letter' ? 'status-down' : record.status === 'requeued' ? 'status-up' : 'status-degraded'}">${record.status}</span></td>
+                      <td>${record.attempts}</td>
+                      <td style="max-width: 300px; overflow: auto;"><code style="font-size: 0.75rem;">${record.error}</code></td>
+                      <td>${new Date(record.failedAt).toLocaleString()}</td>
+                      <td class="actions">
+                        <a href="/admin/jobs/dead-letters/${record.id}">View</a> | 
+                        <a href="/admin/jobs/dead-letters/${record.id}/retry">Retry</a>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            ` : `
+              <p style="color: #64748b; text-align: center; padding: 2rem;">No dead-letter records (great job!)</p>
+            `}
+          </div>
+
+          <h2>📡 API Endpoints</h2>
+          <div class="table-section">
+            <p style="margin-top: 0;">Use these endpoints to manage dead-letter queue records:</p>
+            <table style="font-size: 0.9rem;">
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Endpoint</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>GET</strong></td>
+                  <td><code>/admin/jobs/dead-letters</code></td>
+                  <td>List all dead-letter records with optional filters</td>
+                </tr>
+                <tr>
+                  <td><strong>GET</strong></td>
+                  <td><code>/admin/jobs/dead-letters/:id</code></td>
+                  <td>Retrieve a specific dead-letter record</td>
+                </tr>
+                <tr>
+                  <td><strong>POST</strong></td>
+                  <td><code>/admin/jobs/dead-letters/:id/retry</code></td>
+                  <td>Retry a failed job (supports ?dryRun=true)</td>
+                </tr>
+                <tr>
+                  <td><strong>POST</strong></td>
+                  <td><code>/admin/jobs/dead-letters/:id/resolve</code></td>
+                  <td>Mark a job as manually resolved with notes</td>
+                </tr>
+                <tr>
+                  <td><strong>DELETE</strong></td>
+                  <td><code>/admin/jobs/dead-letters/:id</code></td>
+                  <td>Discard a dead-letter record</td>
+                </tr>
+                <tr>
+                  <td><strong>POST</strong></td>
+                  <td><code>/admin/jobs/dead-letters/bulk-retry</code></td>
+                  <td>Bulk retry multiple records (body: {ids: []})</td>
+                </tr>
+                <tr>
+                  <td><strong>POST</strong></td>
+                  <td><code>/admin/jobs/dead-letters/bulk-discard</code></td>
+                  <td>Bulk discard multiple records (body: {ids: []})</td>
+                </tr>
+                <tr>
+                  <td><strong>POST</strong></td>
+                  <td><code>/admin/jobs/dead-letters/process</code></td>
+                  <td>Trigger batch processing worker (body: {batchSize?: 10})</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2>📋 Full Metrics JSON</h2>
+          <details>
+            <summary style="cursor: pointer; font-weight: 600; padding: 0.5rem; margin-bottom: 0.5rem;">Click to expand full metrics</summary>
+            <pre>${JSON.stringify(jobMetrics, null, 2)}</pre>
+          </details>
+
+          <hr style="margin: 2rem 0; border: none; border-top: 1px solid #e2e8f0;" />
+          <p style="color: #64748b; font-size: 0.875rem;">
+            Last updated: ${new Date().toISOString()} | 
+            <a href="/admin/jobs/metrics">JSON API</a>
+          </p>
         </div>
-        <h2>Job Metrics</h2>
-        <pre>${JSON.stringify(jobMetrics, null, 2)}</pre>
-        <h2>Webhook Metrics</h2>
-        <pre>${JSON.stringify(webhookMetrics, null, 2)}</pre>
       </body>
     </html>
   `);
@@ -4811,4 +5109,9 @@ app.post('/admin/withdrawals/recovery/sweep', validateApiKey, async (req: Reques
 // suites drive the sweeper explicitly.
 if (process.env.NODE_ENV !== 'test') {
   withdrawalRecoveryCoordinator.startSweeper();
+  
+  // Initialize job governance from persisted dead-letter records
+  void initializeJobGovernance();
 }
+
+export default app;

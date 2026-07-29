@@ -257,6 +257,11 @@ async function fulfillHorizonRoute(route: import('@playwright/test').Route) {
 export async function interceptApiRoutes(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem('hasSeenWalkthrough', 'true');
+    // Privacy mode defaults to masked identifiers; disable for stable E2E address matchers.
+    window.localStorage.setItem(
+      'yieldvault-preferences:guest',
+      JSON.stringify({ maskSensitiveValues: false }),
+    );
     // Match Cypress: skip service-worker registration so Playwright route mocks
     // are not bypassed by cross-origin fetches issued from the SW context.
     (window as Window & { Cypress?: boolean }).Cypress = true;
@@ -407,6 +412,14 @@ export async function completeVaultReviewStep(
  */
 export async function stubFreighterConnected(page: Page, address: string) {
   await page.addInitScript((addr) => {
+    window.localStorage.setItem(
+      `yieldvault-preferences:${addr}`,
+      JSON.stringify({ maskSensitiveValues: false }),
+    );
+    window.localStorage.setItem(
+      'yieldvault-preferences:guest',
+      JSON.stringify({ maskSensitiveValues: false }),
+    );
     try {
       const raw = localStorage.getItem('yieldvault-preferences:guest');
       const base = raw ? JSON.parse(raw) : { maskSensitiveValues: false };
@@ -478,6 +491,14 @@ export async function stubFreighterConnected(page: Page, address: string) {
  */
 export async function stubFreighterManualConnect(page: Page, address: string) {
   await page.addInitScript((addr) => {
+    window.localStorage.setItem(
+      `yieldvault-preferences:${addr}`,
+      JSON.stringify({ maskSensitiveValues: false }),
+    );
+    window.localStorage.setItem(
+      'yieldvault-preferences:guest',
+      JSON.stringify({ maskSensitiveValues: false }),
+    );
     try {
       const raw = localStorage.getItem('yieldvault-preferences:guest');
       const base = raw ? JSON.parse(raw) : { maskSensitiveValues: false };

@@ -41,6 +41,9 @@ export function useAsyncActionButton({
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- mirror external async flags into button status */
     if (isPending) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- maps external async flags into button chrome
+      // Sync button chrome with mutation status flags from the caller.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived UI status from external flags
       setStatus("pending");
       return;
     }

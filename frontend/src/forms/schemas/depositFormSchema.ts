@@ -10,6 +10,7 @@
  */
 
 import type { ValidationSchema } from "../validate";
+import { parseAmountInput } from "./amountValidation";
 
 export interface DepositFormValues {
   amount: string;
@@ -37,16 +38,11 @@ export function createDepositFormSchema(
     amount: {
       required: "Amount is required.",
       custom: (value) => {
-        // Check if value is a valid number
-        const num = Number(value);
-        if (Number.isNaN(num) || !Number.isFinite(num)) {
-          return "Enter a valid number.";
+        const parsed = parseAmountInput(value);
+        if (!parsed.ok) {
+          return parsed.error;
         }
-
-        // Amount must be greater than 0
-        if (num <= 0) {
-          return "Amount must be greater than 0.";
-        }
+        const num = parsed.amount;
 
         // Check minimum deposit amount
         if (num < MIN_DEPOSIT_AMOUNT) {

@@ -4,6 +4,8 @@
  *
  * Import the schema you need and pass it to `validate()` from ./validation
  * before calling any API function.
+ *
+ * Naming convention: <Entity><Action>Schema  (e.g. DepositRequestSchema)
  */
 
 export {

@@ -66,6 +66,8 @@ describe('TransactionConfirmationModal', () => {
     it('displays contract address in monospace font', () => {
       render(<TransactionConfirmationModal {...defaultProps} />);
       const addressText = screen.getByText(mockSummary.contractAddress);
+      const styledParent = addressText.parentElement;
+      expect(styledParent?.style.fontFamily).toMatch(/monospace/i);
       expect(addressText.parentElement?.getAttribute("style") ?? "").toMatch(/monospace/i);
     });
   });

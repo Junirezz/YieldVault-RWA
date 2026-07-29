@@ -14,7 +14,6 @@ import {
   SORT_PARAM,
   VAULT_STRATEGIES,
   findBestStrategyIds,
-  findStrategy,
   formatLiquidityCadence,
   getApySpread,
   getComparisonMetric,
@@ -26,7 +25,6 @@ import {
 } from "../lib/vaultStrategies";
 import type {
   ComparisonMetric,
-  ComparisonMetricId,
   SortDirection,
   VaultStrategy,
 } from "../lib/vaultStrategies";
@@ -60,13 +58,11 @@ const VaultComparison: React.FC = () => {
     sortMetric ? bestFirstDirection(sortMetric) : "desc",
   );
 
-  // `parseSelectionParam` already dropped unknown ids; the type guard keeps the
-  // array typed without a non-null assertion.
   const selectedStrategies = useMemo(
     () =>
       selectedIds
-        .map((id) => findStrategy(id))
-        .filter((strategy): strategy is VaultStrategy => strategy !== undefined),
+        .map((id) => VAULT_STRATEGIES.find((strategy) => strategy.id === id))
+        .filter((strategy): strategy is VaultStrategy => Boolean(strategy)),
     [selectedIds],
   );
 
@@ -76,7 +72,7 @@ const VaultComparison: React.FC = () => {
   );
 
   const bestByMetric = useMemo(() => {
-    const map = new Map<ComparisonMetricId, string[]>();
+    const map = new Map<string, string[]>();
     COMPARISON_METRICS.forEach((metric) => {
       map.set(metric.id, findBestStrategyIds(comparedStrategies, metric));
     });
@@ -101,8 +97,6 @@ const VaultComparison: React.FC = () => {
     (strategy: VaultStrategy) => {
       const next = toggleStrategySelection(selectedIds, strategy.id);
 
-      // `toggleStrategySelection` hands back the same array when the cap blocks
-      // the change. Announce it instead of dropping the click on the floor.
       if (next === selectedIds) {
         setAnnouncement(
           `Comparison limit of ${MAX_COMPARISON_SELECTION} reached. Deselect a strategy before adding ${strategy.name}.`,
@@ -365,6 +359,13 @@ const VaultComparison: React.FC = () => {
               </button>
               <button
                 type="button"
+                className="btn btn-primary"
+                onClick={() => navigate("/?tab=deposit")}
+              >
+                Allocate to selected
+              </button>
+              <button
+                type="button"
                 className="btn btn-secondary"
                 onClick={() => navigate("/")}
               >
@@ -486,8 +487,6 @@ const VaultComparison: React.FC = () => {
                             }}
                           >
                             {metric.format(strategy)}
-                            {/* Colour alone would fail WCAG 1.4.1, so the
-                                winner also carries a glyph and a text cue. */}
                             {isBest && (
                               <>
                                 <span aria-hidden="true"> ★</span>

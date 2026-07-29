@@ -18,6 +18,12 @@ import {
 /** Valid Stellar public key (G + 55 base32 chars) for API validation in submitDeposit / submitWithdrawal. */
 const MOCK_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
+/** Truncated or privacy-masked forms of MOCK_ADDRESS shown in the navbar. */
+const SHORT_ADDR = /GBBD4?\.\.\.FLA5|GBBD•{8}FLA5/;
+
+async function goToConnectedVault(page: Page, path = '/') {
+  await page.goto(path);
+  await expect(page.getByText(SHORT_ADDR)).toBeVisible({ timeout: 10_000 });
 const SHORT_ADDR = `${MOCK_ADDRESS.substring(0, 5)}...${MOCK_ADDRESS.substring(MOCK_ADDRESS.length - 4)}`;
 
 async function goToConnectedVault(page: Page, path = '/') {

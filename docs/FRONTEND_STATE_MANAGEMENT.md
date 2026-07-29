@@ -1,6 +1,6 @@
 # YieldVault-RWA — Frontend State Management
 
-> **Last Updated:** 2026-05-29
+> **Last Updated:** 2026-07-24
 
 A shared reference for the frontend state management architecture used across the YieldVault-RWA codebase. The purpose of this document is to clarify state ownership, data fetching boundaries, and UI synchronization patterns to ensure a consistent and maintainable developer experience. 
 
@@ -65,6 +65,23 @@ Instead of relying on backend endpoints for every data permutation, raw data is 
 - **Vault Metrics**: `VaultContext` consumes raw `useVaultSummary` and `useVaultHistory` data, computes the active APY and Vault Utilization, and provides these derived metrics to all dashboard components.
 - **Table Filtering**: `TransactionHistory` fetches a raw list of transactions (max 200) and uses `useClientDataTable` to handle sorting, filtering, and pagination entirely in memory.
 
+### Optimistic Mutations And Rollback
+Deposit and withdrawal mutations update React Query caches immediately so the UI feels responsive, then reconcile with the server.
+
+Shared helpers live in `frontend/src/lib/optimisticVaultCache.ts` and are consumed by `useDepositMutation` / `useWithdrawMutation`:
+
+1. **Cancel** in-flight reads for balance, holdings, vault summary, and transactions.
+2. **Snapshot** each key, including whether the key existed (so rollback can `removeQueries` when there was no prior cache).
+3. **Apply** optimistic patches:
+   - Deposit: wallet USDC ↓, holdings/TVL ↑, prepend pending tx row
+   - Withdrawal: wallet USDC ↑, holdings/TVL ↓, prepend pending tx row
+4. **On error**: restore the snapshot exactly (cache consistency first).
+5. **On settled** (success or failure): invalidate the same keys so server truth replaces optimistic rows.
+
+`VaultDashboard` still owns user-facing feedback (result step + toast). Cache rollback must not depend on toast timing.
+
+See also [`docs/VAULT_UX_PATTERN_LIBRARY.md`](./VAULT_UX_PATTERN_LIBRARY.md) for pending / optimistic UX rules.
+
 ---
 
 ## Key Contexts
@@ -93,7 +110,7 @@ Custom hooks in `frontend/src/hooks/` encapsulate all complex logic.
 - **`useVaultSummary` & `useVaultHistory`**: Fetch global vault stats and historical data.
 
 **Mutation Hooks (React Query):**
-- **`useVaultMutations`**: Exposes `useDepositMutation` and `useWithdrawMutation` for executing Soroban contract calls. Automatically invalidates related query caches (balances, transactions) on success.
+- **`useVaultMutations`**: Exposes `useDepositMutation` and `useWithdrawMutation` for executing Soroban contract calls. Applies optimistic cache updates via `optimisticVaultCache`, rolls back on failure, and invalidates related query caches on settle.
 
 **Utility Hooks:**
 - **`useClientDataTable`**: Handles client-side pagination, sorting, and text-based filtering of arrays.
@@ -127,6 +144,7 @@ To maintain a clean and scalable frontend architecture, adhere to the following 
 3. **Use the URL as the Source of Truth:** For shareable states like search queries, filters, or active tabs, use the URL parameters instead of internal `useState`.
 4. **Don't Duplicate Server State:** Avoid copying React Query data into local `useState`. Derive values directly from the query data during render.
 5. **Colocate Form State:** Use the custom `useForm` hook for transaction inputs and validation. Avoid storing form inputs in global contexts.
+6. **Optimistic Updates Must Roll Back:** When mutating vault state, patch React Query caches through `optimisticVaultCache` helpers. Always snapshot before patching and restore on failure; never leave pending optimistic rows after an error.
 
 ---
 

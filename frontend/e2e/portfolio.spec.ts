@@ -4,7 +4,7 @@
 import { test, expect, interceptApiRoutes, stubFreighterConnected } from './fixtures';
 
 const MOCK_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
-const SHORT_ADDR = `${MOCK_ADDRESS.substring(0, 5)}...${MOCK_ADDRESS.substring(MOCK_ADDRESS.length - 4)}`;
+const SHORT_ADDR = /GBBD4?\.\.\.FLA5|GBBD•{8}FLA5/;
 
 test.describe('Portfolio page  unauthenticated', () => {
   test('shows connect-wallet prompt when no wallet is connected', async ({ page }) => {

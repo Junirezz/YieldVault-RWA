@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 import Navbar from "./components/Navbar";
@@ -42,10 +42,13 @@ import OfflineBanner from "./components/OfflineBanner";
 import HighLatencyBanner from "./components/HighLatencyBanner";
 import { useVault, VaultProvider } from "./context/VaultContext";
 import { usePageViewTracking } from "./hooks/useAnalytics";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { resolveUserRole } from "./lib/roles";
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
 const TransactionReceipt = lazy(() => import("./pages/TransactionReceipt"));
+const Admin = lazy(() => import("./pages/Admin"));
 
 // Removed simple fallback in favor of components/ErrorFallback
 
@@ -59,6 +62,7 @@ function AppContent() {
   const { data: usdcBalance = 0 } = useUsdcBalance(walletAddress);
   const { data: xlmBalance = 0 } = useXlmBalance(walletAddress);
   const { tvl } = useVault();
+  const role = useMemo(() => resolveUserRole(walletAddress), [walletAddress]);
 
   useEffect(() => {
     if ((window as Window & { Cypress?: unknown }).Cypress) {
@@ -154,6 +158,7 @@ function AppContent() {
             usdcBalance={usdcBalance}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
+            role={role}
           />
           <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
             <Suspense fallback={<RouteLoadingFallback />}>
@@ -189,6 +194,14 @@ function AppContent() {
                 <Route path="/receipt/:txHash" element={<TransactionReceipt />} />
                 <Route path="/settings" element={<LazySettings />} />
                 <Route path="/ui-kit" element={<LazyUIPreview />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute role={role} allow={["admin"]}>
+                      <Admin walletAddress={walletAddress} />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </SentryRoutes>
             </Suspense>

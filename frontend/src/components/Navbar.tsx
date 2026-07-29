@@ -12,6 +12,7 @@ import { useWalletNetwork } from "../hooks/useWalletNetwork";
 import Badge from "./Badge";
 import { usePendingTransactionCount } from "../hooks/usePendingTransactionCount";
 import { getRoutePrefetchHandlers } from "../lib/routePrefetch";
+import type { UserRole } from "../lib/roles";
 
 interface NavbarProps {
   currentPath?: "/" | "/analytics" | "/portfolio";
@@ -20,6 +21,7 @@ interface NavbarProps {
   usdcBalance?: number;
   onConnect: (address: string) => void;
   onDisconnect: (reason?: DisconnectReason) => void;
+  role?: UserRole;
 }
 
 const Navbar: FC<NavbarProps> = ({
@@ -27,6 +29,7 @@ const Navbar: FC<NavbarProps> = ({
   usdcBalance = 0,
   onConnect,
   onDisconnect,
+  role = "guest",
 }) => {
   const { t } = useTranslation();
   const { walletNetwork, expectedNetwork } = useWalletNetwork(walletAddress);
@@ -131,6 +134,11 @@ const Navbar: FC<NavbarProps> = ({
                 </Badge>
               )}
             </NavLink>
+            {role === "admin" && (
+              <NavLink to="/admin" className="nav-link">
+                {t("nav.admin")}
+              </NavLink>
+            )}
           </div>
         </div>
 
@@ -214,6 +222,11 @@ const Navbar: FC<NavbarProps> = ({
               </Badge>
             )}
           </NavLink>
+          {role === "admin" && (
+            <NavLink to="/admin" onClick={() => setIsMobileMenuOpen(false)}>
+              {t("nav.admin")}
+            </NavLink>
+          )}
 
           <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
             <ThemeToggle />
@@ -245,6 +258,11 @@ const Navbar: FC<NavbarProps> = ({
               </Badge>
             )}
           </NavLink>
+          {role === "admin" && (
+            <NavLink to="/admin" role="menuitem" onClick={() => setMenuOpen(false)}>
+              {t("nav.admin")}
+            </NavLink>
+          )}
         </div>
       )}
     </nav>

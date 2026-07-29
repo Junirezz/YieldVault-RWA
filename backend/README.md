@@ -25,6 +25,9 @@ npm install
 
 # Create environment file
 cp .env.example .env
+
+# Create/update the local Prisma database
+npx prisma migrate dev
 ```
 
 ### Development
@@ -35,6 +38,23 @@ npm run dev
 ```
 
 The server will start on `http://localhost:3000`.
+
+For the default local workflow, PostgreSQL and Redis are optional:
+
+- Prisma uses the SQLite datasource in [`prisma/schema.prisma`](/Users/macbook/stellar/YieldVault-RWA/backend/prisma/schema.prisma:1) when `DATABASE_URL` is not set.
+- Redis-backed features fall back to in-memory behavior when `REDIS_URL` is not configured.
+
+Minimum local environment values:
+
+```env
+PORT=3000
+NODE_ENV=development
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+VAULT_CONTRACT_ID=
+```
+
+For the full monorepo bootstrap order, see [`docs/LOCAL_DEVELOPMENT_QUICKSTART.md`](/Users/macbook/stellar/YieldVault-RWA/docs/LOCAL_DEVELOPMENT_QUICKSTART.md:1).
 
 ### Production
 
@@ -58,6 +78,10 @@ Rate limiting and other settings are configurable via environment variables:
 | `RATE_LIMIT_MAX_REQUESTS` | 100 | Global requests per window |
 | `API_RATE_LIMIT_WINDOW_MS` | 60000 | API rate limit window (1 min) |
 | `API_RATE_LIMIT_MAX_REQUESTS` | 30 | API requests per window |
+| `RATE_LIMIT_AUTH_MAX` | 5 | Auth tier request limit per window (1 min) |
+| `RATE_LIMIT_AUTH_WINDOW_MS` | 60000 | Auth tier window duration in ms |
+| `DEPOSITS_RATE_LIMIT_MAX` | 10 | Deposit/transfer tier request limit per window (1 min) |
+| `DEPOSITS_RATE_LIMIT_WINDOW_MS` | 60000 | Deposit/transfer tier window duration in ms |
 | `STELLAR_RPC_URL` | https://soroban-testnet.stellar.org | Stellar RPC endpoint |
 | `DATABASE_URL` | local PostgreSQL URL | Primary PostgreSQL connection string (required in production) |
 | `DATABASE_REPLICA_URL` | primary database | Optional read-replica connection string |
@@ -138,8 +162,15 @@ Protected routes (`POST /api/v1/auth/login`, vault deposits/withdrawals) accept 
 | Expired nonce | 401 | `NONCE_EXPIRED` |
 | Reused nonce | 401 | `NONCE_REPLAY` |
 | Bad signature | 401 | `SIGNATURE_INVALID` |
+| Active nonce cap reached | 429 | `NONCE_LIMIT_EXCEEDED` |
 
 Configure via `WALLET_NONCE_ENFORCEMENT` (strict in production) and `WALLET_SIGNATURE_MODE` (`stellar` \| `hmac`).
+
+Nonce allocation and consumption are atomic. With `REDIS_URL` configured, the
+backend enforces single-use consumption and the per-wallet active nonce cap
+across all replicas. Without Redis those guarantees apply only within one
+backend process, so multi-instance production deployments must configure the
+shared Redis store.
 
 ### Admin API Key RBAC
 
@@ -245,6 +276,19 @@ When bumping snapshots intentionally:
 1. Update the Zod schema in `src/apiContractSnapshots.ts`
 2. Run `npm run snapshots:write` and commit `schema-snapshots/*.json`
 3. Align OpenAPI annotations and run `npm run generate:openapi`
+
+### Wallet Alias Persistence
+
+Wallet alias identity groups are persisted in Prisma and loaded into the
+`walletAliasService` cache on startup. New aliases registered through auth or
+`/api/v1/wallet-aliases/link` survive backend restarts and continue to resolve
+for referral attribution.
+
+Environments that relied on the previous in-memory-only alias registry do not
+have a durable source to backfill from after a restart. If those aliases matter,
+export or re-register the live mappings before deploying/restarting; otherwise
+the persistent tables will start empty and only new registrations will be
+preserved.
 
 ## Issues Addressed
 

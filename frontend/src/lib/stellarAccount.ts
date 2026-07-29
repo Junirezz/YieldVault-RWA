@@ -61,7 +61,21 @@ export async function fetchUsdcBalance(
   rpcUrl = import.meta.env.VITE_SOROBAN_RPC_URL || `https://${TESTNET_SOROBAN_RPC}`,
 ): Promise<number> {
   const horizonUrl = toHorizonUrl(rpcUrl);
-  const server = new Horizon.Server(horizonUrl);
+  const ServerFactory = Horizon.Server as unknown as {
+    new (url: string): {
+      accounts: () => { accountId: (id: string) => { call: () => Promise<{ balances: Array<Horizon.HorizonApi.BalanceLine> }> } };
+    };
+    (url: string): {
+      accounts: () => { accountId: (id: string) => { call: () => Promise<{ balances: Array<Horizon.HorizonApi.BalanceLine> }> } };
+    };
+  };
+  const server = (() => {
+    try {
+      return new ServerFactory(horizonUrl);
+    } catch {
+      return ServerFactory(horizonUrl);
+    }
+  })();
   const account = await server.accounts().accountId(walletAddress).call();
 
   const usdc = account.balances.find((balance) => {

@@ -3,7 +3,7 @@
   "info": {
     "title": "YieldVault Stellar RWA API",
     "version": "1.0.0",
-    "description": "API documentation for the YieldVault Stellar RWA backend.",
+    "description": "API documentation for the YieldVault Stellar RWA backend.\n\n## API Version Negotiation\n\nEvery response includes `X-API-Version` and `X-API-Version-Supported` headers.\n\nClients may request a specific version via:\n- `Accept-Version: 1.0.0` header\n- `X-API-Version: 1.0.0` header (takes priority)\n- `Accept: application/json;version=1.0.0` media-type parameter\n\nIf the requested version is not supported, the server responds with **406 Not Acceptable**.\n\n## Deprecation\n\nLegacy unversioned routes (`/vault/*`, `/referrals/*`, `/transactions/*`, `/portfolio/*`) and `/api/*` paths (non-`/api/v1/`) return RFC 8594 deprecation headers (`Deprecation`, `Sunset`, `Link`, `X-API-Deprecation-Info`). Migrate to the corresponding `/api/v1/…` path before `Fri, 31 Dec 2027 23:59:59 GMT`.",
     "license": {
       "name": "MIT",
       "url": "https://spdx.org/licenses/MIT.html"
@@ -20,6 +20,110 @@
     }
   ],
   "components": {
+    "parameters": {
+      "AcceptVersion": {
+        "in": "header",
+        "name": "Accept-Version",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "1.0.0"
+        },
+        "description": "Requested API version. Supported values: `1`, `v1`, `1.0.0`, or any `1.x.y` patch/minor. Omitting this header defaults to the current version. If the requested version is unsupported the server responds with 406."
+      },
+      "XApiVersionRequest": {
+        "in": "header",
+        "name": "X-API-Version",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "1.0.0"
+        },
+        "description": "Explicit version override. Takes priority over `Accept-Version`. Supported values: `1`, `v1`, `1.0.0`, or any `1.x.y` patch/minor."
+      }
+    },
+    "headers": {
+      "XApiVersion": {
+        "description": "The API version that processed this request.",
+        "schema": {
+          "type": "string",
+          "example": "1.0.0"
+        }
+      },
+      "XApiVersionSupported": {
+        "description": "Comma-separated list of all API versions currently supported by this server.",
+        "schema": {
+          "type": "string",
+          "example": "1.0.0"
+        }
+      },
+      "Deprecation": {
+        "description": "Present and set to `true` when the requested path is on the legacy unversioned API surface.",
+        "schema": {
+          "type": "string",
+          "enum": ["true"]
+        }
+      },
+      "Sunset": {
+        "description": "RFC 8594. The date after which the deprecated endpoint will be removed.",
+        "schema": {
+          "type": "string",
+          "example": "Fri, 31 Dec 2027 23:59:59 GMT"
+        }
+      },
+      "Link": {
+        "description": "RFC 5988 link relation pointing to the successor canonical path (`rel=\"successor-version\"`).",
+        "schema": {
+          "type": "string",
+          "example": "</api/v1/vault/summary>; rel=\"successor-version\""
+        }
+      },
+      "XApiDeprecationInfo": {
+        "description": "Human-readable deprecation notice with the successor path and sunset date.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "406VersionNotAcceptable": {
+        "description": "The API version requested via `Accept-Version`, `X-API-Version`, or the `version` media-type parameter is not supported by this server.",
+        "headers": {
+          "X-API-Version-Supported": {
+            "$ref": "#/components/headers/XApiVersionSupported"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["error", "status", "message", "supportedVersions"],
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "example": "Not Acceptable"
+                },
+                "status": {
+                  "type": "integer",
+                  "example": 406
+                },
+                "message": {
+                  "type": "string",
+                  "example": "The requested API version '2.0.0' is not supported. Supported versions: 1.0.0"
+                },
+                "supportedVersions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "example": ["1.0.0"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "securitySchemes": {
       "IdempotencyKey": {
         "type": "apiKey",
@@ -212,6 +316,8 @@
           "Referrals"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "path",
             "name": "wallet",
@@ -225,6 +331,10 @@
         "responses": {
           "200": {
             "description": "Referral stats",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -244,6 +354,9 @@
           "404": {
             "description": "Wallet has no referral activity"
           },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
+          },
           "500": {
             "description": "Internal server error"
           }
@@ -258,6 +371,8 @@
           "Referrals"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "path",
             "name": "wallet",
@@ -271,6 +386,10 @@
         "responses": {
           "200": {
             "description": "Referral code",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -283,6 +402,9 @@
                 }
               }
             }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           },
           "500": {
             "description": "Internal server error"
@@ -298,6 +420,8 @@
           "Transactions"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "query",
             "name": "limit",
@@ -372,6 +496,10 @@
         "responses": {
           "200": {
             "description": "List of transactions",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -394,6 +522,9 @@
                 }
               }
             }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           }
         }
       }
@@ -406,6 +537,8 @@
           "Portfolio"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "query",
             "name": "limit",
@@ -436,7 +569,14 @@
         ],
         "responses": {
           "200": {
-            "description": "List of holdings"
+            "description": "List of holdings",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           }
         }
       }
@@ -449,6 +589,8 @@
           "Vault"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "query",
             "name": "limit",
@@ -476,7 +618,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Vault history points"
+            "description": "Vault history points",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           }
         }
       }
@@ -489,6 +638,8 @@
           "Vault"
         ],
         "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" },
           {
             "in": "query",
             "name": "days",
@@ -504,6 +655,10 @@
         "responses": {
           "200": {
             "description": "Array of APY snapshots ordered oldest → newest",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -534,20 +689,36 @@
                 }
               }
             }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           }
         }
       }
     },
     "/vault/summary": {
       "get": {
-        "summary": "Vault summary",
-        "description": "Returns high-level vault metrics including total assets, shares, and APY.",
+        "summary": "Vault summary (deprecated)",
+        "description": "**Deprecated.** Returns high-level vault metrics including total assets, shares, and APY.\n\nThis endpoint is on the legacy unversioned API surface. Migrate to `/api/v1/vault/summary` before `Fri, 31 Dec 2027 23:59:59 GMT`.\n\nThe response includes `Deprecation: true`, `Sunset`, `Link` (RFC 8594), and `X-API-Deprecation-Info` headers.",
+        "deprecated": true,
         "tags": [
           "Vault"
         ],
+        "parameters": [
+          { "$ref": "#/components/parameters/AcceptVersion" },
+          { "$ref": "#/components/parameters/XApiVersionRequest" }
+        ],
         "responses": {
           "200": {
-            "description": "Vault summary metrics",
+            "description": "Vault summary metrics (redirect — see `Location` header for canonical URL)",
+            "headers": {
+              "X-API-Version": { "$ref": "#/components/headers/XApiVersion" },
+              "X-API-Version-Supported": { "$ref": "#/components/headers/XApiVersionSupported" },
+              "Deprecation": { "$ref": "#/components/headers/Deprecation" },
+              "Sunset": { "$ref": "#/components/headers/Sunset" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-API-Deprecation-Info": { "$ref": "#/components/headers/XApiDeprecationInfo" }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -555,6 +726,21 @@
                 }
               }
             }
+          },
+          "301": {
+            "description": "Permanent redirect to `/api/v1/vault/summary`",
+            "headers": {
+              "Location": {
+                "schema": { "type": "string", "example": "/api/v1/vault/summary" }
+              },
+              "Deprecation": { "$ref": "#/components/headers/Deprecation" },
+              "Sunset": { "$ref": "#/components/headers/Sunset" },
+              "Link": { "$ref": "#/components/headers/Link" },
+              "X-API-Deprecation-Info": { "$ref": "#/components/headers/XApiDeprecationInfo" }
+            }
+          },
+          "406": {
+            "$ref": "#/components/responses/406VersionNotAcceptable"
           }
         }
       }
