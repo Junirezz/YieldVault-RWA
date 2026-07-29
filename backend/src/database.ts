@@ -1,5 +1,6 @@
 import { logger } from './middleware/structuredLogging';
 import { Pool, PoolConfig } from 'pg';
+import { recordQueryPerformance } from './queryBudgets';
 
 /**
  * Interface for a database pool.
@@ -91,19 +92,19 @@ export class DatabaseManager {
 
     if (isReadQuery) {
       try {
-        return await this.replicaPool.query<T>(text, params);
+        return await this.executeWithBudget(this.replicaPool, 'raw_replica', text, params);
       } catch (error) {
         logger.log('warn', 'Read replica query failed, failing over to primary', {
           error: error instanceof Error ? error.message : String(error),
-          text,
+          action: classifySqlAction(text),
         });
         // Fallback to primary
-        return await this.primaryPool.query<T>(text, params);
+        return await this.executeWithBudget(this.primaryPool, 'raw_primary', text, params);
       }
     }
 
     // Write queries always go to primary
-    return await this.primaryPool.query<T>(text, params);
+    return await this.executeWithBudget(this.primaryPool, 'raw_primary', text, params);
   }
 
   /**
@@ -112,7 +113,7 @@ export class DatabaseManager {
    * Throws if the replica is unreachable.
    */
   async queryReplica<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }> {
-    return await this.replicaPool.query<T>(text, params);
+    return await this.executeWithBudget(this.replicaPool, 'raw_replica', text, params);
   }
 
   /**
@@ -120,7 +121,7 @@ export class DatabaseManager {
    * Useful for reads that require the latest committed data (e.g. after a write).
    */
   async queryPrimary<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }> {
-    return await this.primaryPool.query<T>(text, params);
+    return await this.executeWithBudget(this.primaryPool, 'raw_primary', text, params);
   }
 
   /**
@@ -151,6 +152,39 @@ export class DatabaseManager {
   private isReadQuery(text: string): boolean {
     const trimmed = text.trim().toLowerCase();
     return trimmed.startsWith('select') || trimmed.startsWith('with');
+  }
+
+  private async executeWithBudget<T>(
+    pool: IDatabasePool,
+    model: 'raw_primary' | 'raw_replica',
+    text: string,
+    params?: any[],
+  ): Promise<{ rows: T[] }> {
+    const startedAt = process.hrtime.bigint();
+    let failed = false;
+    try {
+      return await pool.query<T>(text, params);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      void recordQueryPerformance({
+        model,
+        action: classifySqlAction(text),
+        durationMs,
+        source: 'postgres',
+        failed,
+      }).catch((error) => {
+        if (process.env.NODE_ENV !== 'test') {
+          logger.log('error', 'Failed to record PostgreSQL query performance', {
+            model,
+            action: classifySqlAction(text),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    }
   }
 
   /**
@@ -197,6 +231,13 @@ function requireDatabaseUrl(): string {
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function classifySqlAction(text: string): string {
+  const withoutLeadingComments = text
+    .replace(/^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/u, '')
+    .trimStart();
+  return withoutLeadingComments.match(/^([A-Za-z]+)/)?.[1]?.toLowerCase() || 'unknown';
 }
 
 // Export a singleton instance

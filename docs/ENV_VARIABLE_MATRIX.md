@@ -70,8 +70,15 @@ Complete reference for all environment variables across the YieldVault RWA stack
 | `PRISMA_QUERY_TIMEOUT_MS` | `5000` | ⬜ optional | Prisma per-query timeout (ms) | `backend/src/prisma.ts` |
 | `PRISMA_TX_MAX_WAIT_MS` | `5000` | ⬜ optional | Prisma transaction max wait (ms) | `backend/.env.example` |
 | `PRISMA_TX_TIMEOUT_MS` | `10000` | ⬜ optional | Prisma transaction timeout (ms) | `backend/.env.example` |
-| `SLOW_QUERY_THRESHOLD_MS` | `500` | ⬜ optional | Slow query warning threshold (ms) | `backend/src/prismaClient.ts` |
+| `QUERY_READ_BUDGET_MS` | `100` | ⬜ optional | Default budget for read queries (ms) | `backend/src/queryBudgets.ts` |
+| `QUERY_WRITE_BUDGET_MS` | `200` | ⬜ optional | Default budget for write queries (ms) | `backend/src/queryBudgets.ts` |
+| `QUERY_BUDGETS_JSON` | built-in hot-path budgets | ⬜ optional | JSON map of exact `Model.action` budget overrides | `backend/src/queryBudgets.ts` |
+| `SLOW_QUERY_CRITICAL_MULTIPLIER` | `3` | ⬜ optional | Budget multiple that escalates a breach to critical | `backend/src/queryBudgets.ts` |
 | `SLOW_QUERY_ALERT_COOLDOWN_MS` | `900000` (15 min) | ⬜ optional | Cooldown between slow query alerts | `backend/src/queryBudgets.ts` |
+| `SLOW_QUERY_ALERT_TIMEOUT_MS` | `5000` | ⬜ optional | Slack/PagerDuty delivery timeout (ms) | `backend/src/queryBudgets.ts` |
+| `QUERY_ALERT_TYPE` | `ALERT_TYPE` / `slack` | ⬜ optional | Slow-query alert channels: `slack`, `pagerduty`, or `both` | `backend/src/queryBudgets.ts` |
+| `SLOW_QUERY_SLACK_WEBHOOK_URL` | `SLACK_WEBHOOK_URL` | ⬜ optional | Dedicated slow-query Slack webhook | `backend/src/queryBudgets.ts` |
+| `SLOW_QUERY_PAGERDUTY_INTEGRATION_KEY` | `PAGERDUTY_INTEGRATION_KEY` | ⬜ optional | Dedicated slow-query PagerDuty key | `backend/src/queryBudgets.ts` |
 
 ---
 
