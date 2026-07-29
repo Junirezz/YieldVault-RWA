@@ -27,6 +27,12 @@ This document outlines all environment variables used by the latency monitoring 
 - `SLO_ALERT_COOLDOWN_MS` - Cooldown between alerts for same endpoint in milliseconds (default: `900000` = 15 minutes)
 - `SLO_CHECK_INTERVAL_MS` - How often to check for SLO violations in milliseconds (default: `60000` = 1 minute)
 
+### Rate Limiting Configuration
+- `RATE_LIMIT_AUTH_MAX` - Maximum requests for authentication tier (`/api/v1/auth/*`) per window (default: `5`)
+- `RATE_LIMIT_AUTH_WINDOW_MS` - Window duration for auth rate limiting in milliseconds (default: `60000` = 1 minute)
+- `DEPOSITS_RATE_LIMIT_MAX` - Maximum requests for deposit/transfer tier (`/api/v1/vault/deposits`, `/api/v1/vault/withdrawals`) per window (default: `10`)
+- `DEPOSITS_RATE_LIMIT_WINDOW_MS` - Window duration for deposit/transfer rate limiting in milliseconds (default: `60000` = 1 minute)
+
 ## Example Configuration
 
 ### Development Environment
