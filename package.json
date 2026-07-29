@@ -13,6 +13,7 @@
     "validate:testing-strategy": "tsx scripts/validate-testing-strategy.ts",
     "validate:sprint-and-triage": "tsx scripts/validate-sprint-and-triage-conventions.ts",
     "validate:release-notes": "tsx scripts/validate-release-notes.ts",
-    "validate:nfr-baselines": "tsx scripts/validate-nfr-baselines.ts"
+    "validate:nfr-baselines": "tsx scripts/validate-nfr-baselines.ts",
+    "validate:incident-severity": "tsx scripts/validate-incident-severity.ts"
   }
 }
