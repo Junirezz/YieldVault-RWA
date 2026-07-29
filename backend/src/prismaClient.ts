@@ -9,11 +9,10 @@
 
 import { PrismaClient } from '@prisma/client';
 import { logger } from './middleware/structuredLogging';
-import { observeDbQueryDuration } from './metrics';
+import { recordQueryPerformance } from './queryBudgets';
 
 let prismaClientInstance: PrismaClient | null = null;
 let queryInstrumentationAttached = false;
-const SLOW_QUERY_THRESHOLD_MS = parsePositiveInt(process.env.SLOW_QUERY_THRESHOLD_MS, 500);
 
 /**
  * Get or create the shared Prisma Client instance.
@@ -57,8 +56,6 @@ export function getPrismaClient(): PrismaClient {
   return prismaClientInstance as PrismaClient;
 }
 
-import { getQueryBudget, triggerSlowQueryAlert } from './queryBudgets';
-
 function attachQueryInstrumentation(client: PrismaClient): void {
   if (queryInstrumentationAttached) {
     return;
@@ -74,29 +71,18 @@ function attachQueryInstrumentation(client: PrismaClient): void {
       const model = params.model || 'raw';
       const action = params.action || 'unknown';
 
-      observeDbQueryDuration(model, action, elapsedMs);
-
-      const budgetMs = getQueryBudget(model, action);
-      if (elapsedMs >= budgetMs) {
-        logger.log('warn', 'Prisma query exceeded performance budget', {
+      void recordQueryPerformance({
+        model,
+        action,
+        durationMs: elapsedMs,
+        source: 'prisma',
+      }).catch((err) => {
+        logger.log('error', 'Failed to record Prisma query performance', {
+          error: err instanceof Error ? err.message : String(err),
           model,
           action,
-          durationMs: Math.round(elapsedMs * 100) / 100,
-          budgetMs,
         });
-
-        void triggerSlowQueryAlert(model, action, elapsedMs, budgetMs).catch((err) => {
-          logger.log('error', 'Failed to trigger slow query alert', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      } else if (elapsedMs >= SLOW_QUERY_THRESHOLD_MS) {
-        logger.log('warn', 'Slow Prisma query detected', {
-          model,
-          action,
-          durationMs: Math.round(elapsedMs * 100) / 100,
-        });
-      }
+      });
     }
   });
 
@@ -108,15 +94,6 @@ function attachQueryInstrumentation(client: PrismaClient): void {
   });
 
   queryInstrumentationAttached = true;
-}
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  const parsed = parseInt(raw || '', 10);
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    return fallback;
-  }
-
-  return parsed;
 }
 
 /**

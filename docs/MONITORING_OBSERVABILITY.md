@@ -81,7 +81,10 @@ sum(rate(http_request_count[5m])) by (route)
 
 | Metric                      | Type      | Labels            | What it measures                           |
 | --------------------------- | --------- | ----------------- | ------------------------------------------ |
-| `db_query_duration_seconds` | Histogram | `model`, `action` | Prisma query duration; buckets at 5 ms–5 s |
+| `db_query_duration_seconds` | Histogram | `model`, `action` | Prisma and raw PostgreSQL query duration; buckets at 5 ms–5 s |
+| `db_query_budget_ms` | Gauge | `model`, `action` | Active performance budget for each observed query |
+| `db_query_budget_breach_total` | Counter | `model`, `action`, `source`, `severity` | Queries exceeding budget |
+| `db_slow_query_alert_total` | Counter | `model`, `action`, `severity`, `outcome` | Delivered, logged, suppressed, or failed alerts |
 
 **Key derived query:**
 
@@ -90,7 +93,16 @@ sum(rate(http_request_count[5m])) by (route)
 histogram_quantile(0.95,
   sum(rate(db_query_duration_seconds_bucket[5m])) by (le, model, action)
 )
+
+# Budget breaches by severity
+sum(rate(db_query_budget_breach_total[5m])) by (model, action, severity)
+
+# Alert delivery failures
+sum(increase(db_slow_query_alert_total{outcome="delivery_failed"}[15m]))
 ```
+
+See [Query Performance Budgets and Slow-Query Alerts](../backend/docs/QUERY_PERFORMANCE_BUDGETS.md)
+for configuration, alert routing, and the operator response procedure.
 
 ### 1.3 Cache Metrics
 

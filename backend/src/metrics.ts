@@ -37,9 +37,30 @@ export const activeConnections = new Gauge({
 
 export const dbQueryDuration = new Histogram({
   name: 'db_query_duration_seconds',
-  help: 'Histogram of Prisma query duration in seconds',
+  help: 'Histogram of database query duration in seconds',
   labelNames: ['model', 'action'],
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
+export const dbQueryBudgetMs = new Gauge({
+  name: 'db_query_budget_ms',
+  help: 'Configured database query performance budget in milliseconds',
+  labelNames: ['model', 'action'],
+  registers: [register],
+});
+
+export const dbQueryBudgetBreachTotal = new Counter({
+  name: 'db_query_budget_breach_total',
+  help: 'Total database queries that exceeded their performance budget',
+  labelNames: ['model', 'action', 'source', 'severity'],
+  registers: [register],
+});
+
+export const dbSlowQueryAlertTotal = new Counter({
+  name: 'db_slow_query_alert_total',
+  help: 'Slow-query alert outcomes after cooldown and delivery processing',
+  labelNames: ['model', 'action', 'severity', 'outcome'],
   registers: [register],
 });
 
@@ -95,6 +116,28 @@ export function observeDbQueryDuration(model: string, action: string, durationMs
     },
     durationMs / 1000,
   );
+}
+
+export function setDbQueryBudget(model: string, action: string, budgetMs: number): void {
+  dbQueryBudgetMs.set({ model, action }, budgetMs);
+}
+
+export function recordDbQueryBudgetBreach(
+  model: string,
+  action: string,
+  source: string,
+  severity: string,
+): void {
+  dbQueryBudgetBreachTotal.inc({ model, action, source, severity });
+}
+
+export function recordDbSlowQueryAlert(
+  model: string,
+  action: string,
+  severity: string,
+  outcome: string,
+): void {
+  dbSlowQueryAlertTotal.inc({ model, action, severity, outcome });
 }
 
 // --- Job Governance Metrics ---
