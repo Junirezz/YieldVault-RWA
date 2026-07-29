@@ -121,7 +121,7 @@ for (const event of response.events) {
 - [TypeScript Consumer](./docs/examples/webhook_consumer.ts)
 - [Python Consumer](./docs/examples/webhook_consumer.py)
 
-## Disaster Recovery
+## Disaster Recovery & Incident Response
 
 YieldVault has comprehensive disaster recovery procedures to ensure system resilience:
 
@@ -130,6 +130,16 @@ YieldVault has comprehensive disaster recovery procedures to ensure system resil
 - **Runbooks:** Step-by-step recovery procedures for all failure scenarios
 
 See [Disaster Recovery Runbooks](./docs/runbooks/README.md) for detailed procedures.
+
+### Incident Response
+
+See the [Incident Runbook](./docs/incident-runbook.md) for the complete incident triage guide, including:
+
+- **Severity classification (Sev0–Sev3)** with definitions, example scenarios, and response SLAs
+- **First responder triage flow** with step-by-step instructions for the first 15 minutes
+- **Escalation paths** with triggers and contact information
+- **Communication templates** for status updates and stakeholder notifications
+- **Symptom-to-playbook quick reference** for rapid diagnosis
 
 ## Roadmap (Phases)
 
