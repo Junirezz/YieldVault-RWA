@@ -1,6 +1,7 @@
 /**
  * @file walletNonce.ts
  * Server-side nonce tracking for signed wallet actions (replay protection).
+ * Race-condition hardening for Issue #1044.
  *
  * Each nonce is single-use and expires after WALLET_NONCE_TTL_SECONDS.
  * Backed by in-memory storage with optional Redis when REDIS_URL is set.
@@ -12,25 +13,6 @@ import Redis from 'ioredis';
 import { logger } from './middleware/structuredLogging';
 import { normalizeWalletAddress } from './walletUtils';
 
-class AsyncMutex {
-  private readonly locks = new Map<string, Promise<void>>();
-  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(key) ?? Promise.resolve();
-    let release: () => void;
-    const current = new Promise<void>((res) => (release = res));
-    this.locks.set(key, current);
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      release!();
-      if (this.locks.get(key) === current) this.locks.delete(key);
-    }
-  }
-}
-
-
-
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export type WalletAction = 'login' | 'deposit' | 'withdrawal';
@@ -38,7 +20,7 @@ export type WalletAction = 'login' | 'deposit' | 'withdrawal';
 const DEFAULT_NONCE_TTL_SECONDS = parseInt(process.env.WALLET_NONCE_TTL_SECONDS || '300', 10);
 const MAX_ACTIVE_NONCES_PER_WALLET = parseInt(
   process.env.WALLET_NONCE_MAX_ACTIVE_PER_WALLET || '10',
-  10,
+  10
 );
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,7 +35,7 @@ export interface IssuedWalletNonce {
   message: string;
 }
 
-interface StoredNonce {
+export interface StoredNonce {
   nonce: string;
   walletAddress: string;
   action: WalletAction;
@@ -117,18 +99,47 @@ export class NonceWalletMismatchError extends Error {
   }
 }
 
+export class NonceLimitExceededError extends Error {
+  readonly code = 'NONCE_LIMIT_EXCEEDED';
+
+  constructor(maxActive: number) {
+    super(
+      `Too many active nonces for wallet (max ${maxActive}). ` +
+        'Complete or wait for existing nonces to expire.'
+    );
+    this.name = 'NonceLimitExceededError';
+  }
+}
+
 // ─── Store interface ──────────────────────────────────────────────────────────
 
-interface INonceStore {
-  save(entry: StoredNonce, ttlSeconds: number): Promise<void>;
+export type NonceSaveResult = 'saved' | 'limit_reached' | 'nonce_conflict';
+export type NonceConsumeResult =
+  | 'consumed'
+  | 'not_found'
+  | 'wallet_mismatch'
+  | 'action_mismatch'
+  | 'expired'
+  | 'replay';
+
+export interface INonceStore {
+  saveIfBelowLimit(
+    entry: StoredNonce,
+    ttlSeconds: number,
+    maxActive: number
+  ): Promise<NonceSaveResult>;
   get(nonce: string): Promise<StoredNonce | null>;
-  markUsed(nonce: string): Promise<boolean>;
-  countActiveForWallet(walletAddress: string): Promise<number>;
+  consume(
+    nonce: string,
+    walletAddress: string,
+    action: WalletAction,
+    now: number
+  ): Promise<NonceConsumeResult>;
 }
 
 // ─── In-memory store ─────────────────────────────────────────────────────────
 
-class InMemoryNonceStore implements INonceStore {
+export class InMemoryNonceStore implements INonceStore {
   private readonly byNonce: NodeCache;
   private readonly walletIndex = new Map<string, Set<string>>();
 
@@ -140,47 +151,158 @@ class InMemoryNonceStore implements INonceStore {
     });
   }
 
-  async save(entry: StoredNonce, ttlSeconds: number): Promise<void> {
+  async saveIfBelowLimit(
+    entry: StoredNonce,
+    ttlSeconds: number,
+    maxActive: number
+  ): Promise<NonceSaveResult> {
+    const existing = this.byNonce.get<StoredNonce>(entry.nonce);
+    if (existing) return 'nonce_conflict';
+
+    const set = this.walletIndex.get(entry.walletAddress) ?? new Set<string>();
+    let active = 0;
+    for (const nonce of set) {
+      const indexedEntry = this.byNonce.get<StoredNonce>(nonce);
+      if (indexedEntry && !indexedEntry.used && indexedEntry.expiresAt > Date.now()) {
+        active++;
+      } else {
+        set.delete(nonce);
+      }
+    }
+
+    if (active >= maxActive) return 'limit_reached';
+
     this.byNonce.set(entry.nonce, entry, ttlSeconds);
-    const set = this.walletIndex.get(entry.walletAddress) ?? new Set();
     set.add(entry.nonce);
     this.walletIndex.set(entry.walletAddress, set);
+    return 'saved';
   }
 
   async get(nonce: string): Promise<StoredNonce | null> {
     return this.byNonce.get<StoredNonce>(nonce) ?? null;
   }
 
-  async markUsed(nonce: string): Promise<boolean> {
+  async consume(
+    nonce: string,
+    walletAddress: string,
+    action: WalletAction,
+    now: number
+  ): Promise<NonceConsumeResult> {
     const entry = this.byNonce.get<StoredNonce>(nonce);
-    if (!entry || entry.used) {
-      return false;
-    }
-    entry.used = true;
-    this.byNonce.set(nonce, entry);
-    return true;
-  }
+    if (!entry) return 'not_found';
+    if (entry.walletAddress !== walletAddress) return 'wallet_mismatch';
+    if (entry.action !== action) return 'action_mismatch';
+    if (entry.expiresAt <= now) return 'expired';
+    if (entry.used) return 'replay';
 
-  async countActiveForWallet(walletAddress: string): Promise<number> {
-    const set = this.walletIndex.get(walletAddress);
-    if (!set) return 0;
-    let count = 0;
-    for (const nonce of set) {
-      const entry = this.byNonce.get<StoredNonce>(nonce);
-      if (entry && !entry.used) count++;
-    }
-    return count;
+    entry.used = true;
+    const remainingTtlSeconds = Math.max(1, Math.ceil((entry.expiresAt - now) / 1000));
+    this.byNonce.set(nonce, entry, remainingTtlSeconds);
+    this.walletIndex.get(walletAddress)?.delete(nonce);
+    return 'consumed';
   }
 
   flushAll(): void {
     this.byNonce.flushAll();
     this.walletIndex.clear();
   }
+
+  expireForTests(nonce: string): void {
+    const entry = this.byNonce.get<StoredNonce>(nonce);
+    if (!entry) return;
+    entry.expiresAt = Date.now() - 1000;
+    this.byNonce.set(nonce, entry, 1);
+  }
 }
 
 // ─── Redis store ─────────────────────────────────────────────────────────────
 
-class RedisNonceStore implements INonceStore {
+/**
+ * Counts/prunes a wallet's live nonces and reserves the new nonce in one Redis
+ * command. Keeping the check and write in Lua prevents concurrent replicas from
+ * exceeding the wallet cap.
+ */
+const SAVE_NONCE_SCRIPT = `
+local active = 0
+local now = tonumber(ARGV[5])
+local indexedNonces = redis.call('SMEMBERS', KEYS[2])
+
+for _, indexedNonce in ipairs(indexedNonces) do
+  local raw = redis.call('GET', ARGV[1] .. indexedNonce)
+  local keep = false
+  if raw then
+    local decodedOk, decoded = pcall(cjson.decode, raw)
+    local expiresAt = decodedOk and tonumber(decoded.expiresAt) or nil
+    keep = decodedOk
+      and decoded.used ~= true
+      and expiresAt ~= nil
+      and expiresAt > now
+  end
+
+  if keep then
+    active = active + 1
+  else
+    redis.call('SREM', KEYS[2], indexedNonce)
+  end
+end
+
+if active >= tonumber(ARGV[6]) then
+  return 0
+end
+
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return -1
+end
+
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[4])
+redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+return 1
+`;
+
+/**
+ * Validates and marks a nonce used in one Redis command. This is the replay
+ * protection boundary: exactly one replica can receive result 0.
+ */
+const CONSUME_NONCE_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 1
+end
+
+local decodedOk, entry = pcall(cjson.decode, raw)
+if not decodedOk then
+  return 1
+end
+if entry.walletAddress ~= ARGV[1] then
+  return 2
+end
+if entry.action ~= ARGV[2] then
+  return 3
+end
+local expiresAt = tonumber(entry.expiresAt)
+if not expiresAt then
+  return 1
+end
+if expiresAt <= tonumber(ARGV[4]) then
+  return 4
+end
+if entry.used == true then
+  return 5
+end
+
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl <= 0 then
+  return 4
+end
+
+entry.used = true
+redis.call('SET', KEYS[1], cjson.encode(entry), 'PX', ttl)
+redis.call('SREM', KEYS[2], ARGV[3])
+return 0
+`;
+
+export class RedisNonceStore implements INonceStore {
   constructor(private readonly redis: Redis) {}
 
   private entryKey(nonce: string): string {
@@ -191,10 +313,29 @@ class RedisNonceStore implements INonceStore {
     return `wallet-nonce:active:${walletAddress}`;
   }
 
-  async save(entry: StoredNonce, ttlSeconds: number): Promise<void> {
-    await this.redis.set(this.entryKey(entry.nonce), JSON.stringify(entry), 'EX', ttlSeconds);
-    await this.redis.sadd(this.walletSetKey(entry.walletAddress), entry.nonce);
-    await this.redis.expire(this.walletSetKey(entry.walletAddress), ttlSeconds);
+  async saveIfBelowLimit(
+    entry: StoredNonce,
+    ttlSeconds: number,
+    maxActive: number
+  ): Promise<NonceSaveResult> {
+    const result = Number(
+      await this.redis.eval(
+        SAVE_NONCE_SCRIPT,
+        2,
+        this.entryKey(entry.nonce),
+        this.walletSetKey(entry.walletAddress),
+        'wallet-nonce:',
+        JSON.stringify(entry),
+        entry.nonce,
+        String(ttlSeconds),
+        String(Date.now()),
+        String(maxActive)
+      )
+    );
+
+    if (result === 1) return 'saved';
+    if (result === 0) return 'limit_reached';
+    return 'nonce_conflict';
   }
 
   async get(nonce: string): Promise<StoredNonce | null> {
@@ -203,31 +344,34 @@ class RedisNonceStore implements INonceStore {
     return JSON.parse(raw) as StoredNonce;
   }
 
-  async markUsed(nonce: string): Promise<boolean> {
-    const entry = await this.get(nonce);
-    if (!entry || entry.used) {
-      return false;
-    }
-    entry.used = true;
-    const ttl = await this.redis.ttl(this.entryKey(nonce));
-    await this.redis.set(
-      this.entryKey(nonce),
-      JSON.stringify(entry),
-      'EX',
-      ttl > 0 ? ttl : DEFAULT_NONCE_TTL_SECONDS,
+  async consume(
+    nonce: string,
+    walletAddress: string,
+    action: WalletAction,
+    now: number
+  ): Promise<NonceConsumeResult> {
+    const result = Number(
+      await this.redis.eval(
+        CONSUME_NONCE_SCRIPT,
+        2,
+        this.entryKey(nonce),
+        this.walletSetKey(walletAddress),
+        walletAddress,
+        action,
+        nonce,
+        String(now)
+      )
     );
-    return true;
-  }
 
-  async countActiveForWallet(walletAddress: string): Promise<number> {
-    const nonces = await this.redis.smembers(this.walletSetKey(walletAddress));
-    if (!nonces.length) return 0;
-    let active = 0;
-    for (const nonce of nonces) {
-      const entry = await this.get(nonce);
-      if (entry && !entry.used) active++;
-    }
-    return active;
+    const outcomes: Record<number, NonceConsumeResult> = {
+      0: 'consumed',
+      1: 'not_found',
+      2: 'wallet_mismatch',
+      3: 'action_mismatch',
+      4: 'expired',
+      5: 'replay',
+    };
+    return outcomes[result] ?? 'not_found';
   }
 }
 
@@ -245,7 +389,7 @@ function createNonceStore(): INonceStore {
   return new InMemoryNonceStore(DEFAULT_NONCE_TTL_SECONDS);
 }
 
-class WalletNonceService {
+export class WalletNonceService {
   private readonly store: INonceStore;
   private readonly inMemoryStore: InMemoryNonceStore | null;
   private metrics: NonceStoreMetrics = {
@@ -272,48 +416,53 @@ class WalletNonceService {
   async issue(
     walletAddress: string,
     action: WalletAction,
-    buildMessage: (meta: Omit<IssuedWalletNonce, 'message'>) => string,
+    buildMessage: (meta: Omit<IssuedWalletNonce, 'message'>) => string
   ): Promise<IssuedWalletNonce> {
     const wallet = normalizeWalletAddress(walletAddress);
-    const active = await this.store.countActiveForWallet(wallet);
-    if (active >= MAX_ACTIVE_NONCES_PER_WALLET) {
-      throw new Error(
-        `Too many active nonces for wallet (max ${MAX_ACTIVE_NONCES_PER_WALLET}). ` +
-          'Complete or wait for existing nonces to expire.',
+    // A cryptographic collision is vanishingly unlikely, but bounded retries
+    // make the store contract explicit and avoid overwriting an existing nonce.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const now = Date.now();
+      const expiresAt = now + DEFAULT_NONCE_TTL_SECONDS * 1000;
+      const nonce = crypto.randomBytes(24).toString('hex');
+
+      const base: Omit<IssuedWalletNonce, 'message'> = {
+        nonce,
+        walletAddress: wallet,
+        action,
+        issuedAt: new Date(now).toISOString(),
+        expiresAt: new Date(expiresAt).toISOString(),
+        expiresIn: DEFAULT_NONCE_TTL_SECONDS,
+      };
+
+      const issued: IssuedWalletNonce = {
+        ...base,
+        message: buildMessage(base),
+      };
+
+      const result = await this.store.saveIfBelowLimit(
+        {
+          nonce,
+          walletAddress: wallet,
+          action,
+          issuedAt: now,
+          expiresAt,
+          used: false,
+        },
+        DEFAULT_NONCE_TTL_SECONDS,
+        MAX_ACTIVE_NONCES_PER_WALLET
       );
+
+      if (result === 'limit_reached') {
+        throw new NonceLimitExceededError(MAX_ACTIVE_NONCES_PER_WALLET);
+      }
+      if (result === 'saved') {
+        this.metrics.issued++;
+        return issued;
+      }
     }
 
-    const now = Date.now();
-    const expiresAt = now + DEFAULT_NONCE_TTL_SECONDS * 1000;
-    const nonce = crypto.randomBytes(24).toString('hex');
-
-    const base: Omit<IssuedWalletNonce, 'message'> = {
-      nonce,
-      walletAddress: wallet,
-      action,
-      issuedAt: new Date(now).toISOString(),
-      expiresAt: new Date(expiresAt).toISOString(),
-      expiresIn: DEFAULT_NONCE_TTL_SECONDS,
-    };
-
-    const issued: IssuedWalletNonce = {
-      ...base,
-      message: buildMessage(base),
-    };
-
-    const stored: StoredNonce = {
-      nonce,
-      walletAddress: wallet,
-      action,
-      issuedAt: now,
-      expiresAt,
-      used: false,
-    };
-
-    await this.store.save(stored, DEFAULT_NONCE_TTL_SECONDS);
-    this.metrics.issued++;
-
-    return issued;
+    throw new Error('Unable to allocate a unique wallet nonce');
   }
 
   /**
@@ -322,7 +471,7 @@ class WalletNonceService {
   async validateForUse(
     walletAddress: string,
     action: WalletAction,
-    nonce: string,
+    nonce: string
   ): Promise<IssuedWalletNonce> {
     const wallet = normalizeWalletAddress(walletAddress);
     const trimmed = nonce.trim();
@@ -368,13 +517,29 @@ class WalletNonceService {
    * Atomically consumes a nonce after signature verification.
    */
   async consume(walletAddress: string, action: WalletAction, nonce: string): Promise<void> {
-    await this.validateForUse(walletAddress, action, nonce);
-    const marked = await this.store.markUsed(nonce.trim());
-    if (!marked) {
-      this.metrics.replayRejected++;
-      throw new NonceReplayError();
+    const wallet = normalizeWalletAddress(walletAddress);
+    const result = await this.store.consume(nonce.trim(), wallet, action, Date.now());
+
+    switch (result) {
+      case 'consumed':
+        this.metrics.consumed++;
+        return;
+      case 'wallet_mismatch':
+        this.metrics.notFoundRejected++;
+        throw new NonceWalletMismatchError();
+      case 'action_mismatch':
+        this.metrics.notFoundRejected++;
+        throw new NonceActionMismatchError();
+      case 'expired':
+        this.metrics.expiredRejected++;
+        throw new NonceExpiredError();
+      case 'replay':
+        this.metrics.replayRejected++;
+        throw new NonceReplayError();
+      case 'not_found':
+        this.metrics.notFoundRejected++;
+        throw new NonceNotFoundError();
     }
-    this.metrics.consumed++;
   }
 
   clearForTests(): void {
@@ -390,15 +555,7 @@ class WalletNonceService {
 
   /** Forces a nonce to appear expired (in-memory store tests only). */
   async expireNonceForTests(nonce: string): Promise<void> {
-    if (!this.inMemoryStore) {
-      return;
-    }
-    const entry = await this.store.get(nonce);
-    if (!entry) {
-      return;
-    }
-    entry.expiresAt = Date.now() - 1000;
-    await this.store.save(entry, 1);
+    this.inMemoryStore?.expireForTests(nonce);
   }
 }
 

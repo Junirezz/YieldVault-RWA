@@ -465,6 +465,10 @@ supports wallet-signed actions with server-issued nonces.
 - TTL: 5 minutes (configurable via `WALLET_NONCE_TTL_SECONDS`)
 - Max active nonces per wallet: 10 (configurable via `WALLET_NONCE_MAX_ACTIVE_PER_WALLET`)
 - Nonce replay returns `401 Nonce Replay` with code `NONCE_REPLAY`
+- Allocation and consumption are atomic; concurrent requests cannot consume the
+  same nonce or exceed the active nonce cap
+- Multi-instance deployments must set `REDIS_URL` so atomic nonce state is
+  shared across replicas; the in-memory store protects only a single process
 
 ### Signature Modes
 
@@ -527,6 +531,7 @@ curl "http://localhost:3000/api/v1/vault/transactions/export?format=csv&walletAd
 | `WALLET_NONCE_TTL_SECONDS` | `300` | Nonce timeout in seconds |
 | `WALLET_NONCE_MAX_ACTIVE_PER_WALLET` | `10` | Max pending nonces per wallet |
 | `WALLET_ACTION_HMAC_SECRET` | Falls back to `JWT_SECRET` | HMAC secret when in `hmac` mode |
+| `REDIS_URL` | — | Shared nonce store required for replay protection across backend replicas |
 
 ### Refresh Token Store
 
