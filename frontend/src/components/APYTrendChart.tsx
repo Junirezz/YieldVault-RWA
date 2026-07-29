@@ -410,4 +410,4 @@ const APYTrendChart: React.FC<APYTrendChartProps> = ({ data = ALL_HISTORY }) => 
   );
 };
 
-export default APYTrendChart;
+export default React.memo(APYTrendChart);

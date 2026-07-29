@@ -18,6 +18,9 @@ import { ChartModeToggle } from "./ChartModeToggle";
 import { usePreferencesContext } from "../context/PreferencesContext";
 import { formatCurrency, formatDate } from "../lib/formatters";
 import { formatChartCurrency, createChartCurrencyTickFormatter } from "../lib/chartFormatters";
+import { sampleChartSeries } from "../lib/chartSeries";
+
+const MAX_RENDER_POINTS = 120;
 
 interface YieldDataPoint {
   date: string;
@@ -100,15 +103,22 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
 
   const allData = useMemo(() => generateYieldData(totalGain, 90), [totalGain]);
 
-  const data = useMemo(() => {
+  const filteredData = useMemo(() => {
     const days = PERIOD_DAYS[period];
     if (days === null) return allData;
     return allData.slice(-days);
   }, [allData, period]);
 
+  const data = useMemo(
+    () => sampleChartSeries(filteredData, MAX_RENDER_POINTS),
+    [filteredData],
+  );
+
+  const isCompactSeries = filteredData.length > data.length;
+
   const periodTotal = useMemo(
-    () => data.reduce((sum, p) => sum + p.yield, 0),
-    [data],
+    () => filteredData.reduce((sum, p) => sum + p.yield, 0),
+    [filteredData],
   );
 
   const isEmpty = totalGain === 0;
@@ -212,7 +222,13 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={(str: string) => formatDate(str, { month: "short", day: "numeric" }, locale)} minTickGap={28} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={createChartCurrencyTickFormatter(currency, locale, true)} />
                 <Tooltip content={(props: { active?: boolean; payload?: ReadonlyArray<{ value?: number }>; label?: string }) => <YieldTooltip {...props} locale={locale} currency={currency} />} />
-                <Bar dataKey="yield" fill="var(--accent-purple)" radius={[4, 4, 0, 0]} animationDuration={600} />
+                <Bar
+                  dataKey="yield"
+                  fill="var(--accent-purple)"
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={!isCompactSeries}
+                  animationDuration={isCompactSeries ? 0 : 600}
+                />
               </BarChart>
             ) : chartMode === "area" ? (
               <AreaChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} aria-label="Daily yield earnings area chart">
@@ -220,7 +236,16 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={(str: string) => formatDate(str, { month: "short", day: "numeric" }, locale)} minTickGap={28} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={createChartCurrencyTickFormatter(currency, locale, true)} />
                 <Tooltip content={(props: { active?: boolean; payload?: ReadonlyArray<{ value?: number }>; label?: string }) => <YieldTooltip {...props} locale={locale} currency={currency} />} />
-                <Area type="monotone" dataKey="yield" stroke="var(--accent-purple)" strokeWidth={2} fill="var(--accent-purple)" fillOpacity={0.2} animationDuration={600} />
+                <Area
+                  type="monotone"
+                  dataKey="yield"
+                  stroke="var(--accent-purple)"
+                  strokeWidth={2}
+                  fill="var(--accent-purple)"
+                  fillOpacity={0.2}
+                  isAnimationActive={!isCompactSeries}
+                  animationDuration={isCompactSeries ? 0 : 600}
+                />
               </AreaChart>
             ) : (
             <LineChart
@@ -266,7 +291,8 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 4, fill: "var(--accent-purple)" }}
-                animationDuration={600}
+                isAnimationActive={!isCompactSeries}
+                animationDuration={isCompactSeries ? 0 : 600}
               />
             </LineChart>
             )}
@@ -277,4 +303,4 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
   );
 };
 
-export default YieldBreakdownChart;
+export default React.memo(YieldBreakdownChart);

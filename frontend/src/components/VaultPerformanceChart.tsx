@@ -258,4 +258,4 @@ const VaultPerformanceChart: React.FC = () => {
   );
 };
 
-export default VaultPerformanceChart;
+export default React.memo(VaultPerformanceChart);
