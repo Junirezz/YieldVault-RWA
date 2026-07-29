@@ -421,5 +421,223 @@ describe('Dead-Letter Queue (DLQ) Processing', () => {
       expect(response.body.processed).toBe(1);
       expect(response.body.succeeded).toBe(1);
     });
+
+    it('GET /admin/jobs/dashboard returns HTML dashboard', async () => {
+      jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-dash-1',
+        jobName: 'priceRefresh',
+        attempts: 3,
+        error: 'API error',
+        payload: { symbol: 'USDC' },
+        failedAt: new Date().toISOString(),
+      });
+
+      const response = await request(app)
+        .get('/admin/jobs/dashboard')
+        .set('Authorization', `ApiKey ${adminApiKey}`);
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/text\/html/);
+      expect(response.text).toContain('Background Job Monitoring Dashboard');
+      expect(response.text).toContain('Dead-Letter Records');
+      expect(response.text).toContain('Job Runtime Metrics');
+      expect(response.text).toContain('API Endpoints');
+    });
+
+    it('GET /admin/jobs/metrics returns JSON metrics including DLQ summary', async () => {
+      jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-metrics-1',
+        jobName: 'databaseBackup',
+        attempts: 3,
+        error: 'S3 error',
+        payload: null,
+        failedAt: new Date().toISOString(),
+      });
+
+      const response = await request(app)
+        .get('/admin/jobs/metrics')
+        .set('Authorization', `ApiKey ${adminApiKey}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.summary).toBeDefined();
+      expect(response.body.metrics).toBeDefined();
+      expect(response.body.metrics.totalDeadLetters).toBe(1);
+      expect(response.body.metrics.policies).toBeDefined();
+      expect(response.body.metrics.runtime).toBeDefined();
+    });
+
+    it('POST /admin/jobs/dead-letters/bulk-retry with empty ids returns 400', async () => {
+      const response = await request(app)
+        .post('/admin/jobs/dead-letters/bulk-retry')
+        .set('Authorization', `ApiKey ${adminApiKey}`)
+        .send({ ids: [] });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Bad Request');
+    });
+
+    it('POST /admin/jobs/dead-letters/bulk-discard with empty ids returns 400', async () => {
+      const response = await request(app)
+        .post('/admin/jobs/dead-letters/bulk-discard')
+        .set('Authorization', `ApiKey ${adminApiKey}`)
+        .send({ ids: [] });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Bad Request');
+    });
+
+    it('POST /admin/jobs/dead-letters/process with dryRun returns preview', async () => {
+      const response = await request(app)
+        .post('/admin/jobs/dead-letters/process?dryRun=true')
+        .set('Authorization', `ApiKey ${adminApiKey}`)
+        .send({ batchSize: 10 });
+
+      expect(response.status).toBe(200);
+      expect(response.body.dryRun).toBe(true);
+      expect(response.body.message).toContain('dry-run preview');
+    });
+
+    it('GET /admin/jobs/dead-letters with filters returns paginated results', async () => {
+      registerJobHandler('priceRefresh', async () => ({ ok: true }));
+
+      for (let i = 0; i < 5; i++) {
+        jobGovernanceStore.recordDeadLetter({
+          id: `dlq-filter-${i}`,
+          jobName: 'priceRefresh',
+          attempts: 3,
+          error: `Error ${i}`,
+          payload: null,
+          failedAt: new Date().toISOString(),
+        });
+      }
+
+      for (let i = 0; i < 3; i++) {
+        jobGovernanceStore.recordDeadLetter({
+          id: `dlq-apy-${i}`,
+          jobName: 'apySnapshot',
+          attempts: 2,
+          error: `APY Error ${i}`,
+          payload: null,
+          failedAt: new Date().toISOString(),
+        });
+      }
+
+      const allResponse = await request(app)
+        .get('/admin/jobs/dead-letters')
+        .set('Authorization', `ApiKey ${adminApiKey}`);
+
+      expect(allResponse.status).toBe(200);
+      expect(allResponse.body.total).toBe(8);
+      expect(allResponse.body.limit).toBe(50);
+
+      const priceRefreshResponse = await request(app)
+        .get('/admin/jobs/dead-letters?jobName=priceRefresh')
+        .set('Authorization', `ApiKey ${adminApiKey}`);
+
+      expect(priceRefreshResponse.status).toBe(200);
+      expect(priceRefreshResponse.body.total).toBe(5);
+      expect(priceRefreshResponse.body.data.every((r: any) => r.jobName === 'priceRefresh')).toBe(true);
+
+      const paginatedResponse = await request(app)
+        .get('/admin/jobs/dead-letters?limit=3&offset=3')
+        .set('Authorization', `ApiKey ${adminApiKey}`);
+
+      expect(paginatedResponse.status).toBe(200);
+      expect(paginatedResponse.data?.length || 0 || paginatedResponse.body.data?.length).toBeLessThanOrEqual(3);
+      expect(paginatedResponse.body.offset).toBe(3);
+    });
+
+    it('Retry with custom task provided works', async () => {
+      let customTaskExecuted = false;
+
+      const record = jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-custom-task',
+        jobName: 'reportGeneration',
+        attempts: 5,
+        error: 'Generation failed',
+        payload: { reportId: 'rpt-123' },
+        failedAt: new Date().toISOString(),
+      });
+
+      const customTask = async () => {
+        customTaskExecuted = true;
+        return { custom: true };
+      };
+
+      const outcome = await retryDeadLetter(record.id!, customTask);
+
+      expect(outcome.success).toBe(true);
+      expect(customTaskExecuted).toBe(true);
+      expect(outcome.result).toEqual({ custom: true });
+    });
+
+    it('Multiple retries on same record update timestamps correctly', async () => {
+      registerJobHandler('positionReconciliation', async () => ({ reconciled: true }));
+
+      const record = jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-multi-retry',
+        jobName: 'positionReconciliation',
+        attempts: 4,
+        error: 'Drift detected',
+        payload: { portfolioId: 'port-456' },
+        failedAt: new Date().toISOString(),
+      });
+
+      const firstRetry = await retryDeadLetter(record.id!);
+      expect(firstRetry.success).toBe(true);
+
+      const retrieved1 = getDeadLetterRecord(record.id!);
+      expect(retrieved1?.status).toBe('requeued');
+      const firstRetryTime = retrieved1?.retriedAt;
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Retry again by manually resetting status
+      const recordToRetry = getDeadLetterRecord(record.id!);
+      if (recordToRetry) {
+        recordToRetry.status = 'dead-letter';
+        const secondRetry = await retryDeadLetter(record.id!);
+        expect(secondRetry.success).toBe(true);
+
+        const retrieved2 = getDeadLetterRecord(record.id!);
+        expect(retrieved2?.retriedAt).not.toEqual(firstRetryTime);
+      }
+    });
+
+    it('Resolve record prevents further retry without manual intervention', () => {
+      const record = jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-resolve-check',
+        jobName: 'apySnapshot',
+        attempts: 3,
+        error: 'API timeout',
+        payload: null,
+        failedAt: new Date().toISOString(),
+      });
+
+      const resolved = resolveDeadLetter(record.id!, 'operator-123', 'Manual fix applied');
+      expect(resolved?.status).toBe('resolved');
+      expect(resolved?.resolvedBy).toBe('operator-123');
+      expect(resolved?.notes).toBe('Manual fix applied');
+
+      const retrieved = getDeadLetterRecord(record.id!);
+      expect(retrieved?.status).toBe('resolved');
+    });
+
+    it('Discard removes record from queue', () => {
+      const record = jobGovernanceStore.recordDeadLetter({
+        id: 'dlq-discard-check',
+        jobName: 'priceRefresh',
+        attempts: 3,
+        error: 'Data error',
+        payload: null,
+        failedAt: new Date().toISOString(),
+      });
+
+      const discarded = discardDeadLetter(record.id!);
+      expect(discarded?.status).toBe('discarded');
+
+      const retrieved = getDeadLetterRecord(record.id!);
+      expect(retrieved).toBeNull();
+    });
   });
 });

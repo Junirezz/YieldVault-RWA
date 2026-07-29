@@ -301,6 +301,28 @@ model WebhookDeadLetter {
   @@index([status])
 }
 
+model JobDeadLetter {
+  id         String    @id @default(uuid())
+  jobName    String
+  attempts   Int
+  error      String
+  payload    String?   // JSON stringified payload
+  failedAt   DateTime
+  status     String    @default("dead-letter") // dead-letter, processing, requeued, resolved, discarded
+  retriedAt  DateTime?
+  resolvedAt DateTime?
+  resolvedBy String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([jobName])
+  @@index([status])
+  @@index([createdAt])
+  @@index([failedAt])
+  @@index([jobName, status])
+}
+
 model AdminConfigChange {
   id                 String   @id @default(uuid())
   configType         String

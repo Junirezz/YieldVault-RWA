@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { prisma } from './prisma';
 
 export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot';
 
@@ -81,6 +82,48 @@ class JobGovernanceStore {
 
   private readonly handlers = new Map<JobName, JobHandler>();
 
+  private initialized = false;
+
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      const persistedRecords = await prisma.jobDeadLetter.findMany({
+        where: {
+          status: { in: ['dead-letter', 'processing'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1000, // Load recent records
+      });
+
+      for (const dbRecord of persistedRecords) {
+        const record: DeadLetterRecord = {
+          id: dbRecord.id,
+          jobName: dbRecord.jobName as JobName,
+          attempts: dbRecord.attempts,
+          error: dbRecord.error,
+          payload: dbRecord.payload ? JSON.parse(dbRecord.payload) : null,
+          failedAt: dbRecord.failedAt.toISOString(),
+          status: dbRecord.status as any,
+          retriedAt: dbRecord.retriedAt?.toISOString(),
+          resolvedAt: dbRecord.resolvedAt?.toISOString(),
+          resolvedBy: dbRecord.resolvedBy ?? undefined,
+          notes: dbRecord.notes ?? undefined,
+        };
+
+        this.deadLetters.push(record);
+      }
+
+      this.initialized = true;
+      console.log(`Loaded ${persistedRecords.length} dead-letter records from database`);
+    } catch (error) {
+      console.error('Failed to initialize dead-letter records from database:', error);
+      this.initialized = true; // Mark as initialized anyway to avoid retries
+    }
+  }
+
   registerHandler(jobName: JobName, handler: JobHandler): void {
     this.handlers.set(jobName, handler);
     this.ensureRuntimeMetric(jobName);
@@ -135,7 +178,33 @@ class JobGovernanceStore {
       console.warn(`Recurring failures detected for ${fullRecord.jobName}: ${failures}`);
     }
 
+    // Persist to database asynchronously (fire-and-forget)
+    void this.persistDeadLetterToDb(fullRecord);
+
     return fullRecord;
+  }
+
+  private async persistDeadLetterToDb(record: DeadLetterRecord): Promise<void> {
+    try {
+      await prisma.jobDeadLetter.create({
+        data: {
+          id: record.id,
+          jobName: record.jobName,
+          attempts: record.attempts,
+          error: record.error,
+          payload: record.payload ? JSON.stringify(record.payload) : null,
+          failedAt: new Date(record.failedAt),
+          status: record.status ?? 'dead-letter',
+          retriedAt: record.retriedAt ? new Date(record.retriedAt) : null,
+          resolvedAt: record.resolvedAt ? new Date(record.resolvedAt) : null,
+          resolvedBy: record.resolvedBy,
+          notes: record.notes,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to persist dead-letter record to database:', error);
+      // Continue operation even if persistence fails
+    }
   }
 
   listDeadLetters(filters: {
@@ -193,13 +262,40 @@ class JobGovernanceStore {
       const result = await runJobWithRetry(record.jobName, handler, { payload: record.payload });
       record.status = 'requeued';
       record.notes = `Successfully retried at ${now}`;
+      
+      // Update database
+      void this.updateDeadLetterInDb(id, record);
+      
       return { success: true, result, record };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       record.status = 'dead-letter';
       record.error = errorMsg;
       record.notes = `Retry attempt failed at ${now}: ${errorMsg}`;
+      
+      // Update database
+      void this.updateDeadLetterInDb(id, record);
+      
       return { success: false, error: errorMsg, record };
+    }
+  }
+
+  private async updateDeadLetterInDb(id: string, record: DeadLetterRecord): Promise<void> {
+    try {
+      await prisma.jobDeadLetter.update({
+        where: { id },
+        data: {
+          status: record.status,
+          retriedAt: record.retriedAt ? new Date(record.retriedAt) : null,
+          resolvedAt: record.resolvedAt ? new Date(record.resolvedAt) : null,
+          resolvedBy: record.resolvedBy,
+          notes: record.notes,
+          error: record.error,
+          updatedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      console.error('Failed to update dead-letter record in database:', error);
     }
   }
 
@@ -217,6 +313,9 @@ class JobGovernanceStore {
       record.notes = notes;
     }
 
+    // Update database
+    void this.updateDeadLetterInDb(id, record);
+
     return record;
   }
 
@@ -228,6 +327,10 @@ class JobGovernanceStore {
 
     const [record] = this.deadLetters.splice(index, 1);
     record.status = 'discarded';
+    
+    // Update database
+    void this.updateDeadLetterInDb(id, record);
+
     return record;
   }
 
@@ -435,6 +538,10 @@ export function resetJobGovernance(): void {
   jobGovernanceStore.clear();
 }
 
+export async function initializeJobGovernance(): Promise<void> {
+  await jobGovernanceStore.initialize();
+}
+
 function calculateBackoffDelay(policy: JobPolicy, attempt: number): number {
   return Math.round(policy.baseDelayMs * Math.pow(policy.backoffMultiplier, attempt - 1));
 }
@@ -455,4 +562,4 @@ function normalizeError(error: unknown): string {
   }
 
   return 'Unknown job failure';
-}
+}
