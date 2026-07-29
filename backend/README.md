@@ -58,6 +58,10 @@ Rate limiting and other settings are configurable via environment variables:
 | `RATE_LIMIT_MAX_REQUESTS` | 100 | Global requests per window |
 | `API_RATE_LIMIT_WINDOW_MS` | 60000 | API rate limit window (1 min) |
 | `API_RATE_LIMIT_MAX_REQUESTS` | 30 | API requests per window |
+| `RATE_LIMIT_AUTH_MAX` | 5 | Auth tier request limit per window (1 min) |
+| `RATE_LIMIT_AUTH_WINDOW_MS` | 60000 | Auth tier window duration in ms |
+| `DEPOSITS_RATE_LIMIT_MAX` | 10 | Deposit/transfer tier request limit per window (1 min) |
+| `DEPOSITS_RATE_LIMIT_WINDOW_MS` | 60000 | Deposit/transfer tier window duration in ms |
 | `STELLAR_RPC_URL` | https://soroban-testnet.stellar.org | Stellar RPC endpoint |
 | `DATABASE_URL` | local PostgreSQL URL | Primary PostgreSQL connection string (required in production) |
 | `DATABASE_REPLICA_URL` | primary database | Optional read-replica connection string |
