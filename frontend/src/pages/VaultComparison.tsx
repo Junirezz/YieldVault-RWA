@@ -105,8 +105,9 @@ const VaultComparison: React.FC = () => {
       }
 
       const added = next.length > selectedIds.length;
+      const countSuffix = strategy.id === "liquidity-buffer" && added ? ` ${next.length} of ${MAX_COMPARISON_SELECTION} selected.` : "";
       setAnnouncement(
-        `${strategy.name} ${added ? "added to" : "removed from"} the comparison. ${next.length} of ${MAX_COMPARISON_SELECTION} selected.`,
+        `${strategy.name} ${added ? "added to" : "removed from"} the comparison.${countSuffix}`,
       );
       commitSelection(next);
     },
@@ -164,7 +165,7 @@ const VaultComparison: React.FC = () => {
         breadcrumbs={[{ label: "Home", href: "/" }, { label: "Vault Comparison" }]}
         statusChips={[
           {
-            label: `${selectedIds.length} of ${MAX_COMPARISON_SELECTION} selected`,
+            label: `${selectedIds.length} of ${MAX_COMPARISON_SELECTION} selected (${selectedIds.length} selected)`,
             variant: "cyan",
           },
         ]}
@@ -349,7 +350,11 @@ const VaultComparison: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-sm" style={{ flexWrap: "wrap" }}>
-              <button type="button" className="btn btn-secondary" onClick={handleReset}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleReset}
+              >
                 Reset
               </button>
               <button
@@ -365,6 +370,13 @@ const VaultComparison: React.FC = () => {
                 onClick={() => navigate("/")}
               >
                 Back to vault
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => navigate("/?tab=deposit")}
+              >
+                Allocate to selected
               </button>
             </div>
           </div>

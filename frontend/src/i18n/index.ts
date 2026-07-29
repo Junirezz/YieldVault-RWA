@@ -55,7 +55,7 @@ function getValueAtPath(root: unknown, path: string): unknown {
  * @param key - Dot-separated path in the locale catalog (e.g. `wallet.connectFreighter`)
  * @returns The resolved string, an English fallback, or `key` if not found
  */
-export function t(key: string): string {
+export function t(key: string, defaultValue?: string): string {
   const localized = getValueAtPath(catalogs[activeLocale], key);
   if (typeof localized === "string") {
     return localized;
@@ -64,7 +64,7 @@ export function t(key: string): string {
   if (typeof fallbackEn === "string") {
     return fallbackEn;
   }
-  return key;
+  return defaultValue ?? key;
 }
 
 export function getLocale(): LocaleCode {

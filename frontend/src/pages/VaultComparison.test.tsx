@@ -121,10 +121,6 @@ describe("VaultComparison", () => {
     expect(announcement()).toMatch(/Private Credit Income removed from the comparison/i);
   });
 
-  it("shows the empty state when fewer than two strategies are selected", () => {
-    renderComparison();
-  });
-
   it("blocks selection past the cap and explains why instead of ignoring the click", () => {
     renderComparison("/compare?strategies=benji,treasury-ladder,credit-income");
 
