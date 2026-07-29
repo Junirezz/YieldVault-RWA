@@ -41,7 +41,11 @@ import { logger } from './middleware/structuredLogging';
 import Redis from 'ioredis';
 import { normalizeWalletAddress } from './walletUtils';
 import { walletAliasMappingService } from './walletAliasService';
-import { walletNonceService, type WalletAction } from './walletNonce';
+import {
+  walletNonceService,
+  NonceLimitExceededError,
+  type WalletAction,
+} from './walletNonce';
 import { buildWalletSignMessage } from './walletSignature';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -592,10 +596,20 @@ export async function nonceHandler(req: Request, res: Response): Promise<void> {
 
     res.status(200).json(issued);
   } catch (err) {
-    res.status(429).json({
-      error: 'Too Many Requests',
-      status: 429,
-      message: err instanceof Error ? err.message : 'Unable to issue nonce',
+    const limitExceeded = err instanceof NonceLimitExceededError;
+    const status = limitExceeded ? 429 : 503;
+    if (!limitExceeded) {
+      logger.log('error', 'Unable to issue wallet nonce', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    res.status(status).json({
+      error: limitExceeded ? 'Too Many Requests' : 'Service Unavailable',
+      status,
+      code: limitExceeded ? err.code : 'NONCE_STORE_UNAVAILABLE',
+      message: limitExceeded
+        ? err.message
+        : 'Wallet nonce service is temporarily unavailable. Please retry.',
     });
   }
 }

@@ -138,8 +138,15 @@ Protected routes (`POST /api/v1/auth/login`, vault deposits/withdrawals) accept 
 | Expired nonce | 401 | `NONCE_EXPIRED` |
 | Reused nonce | 401 | `NONCE_REPLAY` |
 | Bad signature | 401 | `SIGNATURE_INVALID` |
+| Active nonce cap reached | 429 | `NONCE_LIMIT_EXCEEDED` |
 
 Configure via `WALLET_NONCE_ENFORCEMENT` (strict in production) and `WALLET_SIGNATURE_MODE` (`stellar` \| `hmac`).
+
+Nonce allocation and consumption are atomic. With `REDIS_URL` configured, the
+backend enforces single-use consumption and the per-wallet active nonce cap
+across all replicas. Without Redis those guarantees apply only within one
+backend process, so multi-instance production deployments must configure the
+shared Redis store.
 
 ### Admin API Key RBAC
 

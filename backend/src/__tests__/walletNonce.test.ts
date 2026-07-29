@@ -4,7 +4,14 @@
 
 import request from 'supertest';
 import app from '../index';
-import { walletNonceService } from '../walletNonce';
+import type Redis from 'ioredis';
+import {
+  NonceLimitExceededError,
+  NonceReplayError,
+  RedisNonceStore,
+  walletNonceService,
+  type StoredNonce,
+} from '../walletNonce';
 import {
   buildWalletSignMessage,
   signWalletActionForTests,
@@ -63,6 +70,20 @@ describe('Wallet nonce service', () => {
     expect(res.body.message).toContain(res.body.nonce);
   });
 
+  it('reports nonce store failures as service unavailable', async () => {
+    const issueSpy = jest
+      .spyOn(walletNonceService, 'issue')
+      .mockRejectedValueOnce(new Error('nonce store unavailable'));
+
+    const res = await request(app)
+      .post('/api/v1/auth/nonce')
+      .send({ walletAddress: TEST_WALLET, action: 'login' });
+
+    issueSpy.mockRestore();
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('NONCE_STORE_UNAVAILABLE');
+  });
+
   it('rejects replay of the same nonce on login', async () => {
     const { nonce, signature } = await issueAndSign('login');
 
@@ -78,6 +99,50 @@ describe('Wallet nonce service', () => {
     expect(replay.status).toBe(401);
     expect(replay.body.code).toBe('NONCE_REPLAY');
     expect(replay.body.error).toBe('Nonce Replay');
+  });
+
+  it('allows exactly one concurrent consumer for a nonce', async () => {
+    const issued = await walletNonceService.issue(
+      TEST_WALLET,
+      'login',
+      (base) => base.nonce,
+    );
+
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 20 }, () =>
+        walletNonceService.consume(TEST_WALLET, 'login', issued.nonce),
+      ),
+    );
+
+    const accepted = attempts.filter((attempt) => attempt.status === 'fulfilled');
+    const rejected = attempts.filter(
+      (attempt): attempt is PromiseRejectedResult => attempt.status === 'rejected',
+    );
+
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(19);
+    expect(
+      rejected.every((attempt) => attempt.reason instanceof NonceReplayError),
+    ).toBe(true);
+  });
+
+  it('enforces the active nonce cap under concurrent issuance', async () => {
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 20 }, () =>
+        walletNonceService.issue(TEST_WALLET, 'deposit', (base) => base.nonce),
+      ),
+    );
+
+    const issued = attempts.filter((attempt) => attempt.status === 'fulfilled');
+    const rejected = attempts.filter(
+      (attempt): attempt is PromiseRejectedResult => attempt.status === 'rejected',
+    );
+
+    expect(issued).toHaveLength(10);
+    expect(rejected).toHaveLength(10);
+    expect(
+      rejected.every((attempt) => attempt.reason instanceof NonceLimitExceededError),
+    ).toBe(true);
   });
 
   it('rejects login when signature does not match', async () => {
@@ -139,6 +204,47 @@ describe('Wallet nonce service', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('NONCE_ACTION_MISMATCH');
+  });
+});
+
+describe('Redis wallet nonce atomicity', () => {
+  const entry: StoredNonce = {
+    nonce: 'a'.repeat(48),
+    walletAddress: TEST_WALLET,
+    action: 'login',
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 300_000,
+    used: false,
+  };
+
+  it.each([
+    [1, 'saved'],
+    [0, 'limit_reached'],
+    [-1, 'nonce_conflict'],
+  ] as const)('maps atomic reservation result %i to %s', async (redisResult, expected) => {
+    const evalMock = jest.fn().mockResolvedValue(redisResult);
+    const store = new RedisNonceStore({ eval: evalMock } as unknown as Redis);
+
+    await expect(store.saveIfBelowLimit(entry, 300, 10)).resolves.toBe(expected);
+    expect(evalMock).toHaveBeenCalledTimes(1);
+    expect(evalMock.mock.calls[0][1]).toBe(2);
+  });
+
+  it.each([
+    [0, 'consumed'],
+    [1, 'not_found'],
+    [2, 'wallet_mismatch'],
+    [3, 'action_mismatch'],
+    [4, 'expired'],
+    [5, 'replay'],
+  ] as const)('maps atomic consume result %i to %s', async (redisResult, expected) => {
+    const evalMock = jest.fn().mockResolvedValue(redisResult);
+    const store = new RedisNonceStore({ eval: evalMock } as unknown as Redis);
+
+    await expect(
+      store.consume(entry.nonce, entry.walletAddress, entry.action, Date.now()),
+    ).resolves.toBe(expected);
+    expect(evalMock).toHaveBeenCalledTimes(1);
   });
 });
 
