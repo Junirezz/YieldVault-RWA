@@ -44,6 +44,7 @@ import { useVault, VaultProvider } from "./context/VaultContext";
 import { usePageViewTracking } from "./hooks/useAnalytics";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { resolveUserRole } from "./lib/roles";
+import { useRestoreGuardedRoute } from "./hooks/useRestoreGuardedRoute";
 
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
@@ -63,6 +64,7 @@ function AppContent() {
   const { data: xlmBalance = 0 } = useXlmBalance(walletAddress);
   const { tvl } = useVault();
   const role = useMemo(() => resolveUserRole(walletAddress), [walletAddress]);
+  useRestoreGuardedRoute(role);
 
   useEffect(() => {
     if ((window as Window & { Cypress?: unknown }).Cypress) {
