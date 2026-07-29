@@ -86,6 +86,7 @@ import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
 import walletAliasRouter from './walletAliasEndpoints';
+import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
 import {
   buildPortfolioHoldingsResponse,
@@ -228,6 +229,12 @@ const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CA
 
 // Configure logger
 logger.configure(logLevel);
+
+void walletAliasMappingService.loadFromDatabase().catch((error) => {
+  logger.log('error', 'Failed to warm wallet alias cache', {
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
 
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
@@ -1929,6 +1936,63 @@ app.get('/admin/allowlist', validateApiKey, (_req: Request, res: Response) => {
     addresses: listAddresses(),
     count: allowlistSize(),
     enabled: process.env.ALLOWLIST_ENABLED !== 'false',
+  });
+});
+
+/**
+ * GET /admin/wallet-aliases
+ * Lists persisted wallet alias identity groups.
+ * Requires API key authentication.
+ */
+app.get('/admin/wallet-aliases', validateApiKey, async (_req: Request, res: Response) => {
+  const groups = await walletAliasMappingService.listIdentityLinks();
+  res.json({
+    groups,
+    count: groups.length,
+  });
+});
+
+/**
+ * DELETE /admin/wallet-aliases/:canonicalId
+ * Deletes a canonical wallet alias group and all linked aliases.
+ * Requires API key authentication.
+ */
+app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Request, res: Response) => {
+  const { canonicalId } = req.params;
+  const existing = await walletAliasMappingService.getIdentityLinks(canonicalId);
+
+  if (!existing) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Canonical identity not found',
+    });
+    return;
+  }
+
+  const deleted = await walletAliasMappingService.deleteIdentityGroup(canonicalId);
+  if (!deleted) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Canonical identity not found',
+    });
+    return;
+  }
+
+  const actor = resolveActingAdminAddress(req);
+  void recordAdminAuditLog(req, 'wallet-alias.delete', 200, {
+    actor,
+    canonicalId,
+    aliases: existing.aliases,
+    sources: existing.sources,
+  });
+
+  res.status(200).json({
+    message: 'Wallet alias group deleted',
+    canonicalId,
+    aliasesDeleted: existing.aliases.length,
+    sources: existing.sources,
   });
 });
 

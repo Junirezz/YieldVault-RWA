@@ -13,7 +13,7 @@ router.post(
   '/link',
   readsLimiter,
   validate({ body: WalletAliasLinkSchema }),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const { primaryAlias, primarySource, linkedAlias, linkedSource } = req.body as {
       primaryAlias: string;
       primarySource: string;
@@ -22,9 +22,13 @@ router.post(
     };
 
     try {
-      const mapping = walletAliasMappingService.linkProviderIdentity(
+      const mapping = await walletAliasMappingService.linkProviderIdentity(
         primaryAlias,
         primarySource,
+        linkedAlias,
+        linkedSource,
+      );
+      const canonicalWallet = await walletAliasMappingService.resolveCanonicalWallet(
         linkedAlias,
         linkedSource,
       );
@@ -33,10 +37,7 @@ router.post(
         canonicalId: mapping.canonicalId,
         aliases: mapping.aliases,
         sources: mapping.sources,
-        canonicalWallet: walletAliasMappingService.resolveCanonicalWallet(
-          linkedAlias,
-          linkedSource,
-        ),
+        canonicalWallet,
       });
     } catch (err) {
       res.status(400).json({
@@ -56,9 +57,9 @@ router.get(
   '/resolve',
   readsLimiter,
   validate({ query: WalletAliasResolveQuerySchema }),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const { alias, source } = req.query as { alias: string; source: string };
-    const mapping = walletAliasMappingService.resolveAlias(alias, source);
+    const mapping = await walletAliasMappingService.resolveAlias(alias, source);
 
     if (!mapping) {
       res.status(404).json({
@@ -69,9 +70,11 @@ router.get(
       return;
     }
 
+    const canonicalWallet = await walletAliasMappingService.resolveCanonicalWallet(alias, source);
+
     res.status(200).json({
       ...mapping,
-      canonicalWallet: walletAliasMappingService.resolveCanonicalWallet(alias, source),
+      canonicalWallet,
     });
   },
 );
@@ -80,8 +83,8 @@ router.get(
  * GET /api/v1/wallet-aliases/:canonicalId
  * Returns all aliases linked to a canonical identity.
  */
-router.get('/:canonicalId', readsLimiter, (req: Request, res: Response) => {
-  const mapping = walletAliasMappingService.getIdentityLinks(req.params.canonicalId);
+router.get('/:canonicalId', readsLimiter, async (req: Request, res: Response) => {
+  const mapping = await walletAliasMappingService.getIdentityLinks(req.params.canonicalId);
 
   if (!mapping) {
     res.status(404).json({
