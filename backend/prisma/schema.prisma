@@ -78,6 +78,43 @@ model ReferralCode {
   @@index([ownerAddress])
 }
 
+model WalletCanonicalIdentity {
+  id        String   @id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aliases WalletAlias[]
+
+  @@index([createdAt])
+}
+
+model WalletAlias {
+  id          String   @id @default(uuid())
+  canonicalId String
+  alias       String
+  source      String
+  aliasKey    String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  canonical WalletCanonicalIdentity @relation(fields: [canonicalId], references: [id], onDelete: Cascade)
+
+  @@index([canonicalId])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model WalletAliasSource {
+  id          String   @id @default(uuid())
+  source      String   @unique
+  displayName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([source])
+  @@index([createdAt])
+}
+
 model AdminAuditLog {
   id         String   @id
   action     String
