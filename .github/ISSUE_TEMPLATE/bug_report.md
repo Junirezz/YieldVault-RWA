@@ -1,32 +1,34 @@
 ---
 name: Bug Report
-about: Create a report to help us fix a defect or unexpected behavior
-title: 'Fix: [Short description of bug]'
+about: Report a defect or unexpected behavior in YieldVault-RWA
+title: 'Fix: [Short description of the bug]'
 labels: 'type: bug, status: needs-triage'
 assignees: ''
 ---
 
-## 🐛 Description
-Provide a clear and concise description of what the bug is.
+## 🐛 Summary
+Provide a short summary of the defect and its impact on users, workflows, or system behavior.
 
 ## 🔄 Steps to Reproduce
-Steps to reproduce the behavior:
 1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+2. Perform '...'
+3. Observe '...'
+4. See the error or unexpected result
 
-## 🎯 Expected Behavior
-A clear and concise description of what you expected to happen.
+## ✅ Expected Behavior
+Describe what should have happened.
 
 ## ❌ Actual Behavior
-A description of what actually happened, including error logs or tracebacks if applicable.
+Describe what happened instead, including any errors, logs, or stack traces.
 
-## 🖥️ Environment & Scope
-- **Component Scope**: `scope: frontend` / `scope: backend` / `scope: contracts` / `scope: infra`
-- **Priority**: `priority: p0-critical` / `priority: p1-high` / `priority: p2-medium` / `priority: p3-low`
-- **Environment**: Local / Testnet / Mainnet
-- **Browser/OS/Node Version**: e.g., Chrome v120 / Windows / Node v20
+## 📍 Impact
+- Affected area: `scope: frontend` / `scope: backend` / `scope: contracts` / `scope: infra`
+- Severity / priority: `priority: p0-critical` / `priority: p1-high` / `priority: p2-medium` / `priority: p3-low`
+- Environment: Local / Testnet / Mainnet
+- Browser / OS / Runtime: e.g. Chrome v120 / Windows / Node v20
 
-## 📸 Screenshots / Logs
-If applicable, add screenshots or logs to help explain your problem.
+## 🔎 Evidence
+Attach screenshots, console output, logs, or any other information that helps confirm the issue.
+
+## 📝 Additional Context
+Include any relevant commit, deployment, workaround, or suspected cause.
