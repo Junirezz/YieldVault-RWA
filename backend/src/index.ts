@@ -107,6 +107,7 @@ import {
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
 import { startEventPollingService, stopEventPollingService } from './eventPollingService';
+import { eventOutboxService } from './eventOutbox';
 import { prisma, getPrismaRuntimeConfig } from './prisma';
 import { getPrismaClient } from './prismaClient';
 import {
@@ -4267,6 +4268,29 @@ if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {
     batchSize: parseInt(process.env.EVENT_REPLAY_BATCH_SIZE || '100', 10),
   });
 }
+
+// â”€â”€â”€ Outbox Pattern Processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Starts the background outbox event relay processor.
+// Writes from vault operations go to the EventOutbox table atomically;
+// this processor reads them and delivers via the webhook system.
+if (process.env.NODE_ENV !== 'test') {
+  eventOutboxService.replayOnStartup().catch((err) => {
+    logger.log('error', 'Outbox startup replay failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  eventOutboxService.start();
+
+  // Register graceful shutdown for the outbox processor so pending events
+  // are not abandoned when the process receives a termination signal.
+  process.on('SIGTERM', () => {
+    eventOutboxService.stop();
+  });
+  process.on('SIGINT', () => {
+    eventOutboxService.stop();
+  });
+}
+
 
 // â”€â”€â”€ Dependency Health Checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
