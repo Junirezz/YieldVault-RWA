@@ -129,6 +129,10 @@ windows, sunset policy, and client migration guide.
 
 API endpoints are rate limited. See [RATE_LIMITING.md](./RATE_LIMITING.md) for details.
 
+### SLA and SLO Targets
+
+API reliability, availability/uptime, and latency targets are formally documented and validated. See [SLA_SLO.md](./SLA_SLO.md) for the exact targets and monitoring procedures.
+
 ### Error Handling
 
 All errors follow a consistent format:

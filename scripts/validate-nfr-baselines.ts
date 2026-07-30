@@ -14,6 +14,8 @@ export interface NFRTierConfig {
     availability_percent: number;
     latency_p95_read_ms?: number;
     latency_p95_write_ms?: number;
+    latency_p99_read_ms?: number;
+    latency_p99_write_ms?: number;
   };
   rto_minutes: number;
   rpo_minutes: number;
@@ -54,6 +56,33 @@ export function validateNFRJsonSpec(jsonContent: string): ValidationResult {
       if (typeof t.rpo_minutes !== 'number' || t.rpo_minutes < 0 || t.rpo_minutes > 60) {
         errors.push(`Tier "${t.tier}" has invalid RPO: ${t.rpo_minutes} minutes (must be between 0 and 60 mins).`);
       }
+
+      if (t.slo) {
+        if ('latency_p95_read_ms' in t.slo) {
+          const val = t.slo.latency_p95_read_ms;
+          if (typeof val !== 'number' || val <= 0 || val > 1000) {
+            errors.push(`Tier "${t.tier}" has invalid latency_p95_read_ms SLO: ${val} ms (must be a positive number up to 1000).`);
+          }
+        }
+        if ('latency_p95_write_ms' in t.slo) {
+          const val = t.slo.latency_p95_write_ms;
+          if (typeof val !== 'number' || val <= 0 || val > 3000) {
+            errors.push(`Tier "${t.tier}" has invalid latency_p95_write_ms SLO: ${val} ms (must be a positive number up to 3000).`);
+          }
+        }
+        if ('latency_p99_read_ms' in t.slo) {
+          const val = t.slo.latency_p99_read_ms;
+          if (typeof val !== 'number' || val <= 0 || val > 2000) {
+            errors.push(`Tier "${t.tier}" has invalid latency_p99_read_ms SLO: ${val} ms (must be a positive number up to 2000).`);
+          }
+        }
+        if ('latency_p99_write_ms' in t.slo) {
+          const val = t.slo.latency_p99_write_ms;
+          if (typeof val !== 'number' || val <= 0 || val > 5000) {
+            errors.push(`Tier "${t.tier}" has invalid latency_p99_write_ms SLO: ${val} ms (must be a positive number up to 5000).`);
+          }
+        }
+      }
     }
 
     if (!spec.error_budget_policy || !spec.error_budget_policy.fast_burn || !spec.error_budget_policy.slow_burn) {
@@ -90,6 +119,37 @@ export function validateNFRDocContent(markdownContent: string): ValidationResult
   for (const heading of requiredHeadings) {
     if (!markdownContent.includes(heading)) {
       errors.push(`NFR_BASELINES.md is missing required section: "${heading}"`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+/**
+ * Validates section completeness in docs/api/SLA_SLO.md.
+ */
+export function validateApiSlaSloDocContent(markdownContent: string): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!markdownContent || markdownContent.trim() === '') {
+    errors.push('SLA_SLO.md content cannot be empty.');
+    return { valid: false, errors, warnings };
+  }
+
+  const requiredHeadings = [
+    'API SLA/SLO Targets',
+    '1. Purpose & Scope',
+    '2. Service Level Objectives (SLO) & Service Level Indicators (SLI)',
+    '2.1 Uptime / Availability SLO',
+    '2.2 Latency SLOs',
+    '3. Alerting and Error Budget Policy',
+    '4. Automated Verification',
+  ];
+
+  for (const heading of requiredHeadings) {
+    if (!markdownContent.includes(heading)) {
+      errors.push(`SLA_SLO.md is missing required section: "${heading}"`);
     }
   }
 
@@ -147,6 +207,48 @@ export function runFullNFRValidation(rootDir: string = process.cwd()): Validatio
       const resAlign = validateObservabilityAlignment(jsonContent, obsContent);
       allErrors.push(...resAlign.errors);
       allWarnings.push(...resAlign.warnings);
+    }
+  }
+
+  const apiSlaSloPath = resolve(rootDir, 'docs/api/SLA_SLO.md');
+  if (!existsSync(apiSlaSloPath)) {
+    allErrors.push('docs/api/SLA_SLO.md file does not exist.');
+  } else {
+    const apiSlaSloContent = readFileSync(apiSlaSloPath, 'utf8');
+    const resApiDoc = validateApiSlaSloDocContent(apiSlaSloContent);
+    allErrors.push(...resApiDoc.errors);
+    allWarnings.push(...resApiDoc.warnings);
+
+    if (jsonContent) {
+      try {
+        const spec = JSON.parse(jsonContent);
+        const tier2 = spec.tiers?.find((t: any) => t.tier === 'tier2_backend_api');
+        if (tier2 && tier2.slo) {
+          const availability = tier2.slo.availability_percent;
+          const readP95 = tier2.slo.latency_p95_read_ms;
+          const writeP95 = tier2.slo.latency_p95_write_ms;
+          const readP99 = tier2.slo.latency_p99_read_ms;
+          const writeP99 = tier2.slo.latency_p99_write_ms;
+
+          if (availability !== undefined && !apiSlaSloContent.includes(`${availability}%`)) {
+            allErrors.push(`docs/api/SLA_SLO.md does not document the correct availability target of ${availability}%.`);
+          }
+          if (readP95 !== undefined && !apiSlaSloContent.includes(`${readP95} ms`)) {
+            allErrors.push(`docs/api/SLA_SLO.md does not document the correct read P95 latency target of ${readP95} ms.`);
+          }
+          if (writeP95 !== undefined && !apiSlaSloContent.includes(`${writeP95} ms`)) {
+            allErrors.push(`docs/api/SLA_SLO.md does not document the correct write P95 latency target of ${writeP95} ms.`);
+          }
+          if (readP99 !== undefined && !apiSlaSloContent.includes(`${readP99} ms`)) {
+            allErrors.push(`docs/api/SLA_SLO.md does not document the correct read P99 latency target of ${readP99} ms.`);
+          }
+          if (writeP99 !== undefined && !apiSlaSloContent.includes(`${writeP99} ms`)) {
+            allErrors.push(`docs/api/SLA_SLO.md does not document the correct write P99 latency target of ${writeP99} ms.`);
+          }
+        }
+      } catch {
+        // Handled by validateNFRJsonSpec
+      }
     }
   }
 

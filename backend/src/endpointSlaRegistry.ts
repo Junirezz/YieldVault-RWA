@@ -16,6 +16,8 @@ export interface EndpointSlaAnnotation {
   type: EndpointType;
   /** P95 latency budget in milliseconds. */
   p95BudgetMs: number;
+  /** P99 latency budget in milliseconds. */
+  p99BudgetMs: number;
   /** Documented availability SLO (e.g. 0.999). */
   availabilityTarget: AvailabilityTarget;
   tier: SlaTier;
@@ -34,6 +36,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 50,
+    p99BudgetMs: 150,
     availabilityTarget: 0.999,
     tier: 'critical',
     ownerTeam: 'platform',
@@ -44,6 +47,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 100,
+    p99BudgetMs: 250,
     availabilityTarget: 0.999,
     tier: 'critical',
     ownerTeam: 'platform',
@@ -54,6 +58,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.99,
     tier: 'standard',
     ownerTeam: 'platform',
@@ -64,6 +69,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.995,
     tier: 'critical',
     ownerTeam: 'backend',
@@ -74,6 +80,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.995,
     tier: 'standard',
     ownerTeam: 'backend',
@@ -84,6 +91,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.995,
     tier: 'standard',
     ownerTeam: 'backend',
@@ -94,6 +102,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.995,
     tier: 'standard',
     ownerTeam: 'backend',
@@ -104,6 +113,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['POST'],
     type: EndpointType.WRITE,
     p95BudgetMs: 500,
+    p99BudgetMs: 1200,
     availabilityTarget: 0.99,
     tier: 'critical',
     ownerTeam: 'backend',
@@ -114,6 +124,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['POST'],
     type: EndpointType.WRITE,
     p95BudgetMs: 500,
+    p99BudgetMs: 1200,
     availabilityTarget: 0.99,
     tier: 'critical',
     ownerTeam: 'backend',
@@ -124,6 +135,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['POST'],
     type: EndpointType.WRITE,
     p95BudgetMs: 500,
+    p99BudgetMs: 1200,
     availabilityTarget: 0.99,
     tier: 'standard',
     ownerTeam: 'platform',
@@ -134,6 +146,7 @@ export const ENDPOINT_SLA_REGISTRY: readonly EndpointSlaAnnotation[] = [
     methods: ['GET'],
     type: EndpointType.READ,
     p95BudgetMs: 200,
+    p99BudgetMs: 500,
     availabilityTarget: 0.99,
     tier: 'standard',
     ownerTeam: 'platform',

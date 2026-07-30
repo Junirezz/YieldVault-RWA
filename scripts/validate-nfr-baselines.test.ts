@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import {
   validateNFRJsonSpec,
   validateNFRDocContent,
+  validateApiSlaSloDocContent,
   validateObservabilityAlignment,
   runFullNFRValidation,
 } from './validate-nfr-baselines';
@@ -30,11 +31,21 @@ describe('NFR Baselines Validator Unit Tests', () => {
       expect(validateNFRJsonSpec('{ bad json').valid).toBe(false);
     });
 
-    it('rejects NFR spec with out-of-bound availability or RTO values', () => {
+    it('rejects NFR spec with out-of-bound availability or latency values', () => {
       const json = JSON.stringify({
         tiers: [
           { tier: 't1', name: 'T1', slo: { availability_percent: 50.0 }, rto_minutes: 9999, rpo_minutes: 0 },
-          { tier: 't2', name: 'T2', slo: { availability_percent: 99.9 }, rto_minutes: 60, rpo_minutes: 15 },
+          {
+            tier: 't2',
+            name: 'T2',
+            slo: {
+              availability_percent: 99.9,
+              latency_p95_read_ms: 1200,
+              latency_p99_write_ms: -10,
+            },
+            rto_minutes: 60,
+            rpo_minutes: 15,
+          },
           { tier: 't3', name: 'T3', slo: { availability_percent: 99.9 }, rto_minutes: 15, rpo_minutes: 0 },
         ],
         error_budget_policy: { fast_burn: {}, slow_burn: {} },
@@ -43,6 +54,8 @@ describe('NFR Baselines Validator Unit Tests', () => {
       expect(res.valid).toBe(false);
       expect(res.errors.some((e) => e.includes('invalid availability SLO'))).toBe(true);
       expect(res.errors.some((e) => e.includes('invalid RTO'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('invalid latency_p95_read_ms'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('invalid latency_p99_write_ms'))).toBe(true);
     });
   });
 
@@ -56,6 +69,23 @@ describe('NFR Baselines Validator Unit Tests', () => {
 
     it('rejects empty markdown content', () => {
       expect(validateNFRDocContent('').valid).toBe(false);
+    });
+  });
+
+  describe('validateApiSlaSloDocContent', () => {
+    it('validates repository docs/api/SLA_SLO.md file', () => {
+      const docPath = resolve(__dirname, '../docs/api/SLA_SLO.md');
+      expect(existsSync(docPath)).toBe(true);
+      const markdown = readFileSync(docPath, 'utf8');
+      expect(validateApiSlaSloDocContent(markdown).valid).toBe(true);
+    });
+
+    it('rejects empty markdown content', () => {
+      expect(validateApiSlaSloDocContent('').valid).toBe(false);
+    });
+
+    it('rejects markdown content missing required headings', () => {
+      expect(validateApiSlaSloDocContent('# API SLA/SLO Targets').valid).toBe(false);
     });
   });
 
