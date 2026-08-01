@@ -80,6 +80,14 @@ To keep our repository organized, we follow a strict branch naming convention. P
 - **Bug Fixes**: `fix/<issue-number>-<short-description>`
   - Example: `fix/350-resolve-auth-crash`
 
+## Issue Reporting Conventions
+
+When opening a new issue, please use the most appropriate template so the report is actionable for triage:
+
+- **Bug reports**: use the Bug Report template for defects, crashes, regressions, or unexpected behavior.
+- **Feature requests**: use the Feature Request template for new capabilities or enhancements.
+- **Security concerns**: use the Security Report template or follow the private security policy for sensitive vulnerabilities.
+
 ## Pull Request Conventions
 
 When submitting a Pull Request, please ensure the title is descriptive and follows the format of the issue. The PR body **must** include the following sections:
