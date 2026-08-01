@@ -20,4 +20,12 @@ describe('endpointSlaRegistry', () => {
     const summary = getEndpointSla('/api/v1/vault/summary');
     expect(deposit?.p95BudgetMs).toBeGreaterThan(summary!.p95BudgetMs);
   });
+
+  it('includes p99BudgetMs annotations for all endpoints which are greater than p95BudgetMs', () => {
+    const registry = listEndpointSlaRegistry();
+    for (const entry of registry) {
+      expect(entry.p99BudgetMs).toBeDefined();
+      expect(entry.p99BudgetMs).toBeGreaterThan(entry.p95BudgetMs);
+    }
+  });
 });

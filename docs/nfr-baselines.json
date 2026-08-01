@@ -23,6 +23,8 @@
         "availability_percent": 99.9,
         "latency_p95_read_ms": 200,
         "latency_p95_write_ms": 500,
+        "latency_p99_read_ms": 500,
+        "latency_p99_write_ms": 1200,
         "error_rate_max_percent": 0.1
       },
       "rto_minutes": 60,
