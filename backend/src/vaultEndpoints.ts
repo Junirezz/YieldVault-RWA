@@ -15,7 +15,8 @@ import { submitVaultOperation, SorobanSimulationError } from './sorobanClient';
 import { requireFlag } from './featureFlags';
 import { referralService } from './referralService';
 import { getPrismaClient } from './prismaClient';
-import { emitTransactionEvent, TransactionEventType } from './webhookDelivery';
+import { TransactionEventType } from './webhookDelivery';
+import { eventOutboxService } from './eventOutbox';
 import {
   validate,
   VaultDepositBodySchema,
@@ -435,19 +436,27 @@ async function handleVaultOperation(
         timestamp: new Date().toISOString(),
       };
 
-      // Fire webhook delivery in background so transaction API latency is not blocked.
+      // Write event to outbox for reliable publishing.
+      // The outbox processor will pick this up and deliver via webhooks.
+      // This ensures the event survives a crash between persisting the
+      // transaction and dispatching the webhook delivery.
       const eventType: TransactionEventType =
         type === 'deposit' ? 'transaction.deposit.created' : 'transaction.withdrawal.created';
-      void emitTransactionEvent(eventType, {
-        transactionId: body.id,
-        amount: String(body.amount),
-        asset: String(body.asset),
-        walletAddress: String(body.walletAddress),
-        transactionHash: String(body.transactionHash),
-        status: String(body.status),
-        timestamp: String(body.timestamp),
+      void eventOutboxService.writeEvent({
+        eventType,
+        payload: {
+          transactionId: body.id,
+          amount: String(body.amount),
+          asset: String(body.asset),
+          walletAddress: String(body.walletAddress),
+          transactionHash: String(body.transactionHash),
+          status: String(body.status),
+          timestamp: String(body.timestamp),
+        },
+        aggregateType: 'transaction',
+        aggregateId: body.id,
       }).catch((error) => {
-        logger.log('error', 'Failed to emit webhook delivery', {
+        logger.log('error', 'Failed to write event to outbox', {
           error: error instanceof Error ? error.message : String(error),
           eventType,
           transactionId: body.id,

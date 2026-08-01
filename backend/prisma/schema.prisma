@@ -554,6 +554,36 @@ model CriticalEntityAuditEvent {
 // process restarts and are visible to every backend instance in multi-pod
 // deployments, letting operators reconstruct partial config changes that
 // were prepared but never committed/rolled back before a crash.
+// ─── Outbox Pattern for Reliable Event Publishing ────────────────────────────
+
+/// Event outbox table used for reliable event publishing.
+/// Events are written here atomically within business transactions,
+/// and a background relay processor reads from this table to publish
+/// events to downstream consumers (e.g., webhooks).
+/// This ensures at-least-once delivery even in the face of crashes.
+model EventOutbox {
+  id            String    @id
+  eventType     String
+  payload       String    // JSON-serialised TransactionEventPayload
+  status        String    @default("pending") // pending | relayed | failed | dead_letter
+  aggregateType String    // e.g. "transaction", "vault"
+  aggregateId   String    // e.g. transaction id, vault id
+  attemptCount  Int       @default(0)
+  maxAttempts   Int       @default(3)
+  lastError     String?
+  lockedAt      DateTime? // Used for instance-level locking during relay
+  lockedBy      String?   // Instance identifier that holds the lock
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  relayedAt     DateTime?
+
+  @@index([status])
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@index([lockedAt])
+  @@index([createdAt])
+}
+
 model WriteAheadAuditEntry {
   id                 String    @id
   configType         String
