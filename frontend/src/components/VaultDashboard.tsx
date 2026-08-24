@@ -1047,6 +1047,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               <span className="copy-field-value copy-field-value-mono">{strategy.id}</span>
               <CopyButton value={strategy.id} label="strategy ID" />
             </div>
+            <div style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(`/strategies/${strategy.id}`)}
+              >
+                {t("vaultDashboard.viewDetails")}
+              </button>
+            </div>
           </>
             )}
           </div>
