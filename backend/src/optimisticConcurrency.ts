@@ -40,7 +40,7 @@ export async function executeWithOptimisticConcurrency<T>(
   const maxDelayMs = options?.maxDelayMs ?? DEFAULT_OPTIONS.maxDelayMs;
 
   let attempt = 0;
-  while (true) {
+  for (;;) {
     attempt++;
     try {
       return await operation(attempt);
