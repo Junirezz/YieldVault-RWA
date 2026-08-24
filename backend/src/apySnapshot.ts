@@ -77,7 +77,7 @@ function datePlusDays(date: string, days: number): string {
  */
 async function fetchCurrentApy(): Promise<number> {
   // Mock: query the DB / RPC for the live APY gauge
-  await db.query('SELECT apy FROM vault_metrics ORDER BY recorded_at DESC LIMIT 1');
+  await db.query('SELECT apy FROM vault_metrics_snapshots ORDER BY recorded_at DESC LIMIT 1');
   // Return a realistic mock value between 6% and 12%
   const base = 8.5;
   const jitter = (Math.random() - 0.5) * 0.4;
