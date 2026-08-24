@@ -206,6 +206,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     summary,
     error,
     isLoading,
+    summaryUnavailable,
     utilization,
     isCapWarning,
     isCapReached,
@@ -958,6 +959,36 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           <div className="glass-panel" style={{ padding: "20px", background: "var(--bg-muted)" }}>
             {delayedLoading ? (
               <DashboardCardSkeleton />
+            ) : summaryUnavailable ? (
+              <>
+                <h3
+                  style={{
+                    fontSize: "1.1rem",
+                    marginBottom: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <TrendingUp size={18} color="var(--accent-purple)" />
+                  {t("vaultDashboard.strategyOverview")}
+                </h3>
+                <EmptyState
+                  kind="error"
+                  title={t("vaultDashboard.strategyUnavailableTitle")}
+                  description={t("vaultDashboard.strategyUnavailableDesc")}
+                  icon={<TrendingUp size={24} />}
+                  action={{
+                    label: t("common.retry"),
+                    onClick: () => void refresh(),
+                  }}
+                  secondaryAction={{
+                    label: t("emptyState.compareStrategies"),
+                    href: "/compare",
+                    variant: "secondary",
+                  }}
+                />
+              </>
             ) : (
               <>
                 <h3

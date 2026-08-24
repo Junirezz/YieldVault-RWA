@@ -412,10 +412,16 @@ describe("VaultDashboard", () => {
 
     renderDashboard("GABC123");
 
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
-    }, { timeout: 3000 });
-    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load vault data");
+    // The banner and the strategy-unavailable empty state are both announced.
+    const alerts = await screen.findAllByRole("alert", {}, { timeout: 3000 });
+    expect(
+      alerts.some((alert) => alert.textContent?.includes("Data unavailable")),
+    ).toBe(true);
+    expect(
+      alerts.some((alert) =>
+        alert.textContent?.includes("Failed to load vault data"),
+      ),
+    ).toBe(true);
   });
 
   it("prefills the deposit amount from deep links and removes params", async () => {

@@ -53,6 +53,8 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [error, setError] = useState<ApiError | ValidationError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  /** Bumped by the empty-state retry action to re-run the holdings effect. */
+  const [reloadKey, setReloadKey] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
   const locale = preferences.locale;
   const currency = preferences.currency;
@@ -151,7 +153,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     return () => {
       isMounted = false;
     };
-  }, [walletAddress, urlState.filters.status, t]);
+  }, [walletAddress, urlState.filters.status, t, reloadKey]);
 
   const filteredHoldings = React.useMemo(() => {
     if (!urlState.filters.status || urlState.filters.status === "all") {
@@ -305,6 +307,16 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
 
   const holdingsEmptyMessage = isLoading ? (
     t("portfolio.syncingLabel")
+  ) : error ? (
+    <EmptyState
+      kind="error"
+      className="empty-state-compact"
+      title={t("portfolio.unavailableTitle")}
+      description={t("portfolio.unavailableDesc")}
+      icon={<Briefcase />}
+      actionLabel={t("common.retry")}
+      onAction={() => setReloadKey((key) => key + 1)}
+    />
   ) : (
     <EmptyState
       kind={hasActiveHoldingsFilters ? "no-results" : "no-data"}
@@ -380,8 +392,19 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
 
           <YieldBreakdownChart totalGain={totalGain} />
 
-          {/* Empty state: wallet connected, loading done, no portfolio value */}
-          {!isLoading && totalValue === 0 ? (
+          {/* Empty state: wallet connected, loading done, no portfolio value.
+              A load failure takes precedence — "get started" advice would be
+              misleading when we simply could not fetch the data. */}
+          {error && !isLoading ? (
+            <EmptyState
+              kind="error"
+              title={t("portfolio.unavailableTitle")}
+              description={t("portfolio.unavailableDesc")}
+              icon={<Briefcase />}
+              actionLabel={t("common.retry")}
+              onAction={() => setReloadKey((key) => key + 1)}
+            />
+          ) : !isLoading && totalValue === 0 ? (
             <FirstTimePortfolioPanel
               walletConnected={true}
               onConnectWallet={() => window.dispatchEvent(new Event("TRIGGER_WALLET_CONNECT"))}

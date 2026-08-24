@@ -152,6 +152,7 @@ export const en = {
   },
   common: {
     dismiss: "Dismiss",
+    retry: "Try again",
   },
   txTimeline: {
     ariaLabel: "Transaction status timeline",
@@ -501,10 +502,15 @@ export const en = {
   emptyState: {
     depositNow: "Deposit Now",
     withdrawNow: "Withdraw Now",
+    compareStrategies: "Compare strategies",
   },
   txHistory: {
     pageTitle: "Transaction History",
     pageDesc: "View all your past deposits and withdrawals.",
+    unavailable: {
+      title: "Transactions unavailable",
+      desc: "We could not load your transaction history. Your funds are unaffected — try again in a moment.",
+    },
     typeHeader: "Type",
     statusHeader: "Status",
     amountHeader: "Amount",
@@ -592,6 +598,8 @@ export const en = {
     depositNow: "Deposit Now",
     resetFilters: "Reset Filters",
     syncingLabel: "Syncing...",
+    unavailableTitle: "Positions unavailable",
+    unavailableDesc: "We could not load your positions. Your funds are unaffected — try again in a moment.",
     liveLabel: "Live",
     totalNetValue: "Total Net Value",
     cumulativeYield: "Cumulative Yield",
@@ -740,6 +748,8 @@ export const en = {
     syncing: "Syncing",
     underlyingAsset: "Underlying Asset",
     strategyOverview: "Strategy Overview",
+    strategyUnavailableTitle: "Strategy data unavailable",
+    strategyUnavailableDesc: "We could not load the current strategy details. Your funds are unaffected — try again or compare strategies in the meantime.",
     strategyName: "BENJI Strategy",
     strategyDesc: "This vault pools USDC and deploys it into verified tokenized sovereign bonds available on the Stellar network.",
     targetAllocation: "Target Allocation",

@@ -152,6 +152,7 @@ export const es = {
   },
   common: {
     dismiss: "Descartar",
+    retry: "Reintentar",
   },
   txTimeline: {
     ariaLabel: "Línea de tiempo del estado de la transacción",
@@ -475,10 +476,15 @@ export const es = {
   emptyState: {
     depositNow: "Depositar ahora",
     withdrawNow: "Retirar ahora",
+    compareStrategies: "Comparar estrategias",
   },
   txHistory: {
     pageTitle: "Historial de transacciones",
     pageDesc: "Consulta todos tus depósitos y retiros pasados.",
+    unavailable: {
+      title: "Transacciones no disponibles",
+      desc: "No pudimos cargar tu historial de transacciones. Tus fondos no están afectados — reintenta en un momento.",
+    },
     typeHeader: "Tipo",
     statusHeader: "Estado",
     amountHeader: "Monto",
@@ -566,6 +572,8 @@ export const es = {
     depositNow: "Depositar ahora",
     resetFilters: "Restablecer filtros",
     syncingLabel: "Sincronizando...",
+    unavailableTitle: "Posiciones no disponibles",
+    unavailableDesc: "No pudimos cargar tus posiciones. Tus fondos no están afectados — reintenta en un momento.",
     liveLabel: "En vivo",
     totalNetValue: "Valor neto total",
     cumulativeYield: "Rendimiento acumulado",
@@ -714,6 +722,8 @@ export const es = {
     syncing: "Sincronizando",
     underlyingAsset: "Activo subyacente",
     strategyOverview: "Resumen de la estrategia",
+    strategyUnavailableTitle: "Datos de estrategia no disponibles",
+    strategyUnavailableDesc: "No pudimos cargar los detalles de la estrategia actual. Tus fondos no están afectados — reintenta o compara estrategias mientras tanto.",
     strategyName: "Estrategia BENJI",
     strategyDesc: "Esta bóveda agrupa USDC y lo despliega en bonos soberanos tokenizados verificados disponibles en la red Stellar.",
     targetAllocation: "Asignación objetivo",
