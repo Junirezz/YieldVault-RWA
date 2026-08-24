@@ -158,7 +158,10 @@ export interface TransactionExportArtifact {
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
-const MOCK_WALLET_ADDRESS = 'G234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQ';
+// Kept in sync with VALID_TEST_WALLET in src/__tests__/setup.ts — both must be
+// a real, checksum-valid Ed25519 public key (not just regex-shaped) since
+// some endpoints validate wallet addresses via StrKey.isValidEd25519PublicKey.
+const MOCK_WALLET_ADDRESS = 'GBF2VOZSQLF2BZRW6NIDETV2L3I6GHXZUEFSIESELEAGATV2FYTOHOHI';
 
 const MOCK_TRANSACTIONS: Transaction[] = Array.from({ length: 100 }, (_, i) => ({
   id: `tx-${i + 1}`,

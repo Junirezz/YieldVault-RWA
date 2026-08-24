@@ -1,3 +1,11 @@
+// This file has its own dedicated adaptive-throttle escalation test and
+// already resets that middleware's state before every test (below), so it
+// needs the real threshold restored here — setup.ts globally raises
+// ADAPTIVE_THROTTLE_SCORE_THRESHOLD for every other integration test file,
+// most of which have no such per-test reset. Must run before importing
+// '../index', which reads this value once at module-load time.
+process.env.ADAPTIVE_THROTTLE_SCORE_THRESHOLD = '6';
+
 import request from 'supertest';
 import app from '../index';
 import { resetAdaptiveThrottleStateForTests } from '../middleware/adaptiveThrottle';
@@ -141,11 +149,20 @@ describe('Backend API', () => {
     it('should adaptively throttle repeated 4xx abuse patterns per IP', async () => {
       const clientIp = '198.51.100.33';
 
-      for (let i = 0; i < 8; i++) {
+      // 404s are scored at half weight (0.5) vs. other 4xx (1) in
+      // scoreForStatus — deliberately less suspicious than e.g. repeated
+      // 401/403s — so crossing the default threshold of 6 needs at least 12
+      // hits, not 8.
+      for (let i = 0; i < 20; i++) {
         await request(app)
           .get('/api/not-found-abuse')
           .set('x-forwarded-for', clientIp);
       }
+
+      // The middleware scores each response in a fire-and-forget res.on('finish')
+      // handler, not before the response is sent, so the priming loop above can
+      // outrun its own bookkeeping. Give it a beat to settle before relying on it.
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const throttled = await request(app)
         .get('/api/not-found-abuse')
