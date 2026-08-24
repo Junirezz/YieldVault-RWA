@@ -184,16 +184,31 @@ export interface VaultSubmitOptions {
   idempotencyKey?: string;
 }
 
+/**
+ * Best-effort extraction of the on-chain transaction hash from an operation
+ * response. The API contract (VaultOperationResponseSchema) exposes
+ * `transactionHash`; snake_case is accepted defensively. Returns undefined
+ * whenever no usable hash is present so callers can skip explorer links.
+ */
+function extractTransactionHash(response: unknown): string | undefined {
+  if (!response || typeof response !== "object") return undefined;
+  const record = response as Record<string, unknown>;
+  const candidate = record.transactionHash ?? record.tx_hash;
+  return typeof candidate === "string" && candidate.length > 0
+    ? candidate
+    : undefined;
+}
+
 async function submitVaultOperation(
   path: string,
   body: object,
   options: VaultSubmitOptions = {},
-): Promise<void> {
+): Promise<string | undefined> {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
   if (!apiBaseUrl) {
     await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    return;
+    return undefined;
   }
 
   const headers: Record<string, string> = {};
@@ -202,11 +217,12 @@ async function submitVaultOperation(
   }
 
   try {
-    await apiClient.post(path, {
+    const response = await apiClient.post<unknown>(path, {
       body,
       headers,
       retry: false,
     });
+    return extractTransactionHash(response);
   } catch (error) {
     const conflict = parseTransactionConflict(
       isApiError(error)
@@ -225,23 +241,23 @@ async function submitVaultOperation(
 export async function submitDeposit(
   params: unknown,
   options: VaultSubmitOptions = {},
-) {
+): Promise<string | undefined> {
   if (import.meta.env.VITE_E2E_STUB_BALANCES === "true") {
-    return;
+    return undefined;
   }
   const payload = validate(DepositRequestSchema, params, "DepositRequest");
-  await submitVaultOperation("/api/v1/vault/deposits", payload, options);
+  return submitVaultOperation("/api/v1/vault/deposits", payload, options);
 }
 
 export async function submitWithdrawal(
   params: unknown,
   options: VaultSubmitOptions = {},
-) {
+): Promise<string | undefined> {
   if (import.meta.env.VITE_E2E_STUB_BALANCES === "true") {
-    return;
+    return undefined;
   }
   const payload = validate(WithdrawalRequestSchema, params, "WithdrawalRequest");
-  await submitVaultOperation("/api/v1/vault/withdrawals", payload, options);
+  return submitVaultOperation("/api/v1/vault/withdrawals", payload, options);
 }
 
 export async function getXlmPrice(): Promise<number> {
