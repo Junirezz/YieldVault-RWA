@@ -329,6 +329,50 @@ describe('EventPollingService', () => {
       expect(true).toBe(true);
     });
 
+    it('starts the continuous polling loop even when startup replay fails outright', async () => {
+      (prisma.eventCursor.findUnique as jest.Mock).mockResolvedValue({
+        id: 1,
+        lastLedgerSeq: 1000,
+      });
+
+      // getLatestLedger succeeds (there are missed events to replay), but the
+      // subsequent getEvents call for the replay fails outright — simulating
+      // an RPC outage mid-replay rather than a clean "nothing missed" case.
+      (fetch as jest.Mock).mockImplementation((_url, options) => {
+        const body = JSON.parse((options as RequestInit).body as string);
+        if (body.method === 'getLatestLedger') {
+          return Promise.resolve({
+            json: async () => ({ result: { sequence: 1050 } }),
+          });
+        }
+        return Promise.reject(new Error('RPC unavailable'));
+      });
+
+      // start() must not reject: a failed replay should degrade gracefully
+      // instead of aborting before the continuous polling loop is armed.
+      await expect(service.start()).resolves.toBeUndefined();
+
+      // The continuous polling loop should now be armed for this leader —
+      // subsequent successful polls pick up where the failed replay left off.
+      (fetch as jest.Mock).mockReset();
+      (fetch as jest.Mock).mockImplementation((_url, options) => {
+        const body = JSON.parse((options as RequestInit).body as string);
+        if (body.method === 'getLatestLedger') {
+          return Promise.resolve({ json: async () => ({ result: { sequence: 1050 } }) });
+        }
+        return Promise.resolve({ json: async () => ({ result: { events: [] } }) });
+      });
+      (prisma.eventCursor.upsert as jest.Mock).mockResolvedValue({});
+
+      await (service as any).pollEvents();
+
+      expect(prisma.eventCursor.upsert).toHaveBeenCalledWith({
+        where: { id: 1 },
+        update: { lastLedgerSeq: 1050 },
+        create: { id: 1, lastLedgerSeq: 1050 },
+      });
+    });
+
     it('should continue polling after transient errors', async () => {
       (prisma.eventCursor.findUnique as jest.Mock).mockResolvedValue({
         id: 1,
