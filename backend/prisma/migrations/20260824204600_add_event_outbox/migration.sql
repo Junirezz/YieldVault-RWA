@@ -42,43 +42,14 @@ CREATE TABLE "EventOutbox" (
     "relayedAt" DATETIME
 );
 
--- RedefineTables
-PRAGMA defer_foreign_keys=ON;
-PRAGMA foreign_keys=OFF;
-CREATE TABLE "new_BulkExportJob" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "status" TEXT NOT NULL DEFAULT 'pending',
-    "format" TEXT NOT NULL,
-    "generatedBy" TEXT NOT NULL,
-    "filters" TEXT NOT NULL,
-    "totalRows" INTEGER NOT NULL DEFAULT 0,
-    "processedRows" INTEGER NOT NULL DEFAULT 0,
-    "errorRows" INTEGER NOT NULL DEFAULT 0,
-    "artifactId" TEXT,
-    "errorMessage" TEXT,
-    "version" INTEGER NOT NULL DEFAULT 1,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "completedAt" DATETIME
-);
-INSERT INTO "new_BulkExportJob" ("artifactId", "completedAt", "createdAt", "errorMessage", "errorRows", "filters", "format", "generatedBy", "id", "processedRows", "status", "totalRows", "updatedAt") SELECT "artifactId", "completedAt", "createdAt", "errorMessage", "errorRows", "filters", "format", "generatedBy", "id", "processedRows", "status", "totalRows", "updatedAt" FROM "BulkExportJob";
-DROP TABLE "BulkExportJob";
-ALTER TABLE "new_BulkExportJob" RENAME TO "BulkExportJob";
-CREATE INDEX "BulkExportJob_status_idx" ON "BulkExportJob"("status");
-CREATE INDEX "BulkExportJob_createdAt_idx" ON "BulkExportJob"("createdAt");
-CREATE INDEX "BulkExportJob_generatedBy_idx" ON "BulkExportJob"("generatedBy");
-CREATE TABLE "new_VaultState" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT DEFAULT 1,
-    "totalAssets" TEXT NOT NULL,
-    "totalShares" TEXT NOT NULL,
-    "version" INTEGER NOT NULL DEFAULT 1,
-    "updatedAt" DATETIME NOT NULL
-);
-INSERT INTO "new_VaultState" ("id", "totalAssets", "totalShares", "updatedAt") SELECT "id", "totalAssets", "totalShares", "updatedAt" FROM "VaultState";
-DROP TABLE "VaultState";
-ALTER TABLE "new_VaultState" RENAME TO "VaultState";
-PRAGMA foreign_keys=ON;
-PRAGMA defer_foreign_keys=OFF;
+-- AlterTable: add optimistic-concurrency version column.
+-- A plain ADD COLUMN with a constant DEFAULT is fully supported by SQLite
+-- and preserves the existing table (and its indexes) in place, unlike
+-- Prisma's default drop-and-rebuild diff for SQLite.
+ALTER TABLE "BulkExportJob" ADD COLUMN "version" INTEGER DEFAULT 1 NOT NULL;
+
+-- AlterTable: add optimistic-concurrency version column (see above).
+ALTER TABLE "VaultState" ADD COLUMN "version" INTEGER DEFAULT 1 NOT NULL;
 
 -- CreateIndex
 CREATE INDEX "AdminConfigChange_configType_idx" ON "AdminConfigChange"("configType");
