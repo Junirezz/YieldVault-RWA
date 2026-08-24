@@ -24,6 +24,16 @@ jest.mock('../prismaClient', () => ({
   disconnectPrismaClient: jest.fn().mockResolvedValue(undefined),
 }));
 
+// Deposits call referralService.recordDeposit(), which resolves the wallet's
+// canonical identity and opens its own Prisma transaction for referral
+// bookkeeping — neither of which this file's minimal Prisma mock supports,
+// and neither of which this suite (withdrawal saga recovery) is testing.
+jest.mock('../referralService', () => ({
+  referralService: {
+    recordDeposit: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
 // The signed-action middleware pulls in the wallet nonce service, which is not
 // exercised here (signature enforcement is off in tests).
 jest.mock('../walletNonce', () => ({
