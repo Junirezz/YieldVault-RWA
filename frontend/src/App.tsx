@@ -31,7 +31,9 @@ import {
 } from "./lib/formDraftStorage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ErrorFallback from "./components/ErrorFallback";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import RouteLoadingFallback from "./components/RouteLoadingFallback";
+import { captureException } from "./config/sentry";
 import {
   LazyAnalytics,
   LazyHome,
@@ -179,12 +181,14 @@ function AppContent() {
                   path="/"
                   element={
                     <ErrorBoundary>
+                    <RouteErrorBoundary routeName="home">
                       <LazyHome
                         walletAddress={walletAddress}
                         usdcBalance={usdcBalance}
                         xlmBalance={xlmBalance}
                       />
                     </ErrorBoundary>
+                    </RouteErrorBoundary>
                   }
                 />
                 <Route
@@ -193,6 +197,11 @@ function AppContent() {
                     <ErrorBoundary>
                       <LazyPortfolio walletAddress={walletAddress} />
                     </ErrorBoundary>
+                    <RouteErrorBoundary routeName="portfolio">
+                      <LazyPortfolio
+                        walletAddress={walletAddress}
+                      />
+                    </RouteErrorBoundary>
                   }
                 />
                 <Route
@@ -219,6 +228,69 @@ function AppContent() {
                         <Admin walletAddress={walletAddress} />
                       </ProtectedRoute>
                     </ErrorBoundary>
+                    <FeatureGate flag="ANALYTICS_PAGE">
+                      <RouteErrorBoundary routeName="analytics">
+                        <LazyAnalytics />
+                      </RouteErrorBoundary>
+                    </FeatureGate>
+                  }
+                />
+                <Route
+                  path="/transactions"
+                  element={
+                    <RouteErrorBoundary routeName="transactions">
+                      <LazyTransactionHistory walletAddress={walletAddress} />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/compare"
+                  element={
+                    <RouteErrorBoundary routeName="vault-comparison">
+                      <LazyVaultComparison />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/strategies/:strategyId"
+                  element={
+                    <RouteErrorBoundary routeName="strategy-detail">
+                      <StrategyDetail walletAddress={walletAddress} />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/receipt/:txHash"
+                  element={
+                    <RouteErrorBoundary routeName="transaction-receipt">
+                      <TransactionReceipt />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <RouteErrorBoundary routeName="settings">
+                      <LazySettings />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/ui-kit"
+                  element={
+                    <RouteErrorBoundary routeName="ui-preview">
+                      <LazyUIPreview />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute role={role} allow={["admin"]}>
+                      <RouteErrorBoundary routeName="admin">
+                        <Admin walletAddress={walletAddress} />
+                      </RouteErrorBoundary>
+                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
@@ -262,7 +334,7 @@ function App() {
       )}
       showDialog={false}
     >
-      <ErrorBoundary>
+      <ErrorBoundary onError={(error) => captureException(error, { route: "app-root" })}>
         <AuthProvider>
           <FeatureFlagProvider>
             <VaultProvider>

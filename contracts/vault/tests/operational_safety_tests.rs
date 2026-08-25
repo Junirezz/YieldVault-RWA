@@ -4,8 +4,8 @@
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
 use vault::{
-    operational_events, governance_validation, rounding_consistency, strategy_validation,
-    VaultError, YieldVault, YieldVaultClient, PauseReason,
+    governance_validation, operational_events, rounding_consistency, strategy_validation,
+    PauseReason, VaultError, YieldVault, YieldVaultClient,
 };
 
 // ── Setup Helpers ─────────────────────────────────────────────────────────
@@ -156,50 +156,57 @@ fn test_strategy_validator_accepts_positive_value() {
 
 #[test]
 fn test_strategy_validator_rejects_overflow_value() {
-    let result =
-        strategy_validation::StrategyValidator::validate_total_value(strategy_validation::MAX_STRATEGY_VALUE + 1);
+    let result = strategy_validation::StrategyValidator::validate_total_value(
+        strategy_validation::MAX_STRATEGY_VALUE + 1,
+    );
     assert_eq!(result, Err(VaultError::StrategyValueOverflow));
 }
 
 #[test]
 fn test_deposit_result_validation_normal_case() {
     // Deposit 1000, total increased from 10000 to 11000
-    let result = strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 11_000);
+    let result =
+        strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 11_000);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_deposit_result_validation_with_fees() {
     // Deposit 1000, but only net 950 due to fees
-    let result = strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 10_950);
+    let result =
+        strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 10_950);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_deposit_result_validation_rejects_negative_delta() {
     // Deposit 1000, but total decreased (impossible, indicates malicious response)
-    let result = strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 9_000);
+    let result =
+        strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 9_000);
     assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
 }
 
 #[test]
 fn test_withdrawal_result_validation_normal_case() {
     // Withdraw 1000 from 10000, leaving 9000
-    let result = strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 9_000);
+    let result =
+        strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 9_000);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_withdrawal_result_validation_with_slippage() {
     // Withdraw 1000, but lose extra 50 to slippage
-    let result = strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 8_950);
+    let result =
+        strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 8_950);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_withdrawal_result_validation_rejects_value_increase() {
     // Withdraw 1000, but total increased (impossible, indicates malicious response)
-    let result = strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 11_000);
+    let result =
+        strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 11_000);
     assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
 }
 
@@ -277,9 +284,9 @@ fn test_governance_validator_proposal_freshness_fresh() {
 #[test]
 fn test_governance_validator_proposal_freshness_stale() {
     let result = governance_validation::GovernanceValidator::validate_proposal_freshness(
-        1000, // created at
+        1000,    // created at
         100_000, // current time (way too late)
-        3600, // max age
+        3600,    // max age
     );
     assert_eq!(result, Err(VaultError::ProposalStale));
 }
@@ -343,8 +350,14 @@ fn test_rounding_policy_floor_division_exact() {
 
 #[test]
 fn test_rounding_policy_floor_division_rounds_down() {
-    assert_eq!(rounding_consistency::RoundingPolicy::floor_division(99, 10), 9);
-    assert_eq!(rounding_consistency::RoundingPolicy::floor_division(100, 1500), 0);
+    assert_eq!(
+        rounding_consistency::RoundingPolicy::floor_division(99, 10),
+        9
+    );
+    assert_eq!(
+        rounding_consistency::RoundingPolicy::floor_division(100, 1500),
+        0
+    );
 }
 
 #[test]
@@ -355,12 +368,9 @@ fn test_rounding_policy_decimal_conversion_up() {
 
 #[test]
 fn test_rounding_policy_decimal_conversion_down() {
-    let result = rounding_consistency::RoundingPolicy::convert_decimals(
-        1_000_000_000_000_000_000,
-        18,
-        6,
-    )
-    .unwrap();
+    let result =
+        rounding_consistency::RoundingPolicy::convert_decimals(1_000_000_000_000_000_000, 18, 6)
+            .unwrap();
     assert_eq!(result, 1_000_000);
 }
 
@@ -393,39 +403,39 @@ fn test_rounding_policy_validate_loss_exceeds_threshold() {
 #[test]
 fn test_rounding_policy_verify_safety() {
     // (66 * 1500) = 99000 <= 100000 ✓
-    assert!(rounding_consistency::RoundingPolicy::verify_round_down_safety(
-        100_000, 1500, 66
-    ));
+    assert!(rounding_consistency::RoundingPolicy::verify_round_down_safety(100_000, 1500, 66));
 
     // (67 * 1500) = 100500 > 100000 ✗
-    assert!(!rounding_consistency::RoundingPolicy::verify_round_down_safety(
-        100_000, 1500, 67
-    ));
+    assert!(!rounding_consistency::RoundingPolicy::verify_round_down_safety(100_000, 1500, 67));
 }
 
 #[test]
 fn test_rounding_policy_basis_points_5_percent() {
     let result =
-        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 500).unwrap();
+        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 500)
+            .unwrap();
     assert_eq!(result, 50_000);
 }
 
 #[test]
 fn test_rounding_policy_basis_points_rounds_down() {
     // (999 * 500) / 10000 = 49.95 → 49
-    let result = rounding_consistency::RoundingPolicy::calculate_basis_points_amount(999, 500).unwrap();
+    let result =
+        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(999, 500).unwrap();
     assert_eq!(result, 49);
 }
 
 #[test]
 fn test_rounding_policy_basis_points_zero() {
-    let result = rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 0).unwrap();
+    let result =
+        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 0).unwrap();
     assert_eq!(result, 0);
 }
 
 #[test]
 fn test_rounding_policy_basis_points_invalid() {
-    let result = rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 10_001);
+    let result =
+        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 10_001);
     assert_eq!(result, Err(VaultError::InvalidFeeBps));
 }
 
@@ -460,7 +470,8 @@ fn test_rounding_consistency_with_governance_conditions() {
 
     // Apply rounding
     let rounded =
-        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 500).unwrap();
+        rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 500)
+            .unwrap();
 
     // Governance checks still work
     assert!(governance_validation::GovernanceValidator::validate_quorum(2, &config).is_ok());

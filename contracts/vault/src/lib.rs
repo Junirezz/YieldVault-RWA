@@ -73,22 +73,22 @@ mod formal_verification_tests;
 mod fuzz_math;
 /// Property-based tests for deposit/withdraw math invariants (Issue #962).
 pub mod governance_validation;
-pub mod operational_events;
-pub mod rounding_consistency;
-pub mod strategy_validation;
 #[cfg(test)]
 mod invariant_tests;
 pub mod liquidation_safeguards;
 pub mod math;
+pub mod operational_events;
 #[cfg(test)]
 mod oracle_tests;
 pub mod packed_storage;
 pub mod permissions;
-pub mod recovery_sequence;
 #[cfg(test)]
 pub mod proxy_tests;
+pub mod recovery_sequence;
+pub mod rounding_consistency;
 pub mod storage_registry;
 pub mod strategy;
+pub mod strategy_validation;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
@@ -799,8 +799,9 @@ impl YieldVault {
         strategy_addr: &Address,
         expected_asset: &Address,
     ) -> i128 {
-        Self::validate_strategy_response(env, strategy_addr, expected_asset)
-            .unwrap_or_else(|_| soroban_sdk::panic_with_error!(env, VaultError::UnauthorizedStrategy))
+        Self::validate_strategy_response(env, strategy_addr, expected_asset).unwrap_or_else(|_| {
+            soroban_sdk::panic_with_error!(env, VaultError::UnauthorizedStrategy)
+        })
     }
 
     /// Configures the designated pauser role address.
@@ -855,7 +856,8 @@ impl YieldVault {
         state.is_paused = false;
         env.storage().instance().set(&DataKey::State, &state);
         env.storage().instance().remove(&DataKey::PauseReason);
-        env.events().publish((symbol_short!("unpaused"), caller.clone()), ());
+        env.events()
+            .publish((symbol_short!("unpaused"), caller.clone()), ());
         Ok(())
     }
 
@@ -879,7 +881,8 @@ impl YieldVault {
         state.is_paused = false;
         env.storage().instance().set(&DataKey::State, &state);
         env.storage().instance().remove(&DataKey::PauseReason);
-        env.events().publish((symbol_short!("unpaused"), admin.clone()), ());
+        env.events()
+            .publish((symbol_short!("unpaused"), admin.clone()), ());
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -1528,7 +1531,8 @@ impl YieldVault {
                 .set(&DataKey::GovernanceConfig, &config);
         }
 
-        env.events().publish((symbol_short!("govfin"), admin.clone()), ());
+        env.events()
+            .publish((symbol_short!("govfin"), admin.clone()), ());
     }
 
     pub fn create_strategy_proposal(env: Env, proposer: Address, strategy: Address) -> u32 {
@@ -1944,8 +1948,10 @@ impl YieldVault {
             &env.ledger().timestamp(),
         );
 
-        env.events()
-            .publish((symbol_short!("deposit"), user.clone()), (amount, shares_to_mint));
+        env.events().publish(
+            (symbol_short!("deposit"), user.clone()),
+            (amount, shares_to_mint),
+        );
         Ok(shares_to_mint)
     }
 
@@ -2910,7 +2916,8 @@ impl YieldVault {
                 env.storage()
                     .instance()
                     .set(&DataKey::TreasuryRolloverExcess, &new_rollover);
-                env.events().publish((symbol_short!("rolvr"), admin.clone()), excess);
+                env.events()
+                    .publish((symbol_short!("rolvr"), admin.clone()), excess);
             } else {
                 treasury_bal = treasury_bal.checked_add(fee_amount).expect("overflow");
             }
@@ -2918,8 +2925,10 @@ impl YieldVault {
             env.storage()
                 .instance()
                 .set(&DataKey::TreasuryBalance, &treasury_bal);
-            env.events()
-                .publish((symbol_short!("feeacc"), admin.clone()), (fee_amount, treasury_bal));
+            env.events().publish(
+                (symbol_short!("feeacc"), admin.clone()),
+                (fee_amount, treasury_bal),
+            );
         }
 
         let ta = env
@@ -3131,7 +3140,8 @@ impl YieldVault {
             return Err(VaultError::NoPendingWithdrawal);
         }
         env.storage().instance().remove(&DataKeyExt::PendingFeeBps);
-        env.events().publish((symbol_short!("feebpscn"), admin.clone()), ());
+        env.events()
+            .publish((symbol_short!("feebpscn"), admin.clone()), ());
         Ok(())
     }
 
@@ -3197,7 +3207,8 @@ impl YieldVault {
         env.storage()
             .instance()
             .remove(&DataKeyExt::PendingTreasury);
-        env.events().publish((symbol_short!("trsrycn"), admin.clone()), ());
+        env.events()
+            .publish((symbol_short!("trsrycn"), admin.clone()), ());
         Ok(())
     }
 
@@ -3568,7 +3579,8 @@ impl YieldVault {
         env.storage()
             .instance()
             .remove(&DataKeyExt::PendingPriceOracle);
-        env.events().publish((symbol_short!("oraclecn"), admin.clone()), ());
+        env.events()
+            .publish((symbol_short!("oraclecn"), admin.clone()), ());
         Ok(())
     }
 

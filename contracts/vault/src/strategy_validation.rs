@@ -3,8 +3,8 @@
 //! This module ensures that strategy contract responses are well-formed and
 //! cannot break vault logic through adversarial or corrupted payloads.
 
-use soroban_sdk::{Address, Env};
 use crate::VaultError;
+use soroban_sdk::{Address, Env};
 
 /// Maximum allowed strategy total value to prevent overflow and unreasonable responses.
 /// Set conservatively to catch malicious responses while allowing legitimate vaults.

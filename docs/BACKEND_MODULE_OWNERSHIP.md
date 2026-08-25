@@ -3,6 +3,7 @@
 This document maps every backend module to its functional domain, primary owner, and secondary reviewer. Use it to route issues, PR reviews, and incident escalations to the correct maintainer quickly.
 
 Related documents:
+- [SYSTEM_OWNERSHIP_AND_DATA_FLOW.md](./SYSTEM_OWNERSHIP_AND_DATA_FLOW.md) — Layer ownership boundaries, API flow maps, event flow, and cross-layer assumptions
 - [TRIAGE_AND_REVIEW.md](../TRIAGE_AND_REVIEW.md) — Triage workflow and review criteria
 - [docs/TRIAGE_ROTATION_CALENDAR.md](./TRIAGE_ROTATION_CALENDAR.md) — Weekly rotation schedule and escalation timeline
 - [docs/SERVICE_DEPENDENCY_MATRIX.md](./SERVICE_DEPENDENCY_MATRIX.md) — Cross-service dependencies and startup order
