@@ -47,6 +47,13 @@ pub fn require_pauser_or_admin_auth(caller: &Address, admin: &Address, pauser: O
 
 /// Multi-signer threshold validator for governance operations.
 /// Ensures M of N signers have authorized a critical operation.
+///
+/// Trust assumptions:
+/// - Every approval is treated as a single-use signature and must be unique.
+/// - Duplicate entries are rejected to prevent replay of the same signer weight.
+/// - The calling operation still owns the action-state checks (proposal status,
+///   timelock expiry, pending queue lifecycle) so stale approvals cannot be re-used
+///   out of order.
 pub struct MultiSignerValidator;
 
 impl MultiSignerValidator {
@@ -70,11 +77,25 @@ impl MultiSignerValidator {
         if threshold > signers.len() {
             return Err("threshold exceeds signer set size");
         }
+
+        // Reject duplicate approvals before counting toward the threshold.
+        // This prevents a single signer from replaying the same authorization
+        // multiple times to satisfy an M-of-N requirement.
+        for i in 0..approvals.len() {
+            let first = approvals.get(i).unwrap();
+            for j in (i + 1)..approvals.len() {
+                let second = approvals.get(j).unwrap();
+                if first == second {
+                    return Err("duplicate signer approval");
+                }
+            }
+        }
+
         if approvals.len() < threshold {
             return Err("insufficient approvals");
         }
 
-        // Verify all approvers are in the signer set
+        // Verify all approvers are in the signer set.
         for approver in approvals.iter() {
             if !signers.iter().any(|s| s == approver) {
                 return Err("unauthorized signer");

@@ -223,6 +223,17 @@ intentional for testnet iteration. Threshold must be raised before mainnet deplo
 - Yield model: linear step-up curve — `yield(epoch) = base_yield + step_yield × epoch`.
 - Strategy address is set directly by admin via `configure_korean_strategy`.
 
+### 5.4 Strategy Failure Behavior
+
+- Vaults treat strategy return data as untrusted input: the configured strategy must report the
+  vault's underlying asset address and a non-negative `total_value()`.
+- If a strategy returns a mismatched asset or a negative value, the vault aborts the operation with
+  `VaultError::UnauthorizedStrategy` or `VaultError::InvalidAmount` instead of continuing with
+  partial accounting.
+- When a strategy call itself reverts or fails to return a valid result, the transaction is aborted at
+  the call boundary; no state update is committed. This ensures malicious or partially implemented
+  strategy integrations fail predictably and do not silently distort vault share pricing.
+
 ---
 
 ## 6. Contract State Reference

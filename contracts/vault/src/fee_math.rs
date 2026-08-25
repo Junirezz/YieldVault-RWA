@@ -32,6 +32,15 @@ pub fn calculate_protocol_fee(amount: i128, fee_bps: i128) -> (i128, i128) {
 
     let fee_amount = amount.checked_mul(fee_bps).expect("fee overflow") / BPS_DENOMINATOR;
     let net_amount = amount - fee_amount;
+    assert!(
+        fee_amount >= 0 && net_amount >= 0,
+        "fee accounting invariant violated: negative fee share"
+    );
+    assert_eq!(
+        fee_amount + net_amount,
+        amount,
+        "fee accounting invariant violated: fee + net != amount"
+    );
     (fee_amount, net_amount)
 }
 
@@ -116,6 +125,30 @@ mod tests {
             let (fee, net) = calculate_protocol_fee(amount, bps);
             assert_eq!(fee, expected_fee, "amount={amount} bps={bps}");
             assert_eq!(fee + net, amount);
+        }
+    }
+
+    #[test]
+    fn test_fee_invariant_across_multiple_yield_values() {
+        for amount in [0, 1, 2, 3, 4, 9, 10, 99, 100, 1_001, 10_000] {
+            for bps in [0, 1, 25, 100, 333, 500, 999, 1000, 3333, 5000, 9999, 10_000] {
+                let (fee, net) = calculate_protocol_fee(amount, bps);
+                assert_eq!(fee + net, amount, "amount={amount} bps={bps}");
+                assert!(fee <= amount && net <= amount, "amount={amount} bps={bps}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_fee_invariant_large_balances() {
+        let cases = [
+            (i128::MAX / 10, 250),
+            (i128::MAX / 100, 5000),
+            (i128::MAX / 1_000, 10_000),
+        ];
+        for &(amount, bps) in &cases {
+            let (fee, net) = calculate_protocol_fee(amount, bps);
+            assert_eq!(fee + net, amount, "amount={amount} bps={bps}");
         }
     }
 
