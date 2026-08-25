@@ -211,6 +211,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     isCapWarning,
     isCapReached,
     lastUpdate,
+    strategySwitchCooldownRemaining,
     refresh,
   } = useVault();
   const { t } = useTranslation();
@@ -1084,6 +1085,27 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               <span className="copy-field-value copy-field-value-mono">{strategy.id}</span>
               <CopyButton value={strategy.id} label="strategy ID" />
             </div>
+            {strategySwitchCooldownRemaining > 0 && (
+              <div
+                style={{
+                  marginTop: "8px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  background: "rgba(234, 179, 8, 0.1)",
+                  border: "1px solid rgba(234, 179, 8, 0.3)",
+                  fontSize: "0.78rem",
+                  color: "var(--text-secondary)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <Clock3 size={14} style={{ color: "#eab308", flexShrink: 0 }} />
+                <span>
+                  Strategy switch cooldown: {strategySwitchCooldownRemaining}s remaining
+                </span>
+              </div>
+            )}
             <div style={{ marginTop: "12px" }}>
               <button
                 type="button"

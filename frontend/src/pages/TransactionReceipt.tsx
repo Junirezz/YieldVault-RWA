@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import EmptyState from "../components/ui/EmptyState";
 
@@ -12,10 +12,14 @@ interface TxDetails {
   source_account: string;
   operation_count: number;
   memo?: string;
-  // Derived from first payment operation
   type?: "deposit" | "withdrawal";
   amount?: string;
   asset?: string;
+  status: "pending" | "completed" | "failed";
+  confirmations: number;
+  ledger?: number;
+  explorerUrl: string;
+  horizonUrl: string;
 }
 
 interface HorizonTx {
@@ -25,6 +29,7 @@ interface HorizonTx {
   source_account: string;
   operation_count: number;
   memo?: string;
+  ledger?: number;
 }
 
 interface HorizonOp {
@@ -41,51 +46,73 @@ export default function TransactionReceipt() {
   const [tx, setTx] = useState<TxDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pollCount, setPollCount] = useState(0);
 
-  useEffect(() => {
+  const fetchTx = useCallback(async () => {
     if (!txHash) return;
 
-    async function fetchTx() {
-      try {
-        const [txRes, opsRes] = await Promise.all([
-          fetch(`${HORIZON_BASE}/transactions/${txHash}`),
-          fetch(`${HORIZON_BASE}/transactions/${txHash}/operations`),
-        ]);
+    try {
+      const [txRes, opsRes] = await Promise.all([
+        fetch(`${HORIZON_BASE}/transactions/${txHash}`),
+        fetch(`${HORIZON_BASE}/transactions/${txHash}/operations`),
+      ]);
 
-        if (!txRes.ok) throw new Error(`Transaction not found (${txRes.status})`);
-
-        const txData = (await txRes.json()) as HorizonTx;
-        const opsData = opsRes.ok
-          ? (await opsRes.json() as { _embedded: { records: HorizonOp[] } })
-          : null;
-
-        const paymentOp = opsData?._embedded?.records?.find(
-          (op) => op.type === "payment",
-        );
-
-        setTx({
-          hash: txData.hash,
-          created_at: txData.created_at,
-          fee_charged: txData.fee_charged,
-          source_account: txData.source_account,
-          operation_count: txData.operation_count,
-          memo: txData.memo,
-          type: paymentOp ? "deposit" : undefined,
-          amount: paymentOp?.amount,
-          asset:
-            paymentOp?.asset_type === "native"
-              ? "XLM"
-              : (paymentOp?.asset_code ?? undefined),
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load transaction");
-      } finally {
-        setLoading(false);
+      if (!txRes.ok) {
+        if (txRes.status === 404 && pollCount < 10) {
+          // Transaction not yet indexed — keep polling
+          setPollCount((c) => c + 1);
+          return;
+        }
+        throw new Error(`Transaction not found (${txRes.status})`);
       }
-    }
 
+      const txData = (await txRes.json()) as HorizonTx;
+      const opsData = opsRes.ok
+        ? (await opsRes.json() as { _embedded: { records: HorizonOp[] } })
+        : null;
+
+      const paymentOp = opsData?._embedded?.records?.find(
+        (op) => op.type === "payment",
+      );
+
+      setTx({
+        hash: txData.hash,
+        created_at: txData.created_at,
+        fee_charged: txData.fee_charged,
+        source_account: txData.source_account,
+        operation_count: txData.operation_count,
+        memo: txData.memo,
+        type: paymentOp ? "deposit" : undefined,
+        amount: paymentOp?.amount,
+        asset:
+          paymentOp?.asset_type === "native"
+            ? "XLM"
+            : (paymentOp?.asset_code ?? undefined),
+        status: "completed",
+        confirmations: txData.ledger ? Math.max(1, txData.ledger) : 1,
+        ledger: txData.ledger,
+        explorerUrl: `${EXPLORER_BASE}/${txHash}`,
+        horizonUrl: `${HORIZON_BASE}/transactions/${txHash}`,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load transaction");
+    } finally {
+      setLoading(false);
+    }
+  }, [txHash, pollCount]);
+
+  useEffect(() => {
     void fetchTx();
-  }, [txHash]);
+  }, [fetchTx]);
+
+  // Poll while transaction is not yet found (pending confirmation)
+  useEffect(() => {
+    if (loading || tx) return;
+    const timer = setTimeout(() => {
+      setPollCount((c) => c + 1);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [loading, tx, pollCount]);
 
   if (loading) {
     return (
@@ -115,12 +142,43 @@ export default function TransactionReceipt() {
     timeStyle: "short",
   });
 
+  const handleExportJson = () => {
+    const exportData = {
+      receiptVersion: 1,
+      transactionHash: tx.hash,
+      type: tx.type,
+      amount: tx.amount,
+      asset: tx.asset,
+      fee: feeXlm + " XLM",
+      walletAddress: tx.source_account,
+      date: tx.created_at,
+      status: tx.status,
+      ledger: tx.ledger,
+      explorerUrl: tx.explorerUrl,
+      horizonUrl: tx.horizonUrl,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `receipt-${tx.hash.slice(0, 12)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="receipt-page">
       <div className="receipt-card" role="main" aria-label="Transaction Receipt">
         <header className="receipt-header">
           <h1 className="receipt-title">Transaction Receipt</h1>
           <p className="receipt-subtitle">YieldVault · Stellar Network</p>
+          <div className="receipt-status">
+            <span className={`receipt-status-badge receipt-status-badge--${tx.status}`}>
+              {tx.status.charAt(0).toUpperCase() + tx.status.slice(1)}
+            </span>
+          </div>
         </header>
 
         <dl className="receipt-fields">
@@ -162,7 +220,7 @@ export default function TransactionReceipt() {
             <dt>Transaction Hash</dt>
             <dd className="receipt-mono receipt-truncate" title={tx.hash}>
               <a
-                href={`${EXPLORER_BASE}/${tx.hash}`}
+                href={tx.explorerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="receipt-explorer-link"
@@ -170,6 +228,25 @@ export default function TransactionReceipt() {
                 {tx.hash}
               </a>
             </dd>
+          </div>
+          {tx.ledger && (
+            <div className="receipt-row">
+              <dt>Ledger</dt>
+              <dd>
+                <a
+                  href={`${EXPLORER_BASE}/ledger/${tx.ledger}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="receipt-explorer-link"
+                >
+                  #{tx.ledger}
+                </a>
+              </dd>
+            </div>
+          )}
+          <div className="receipt-row">
+            <dt>Confirmations</dt>
+            <dd>{tx.confirmations}</dd>
           </div>
           {tx.memo && (
             <div className="receipt-row">
@@ -179,6 +256,25 @@ export default function TransactionReceipt() {
           )}
         </dl>
 
+        <div className="receipt-links">
+          <a
+            href={tx.explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="receipt-link"
+          >
+            View on Stellar Expert
+          </a>
+          <a
+            href={tx.horizonUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="receipt-link"
+          >
+            View on Horizon API
+          </a>
+        </div>
+
         <div className="receipt-actions no-print">
           <button
             type="button"
@@ -186,6 +282,13 @@ export default function TransactionReceipt() {
             onClick={() => window.print()}
           >
             Print Receipt
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleExportJson}
+          >
+            Export JSON
           </button>
           <Link to="/transactions" className="btn btn-secondary">
             View All Transactions
