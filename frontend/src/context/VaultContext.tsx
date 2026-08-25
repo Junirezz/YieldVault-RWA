@@ -1,8 +1,10 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useState,
 } from "react";
 import { subscribeToApiTelemetry, normalizeApiError } from "../lib/api";
 import type { ApiError } from "../lib/api";
@@ -32,6 +34,8 @@ interface VaultContextType {
   summaryUnavailable: boolean;
   error: ApiError | null;
   contractPaused: boolean;
+  strategySwitchCooldownRemaining: number;
+  strategySwitchCooldownTotal: number;
   refresh: () => Promise<void>;
 }
 
@@ -120,8 +124,32 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
   const currentApy = calculatedApy !== null ? calculatedApy : summary.apy;
   const formattedApy = calculatedApy !== null || data ? `${currentApy.toFixed(2)}%` : "N/A";
 
+  // Strategy switch cooldown tracking
+  const [strategySwitchCooldownRemaining, setStrategySwitchCooldownRemaining] = useState(0);
+  const [strategySwitchCooldownTotal, setStrategySwitchCooldownTotal] = useState(0);
+
+  // Poll cooldown from backend on interval
+  const fetchCooldown = useCallback(async () => {
+    try {
+      const res = await fetch("/api/v1/vault/strategy/cooldown");
+      if (res.ok) {
+        const data = await res.json();
+        setStrategySwitchCooldownRemaining(data.remaining ?? 0);
+        setStrategySwitchCooldownTotal(data.total ?? 0);
+      }
+    } catch {
+      // Silently ignore — cooldown display is non-critical
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchCooldown();
+    const interval = setInterval(fetchCooldown, 10000);
+    return () => clearInterval(interval);
+  }, [fetchCooldown]);
+
   const refresh = async () => {
-    await Promise.all([refetchSummary(), refetchHistory()]);
+    await Promise.all([refetchSummary(), refetchHistory(), fetchCooldown()]);
   };
 
   return (
@@ -141,6 +169,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
         summaryUnavailable,
         error,
         contractPaused: summary.contractPaused,
+        strategySwitchCooldownRemaining,
+        strategySwitchCooldownTotal,
         refresh,
       }}
     >

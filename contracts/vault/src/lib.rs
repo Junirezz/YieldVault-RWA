@@ -303,6 +303,12 @@ pub enum DataKey {
     RelayerWhitelist(Address),
     // Maximum entries allowed in a single batch_deposit call
     MaxBatchSize,
+    // Strategy switch cooldown: minimum seconds between strategy switches
+    StrategySwitchCooldown,
+    // Timestamp of the last successful strategy switch
+    LastStrategySwitchTime,
+    // Gasless deposit relayer whitelist (address -> approved)
+    GaslessRelayer(Address),
     // Dispute window duration in seconds for emergency proposals (default 3600 = 1 hour)
     // (stored under Emergency(EmergencyStorageKey::DisputeWindow))
     // FIFO withdrawal queue + admin param guard metadata
@@ -685,6 +691,30 @@ impl YieldVault {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 
+        // Strategy switch cooldown enforcement
+        let cooldown: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StrategySwitchCooldown)
+            .unwrap_or(0);
+        if cooldown > 0 {
+            let last_switch: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::LastStrategySwitchTime)
+                .unwrap_or(0);
+            let earliest_switch = last_switch.checked_add(cooldown).expect("overflow");
+            if env.ledger().timestamp() < earliest_switch {
+                return Err(VaultError::AdminParamChangeTooSoon);
+            }
+        }
+
+        let current_strategy = Self::strategy(env.clone());
+        let is_same_strategy = current_strategy.as_ref() == Some(&strategy);
+        if is_same_strategy {
+            return Ok(());
+        }
+
         let registration = strategy_registration::read_registration_state(&env, &strategy);
         if let Some(state) = registration {
             if state == STATE_RETIRED || (state != STATE_PENDING && state != STATE_ACTIVE) {
@@ -718,7 +748,22 @@ impl YieldVault {
             }
         }
 
+        let previous_strategy = current_strategy.clone();
         env.storage().instance().set(&DataKey::Strategy, &strategy);
+
+        // Record switch timestamp and emit events
+        let now = env.ledger().timestamp();
+        env.storage()
+            .instance()
+            .set(&DataKey::LastStrategySwitchTime, &now);
+        env.events().publish(
+            (symbol_short!("stratcd"),),
+            (now, cooldown),
+        );
+        env.events().publish(
+            (symbol_short!("stratset"), admin.clone()),
+            (previous_strategy, strategy),
+        );
         Ok(())
     }
 
@@ -1619,6 +1664,25 @@ impl YieldVault {
             return Err(VaultError::ProposalRejected);
         }
 
+        // Strategy switch cooldown enforcement
+        let cooldown: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StrategySwitchCooldown)
+            .unwrap_or(0);
+        if cooldown > 0 {
+            let last_switch: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::LastStrategySwitchTime)
+                .unwrap_or(0);
+            let earliest_switch = last_switch.checked_add(cooldown).expect("overflow");
+            if env.ledger().timestamp() < earliest_switch {
+                return Err(VaultError::AdminParamChangeTooSoon);
+            }
+        }
+
+        let previous_strategy = Self::strategy(env.clone());
         env.storage().instance().set(
             &DataKey::ConfiguredStrategy(soroban_sdk::symbol_short!("Benji")),
             &proposal.strategy,
@@ -1627,6 +1691,19 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        let now = env.ledger().timestamp();
+        env.storage()
+            .instance()
+            .set(&DataKey::LastStrategySwitchTime, &now);
+        env.events().publish(
+            (symbol_short!("stratcd"),),
+            (now, cooldown),
+        );
+        env.events().publish(
+            (symbol_short!("stratset"),),
+            (previous_strategy, proposal.strategy),
+        );
         Ok(())
     }
 
@@ -1960,6 +2037,168 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::RelayerWhitelist(relayer), &approved);
+    }
+
+    /// Register or deregister a relayer address for gasless deposits.
+    ///
+    /// Gasless relayers can submit deposits on behalf of users, paying the
+    /// transaction fee. The user signs a deposit intent off-chain and the
+    /// relayer submits it, removing the need for users to hold XLM for fees.
+    ///
+    /// Only the Admin can call this.
+    pub fn set_gasless_relayer(env: Env, relayer: Address, approved: bool) {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::GaslessRelayer(relayer), &approved);
+    }
+
+    /// Returns whether the given address is a registered gasless relayer.
+    pub fn is_gasless_relayer(env: Env, relayer: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::GaslessRelayer(relayer))
+            .unwrap_or(false)
+    }
+
+    /// Submit a gasless deposit on behalf of a user.
+    ///
+    /// The relayer pays the transaction fee. The user must have pre-authorized
+    /// the vault to transfer their tokens via Soroban's native auth mechanism.
+    /// This is the Soroban-native equivalent of ERC-20 permit: the user signs
+    /// the transaction envelope off-chain, and the relayer submits it.
+    ///
+    /// ### Authorization
+    /// * `relayer` must be a registered gasless relayer
+    /// * `user` must have authorized the token transfer (Soroban auth)
+    ///
+    /// ### Parameters
+    /// * `relayer` — The gasless relayer address (requires auth)
+    /// * `user` — The user making the deposit (pre-authorized)
+    /// * `amount` — The deposit amount
+    ///
+    /// ### Returns
+    /// The number of shares minted to the user.
+    pub fn gasless_deposit(
+        env: Env,
+        relayer: Address,
+        user: Address,
+        amount: i128,
+    ) -> Result<i128, VaultError> {
+        let mut state = Self::get_state(&env);
+        if state.is_paused {
+            return Err(VaultError::ContractPaused);
+        }
+
+        // Relayer must be registered and authorized
+        relayer.require_auth();
+        let is_approved: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::GaslessRelayer(relayer.clone()))
+            .unwrap_or(false);
+        if !is_approved {
+            return Err(VaultError::RelayerNotAuthorized);
+        }
+
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        // Enforce minimum deposit
+        let min_deposit: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinDeposit)
+            .unwrap_or(0);
+        if amount < min_deposit {
+            return Err(VaultError::MinDepositNotMet);
+        }
+
+        let token_addr: Address = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
+        let token_client = token::Client::new(&env, &token_addr);
+
+        // Compute shares using deterministic round-down policy
+        let shares_to_mint =
+            crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
+                .ok_or(VaultError::MathOverflow)?;
+
+        if shares_to_mint == 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        // Per-user deposit cap check
+        let deposit_key = DataKey::UserDeposit(user.clone());
+        let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
+        let new_deposit = current_deposit.checked_add(amount).expect("overflow");
+        let cap: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerUserCap)
+            .unwrap_or(i128::MAX);
+        if new_deposit > cap {
+            return Err(VaultError::ExceedsUserCap);
+        }
+
+        // User must have pre-authorized the token transfer
+        token_client.transfer(&user, &env.current_contract_address(), &amount);
+
+        env.storage().instance().set(&deposit_key, &new_deposit);
+
+        // Dust handling
+        let effective_assets = if state.total_shares == 0 {
+            amount
+        } else {
+            crate::math::try_shares_to_assets(
+                shares_to_mint,
+                state.total_shares,
+                state.total_assets,
+            )
+            .ok_or(VaultError::MathOverflow)?
+        };
+        let dust = amount.checked_sub(effective_assets).unwrap_or(0);
+
+        if dust > 0 {
+            let mut treasury_bal: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TreasuryBalance)
+                .unwrap_or(0);
+            treasury_bal = treasury_bal.checked_add(dust).expect("overflow");
+            env.storage()
+                .instance()
+                .set(&DataKey::TreasuryBalance, &treasury_bal);
+        }
+
+        state.total_assets = state
+            .total_assets
+            .checked_add(effective_assets)
+            .expect("overflow");
+        state.total_shares = state
+            .total_shares
+            .checked_add(shares_to_mint)
+            .expect("overflow");
+        env.storage().instance().set(&DataKey::State, &state);
+
+        let user_key = DataKey::ShareBalance(user.clone());
+        let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
+        env.storage().instance().set(
+            &user_key,
+            &user_shares.checked_add(shares_to_mint).expect("overflow"),
+        );
+
+        // Track last deposit time for withdrawal cooldown
+        env.storage().instance().set(
+            &DataKey::LastDepositTime(user.clone()),
+            &env.ledger().timestamp(),
+        );
+
+        env.events().publish(
+            (symbol_short!("glessdep"), relayer.clone()),
+            (user, amount, shares_to_mint),
+        );
+        Ok(shares_to_mint)
     }
 
     /// Returns whether the given address is a registered relayer.
@@ -3498,6 +3737,62 @@ impl YieldVault {
             .instance()
             .get(&DataKey::WithdrawalCooldown)
             .unwrap_or(0)
+    }
+
+    // ── Strategy switch cooldown ───────────────────────────────────────────────
+
+    /// Set the strategy switch cooldown duration in seconds.
+    /// When non-zero, admin must wait this long between strategy switches.
+    /// Only the Admin can call this.
+    pub fn set_strategy_switch_cooldown(env: Env, seconds: u64) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        Self::assert_admin_param_interval(&env)?;
+        let old: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StrategySwitchCooldown)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::StrategySwitchCooldown, &seconds);
+        Self::record_admin_param_change(&env);
+        env.events()
+            .publish((symbol_short!("stratcchg"),), (old, seconds));
+        Ok(())
+    }
+
+    /// Returns the current strategy switch cooldown in seconds (0 = no cooldown).
+    pub fn strategy_switch_cooldown(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StrategySwitchCooldown)
+            .unwrap_or(0)
+    }
+
+    /// Returns the remaining cooldown before the next strategy switch is allowed.
+    /// Returns 0 if no cooldown is active or the cooldown has elapsed.
+    pub fn strategy_switch_cooldown_remaining(env: Env) -> u64 {
+        let cooldown: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StrategySwitchCooldown)
+            .unwrap_or(0);
+        if cooldown == 0 {
+            return 0;
+        }
+        let last_switch: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastStrategySwitchTime)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        let deadline = last_switch.checked_add(cooldown).unwrap_or(u64::MAX);
+        if now >= deadline {
+            0
+        } else {
+            deadline - now
+        }
     }
 
     // ── Oracle configuration ──────────────────────────────────────────────────

@@ -45,7 +45,8 @@ import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/corr
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
-import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
+import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
+import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
 import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
@@ -847,6 +848,9 @@ apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
 apiV1.use('/', listRouter);
+
+// Register vault data cache invalidation hooks
+registerInvalidationHook(invalidateVaultCaches);
 
 // Backward compatibility for legacy unversioned list routes (/api/*)
 app.use('/api', listRouter);
