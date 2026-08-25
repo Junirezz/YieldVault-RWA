@@ -180,18 +180,23 @@ function AppContent() {
                 <Route
                   path="/"
                   element={
+                    <ErrorBoundary>
                     <RouteErrorBoundary routeName="home">
                       <LazyHome
                         walletAddress={walletAddress}
                         usdcBalance={usdcBalance}
                         xlmBalance={xlmBalance}
                       />
+                    </ErrorBoundary>
                     </RouteErrorBoundary>
                   }
                 />
                 <Route
                   path="/portfolio"
                   element={
+                    <ErrorBoundary>
+                      <LazyPortfolio walletAddress={walletAddress} />
+                    </ErrorBoundary>
                     <RouteErrorBoundary routeName="portfolio">
                       <LazyPortfolio
                         walletAddress={walletAddress}
@@ -202,6 +207,27 @@ function AppContent() {
                 <Route
                   path="/analytics"
                   element={
+                    <ErrorBoundary>
+                      <FeatureGate flag="ANALYTICS_PAGE">
+                        <LazyAnalytics />
+                      </FeatureGate>
+                    </ErrorBoundary>
+                  }
+                />
+                <Route path="/transactions" element={<ErrorBoundary><LazyTransactionHistory walletAddress={walletAddress} /></ErrorBoundary>} />
+                <Route path="/compare" element={<ErrorBoundary><LazyVaultComparison /></ErrorBoundary>} />
+                <Route path="/strategies/:strategyId" element={<ErrorBoundary><StrategyDetail walletAddress={walletAddress} /></ErrorBoundary>} />
+                <Route path="/receipt/:txHash" element={<ErrorBoundary><TransactionReceipt /></ErrorBoundary>} />
+                <Route path="/settings" element={<ErrorBoundary><LazySettings /></ErrorBoundary>} />
+                <Route path="/ui-kit" element={<ErrorBoundary><LazyUIPreview /></ErrorBoundary>} />
+                <Route
+                  path="/admin"
+                  element={
+                    <ErrorBoundary>
+                      <ProtectedRoute role={role} allow={["admin"]}>
+                        <Admin walletAddress={walletAddress} />
+                      </ProtectedRoute>
+                    </ErrorBoundary>
                     <FeatureGate flag="ANALYTICS_PAGE">
                       <RouteErrorBoundary routeName="analytics">
                         <LazyAnalytics />
@@ -267,7 +293,7 @@ function AppContent() {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
               </SentryRoutes>
             </Suspense>
           </main>

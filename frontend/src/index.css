@@ -451,6 +451,40 @@ button {
     "stats actions"
     "chart actions";
   align-items: start;
+  gap: var(--space-6);
+}
+
+@media (max-width: 768px) {
+  .vault-dashboard {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "stats"
+      "chart"
+      "actions";
+    gap: var(--space-4);
+  }
+}
+
+/* Strategy cards: 3-column desktop; stack on mobile */
+.vault-dashboard .flex.gap-md > div[style*="flex: 1 1 150px"] {
+  flex: 1 1 180px;
+}
+
+@media (max-width: 768px) {
+  .vault-dashboard .flex.gap-md > div[style*="flex: 1 1 150px"] {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  
+  .vault-dashboard .flex.gap-md {
+    flex-wrap: wrap;
+  }
+  
+  .vault-dashboard .flex.gap-md > div {
+    flex: 1 1 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
 }
 
 .vault-dashboard-stats {
