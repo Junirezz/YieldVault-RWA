@@ -232,6 +232,14 @@ export class WalletAliasMappingService {
   }
 
   async resetForTests(): Promise<void> {
+    // A background loadFromDatabase() (e.g. the one fired at app startup)
+    // may still be in flight. If we clear state now and let it finish
+    // later, its stale pre-reset rows land in the cache right after we
+    // wiped it, silently undoing this reset. Let it settle first.
+    if (this.hydrationPromise) {
+      await this.hydrationPromise.catch(() => {});
+    }
+
     this.clearCache();
     this.hydrated = false;
     this.hydrationPromise = null;
