@@ -19,6 +19,8 @@ export interface ApiErrorMetadata {
   traceId?: string;
   correlationId?: string;
   details?: unknown;
+  serverCode?: string;
+  serverError?: string;
   cause?: unknown;
 }
 
@@ -33,6 +35,8 @@ export class ApiError extends Error {
   readonly traceId?: string;
   readonly correlationId?: string;
   readonly details?: unknown;
+  readonly serverCode?: string;
+  readonly serverError?: string;
   override readonly cause?: unknown;
 
   constructor(metadata: ApiErrorMetadata) {
@@ -48,6 +52,8 @@ export class ApiError extends Error {
     this.traceId = metadata.traceId;
     this.correlationId = metadata.correlationId;
     this.details = metadata.details;
+    this.serverCode = metadata.serverCode;
+    this.serverError = metadata.serverError;
     this.cause = metadata.cause;
   }
 }
@@ -60,6 +66,21 @@ export interface NormalizeApiErrorOptions {
   details?: unknown;
   traceId?: string;
   correlationId?: string;
+}
+
+function getServerErrorMetadata(details: unknown): {
+  serverCode?: string;
+  serverError?: string;
+} {
+  if (!details || typeof details !== "object") {
+    return {};
+  }
+
+  const response = details as { code?: unknown; error?: unknown };
+  return {
+    serverCode: typeof response.code === "string" ? response.code : undefined,
+    serverError: typeof response.error === "string" ? response.error : undefined,
+  };
 }
 
 const DEFAULT_USER_MESSAGE =
@@ -90,6 +111,7 @@ export function normalizeApiError(
     details: options.details,
     traceId: options.traceId,
     correlationId: options.correlationId,
+    ...getServerErrorMetadata(options.details),
   };
 
   if (error instanceof DOMException && error.name === "AbortError") {

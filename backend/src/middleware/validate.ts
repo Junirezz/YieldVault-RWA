@@ -12,6 +12,7 @@
 import { z, ZodError, type ZodIssue, type ZodTypeAny } from 'zod';
 import type { Request, Response, NextFunction } from 'express';
 import { isValidStellarAddress } from '../sanitization';
+import { sendApiError } from './apiError';
 
 // Re-export shared vault schemas for route handlers and tests
 export {
@@ -247,14 +248,12 @@ export function validate(schemas: ValidateTargets) {
           message: e.message,
         }));
 
-        res.status(400).json({
-          error: 'Bad Request',
+        sendApiError(req, res, {
           status: 400,
           code: 'VALIDATION_ERROR',
-          summary: 'Request validation failed',
           message: formatZodError(issues),
-          errors: details,
           details,
+          retryable: false,
         });
         return;
       }

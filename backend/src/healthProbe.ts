@@ -9,7 +9,7 @@ export interface DependencyProbeState {
   consecutiveFailures: number;
 }
 
-export type DependencyName = 'database' | 'cache' | 'stellarRpc' | 'prisma' | 'queue';
+export type DependencyName = 'database' | 'cache' | 'stellarRpc' | 'prisma' | 'queue' | 'indexer';
 
 type ProbeFunction = () => Promise<'up' | 'down'>;
 

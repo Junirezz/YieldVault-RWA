@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../prisma';
+import { sendApiError } from './apiError';
 
 export type ApiKeyRole = 'viewer' | 'operator' | 'admin' | 'super-admin';
 
@@ -75,7 +76,12 @@ export async function validateApiKey(
   const authHeader = req.get?.('Authorization') || '';
   const match = authHeader.match(/^ApiKey\s+(.+)$/i);
   if (!match) {
-    res.status(401).json({ error: 'Unauthorized', message: 'Missing or invalid API key' });
+    sendApiError(req, res, {
+      status: 401,
+      code: 'AUTH_API_KEY_MISSING',
+      message: 'Missing or invalid API key',
+      retryable: false,
+    });
     return;
   }
   const providedKey = match[1];
@@ -118,14 +124,24 @@ export async function validateApiKey(
 
     // A persisted-but-disabled credential must fail closed. Never let it fall
     // through to the legacy in-memory store where an old duplicate could live.
-    res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+    sendApiError(req, res, {
+      status: 401,
+      code: 'AUTH_API_KEY_INVALID',
+      message: 'Invalid API key',
+      retryable: false,
+    });
     return;
   }
 
   // Fallback: check the in-memory store (used by tests and legacy callers)
   const meta = IN_MEMORY_KEYS.get(hashed);
   if (!meta || meta.revokedAt) {
-    res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+    sendApiError(req, res, {
+      status: 401,
+      code: 'AUTH_API_KEY_INVALID',
+      message: 'Invalid API key',
+      retryable: false,
+    });
     return;
   }
   req.authApiKeyHash = hashed;

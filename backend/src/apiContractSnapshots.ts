@@ -38,6 +38,7 @@ export const HealthResponseSchema = z
       databaseReplica: HealthCheckValueSchema,
       prisma: HealthCheckValueSchema,
       jobs: HealthCheckValueSchema,
+      indexer: HealthCheckValueSchema,
     }),
     sorobanCircuitBreaker: z.object({
       state: z.string(),
@@ -56,6 +57,7 @@ export const ReadyResponseSchema = z
       stellarRpc: z.boolean(),
       database: z.boolean(),
       prisma: z.boolean(),
+      indexer: z.boolean(),
     }),
   })
   .strict();

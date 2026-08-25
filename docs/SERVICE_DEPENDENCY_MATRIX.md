@@ -76,6 +76,14 @@ docker logs -f redis
 | **Dependencies**       | PostgreSQL, Redis, Stellar RPC      |
 | **Depended On By**     | Frontend, Smart Contracts (via RPC) |
 
+The `/health` response reports database, Redis/cache, Stellar RPC, Prisma,
+queue, and event indexer states. `/ready` returns `503` while any required
+dependency, including the indexer, is unavailable. A `degraded` indexer state
+means polling has become stale or has recent failures; inspect
+`lastErrorAt`/`lastSuccessfulPollAt`, then restore Stellar RPC and Redis before
+restarting the backend. The indexer catches up from the persisted event cursor
+after recovery.
+
 **Environment Variables:**
 
 ```env
