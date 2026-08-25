@@ -71,6 +71,13 @@ pub mod fee_math;
 mod formal_verification_tests;
 #[cfg(test)]
 mod fuzz_math;
+/// Property-based tests for deposit/withdraw math invariants (Issue #962).
+pub mod governance_validation;
+pub mod operational_events;
+pub mod rounding_consistency;
+pub mod strategy_validation;
+#[cfg(test)]
+mod deposit_withdraw_props;
 #[cfg(test)]
 mod invariant_tests;
 pub mod math;
