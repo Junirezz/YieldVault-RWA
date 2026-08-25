@@ -35,7 +35,7 @@ impl RoundingPolicy {
     /// ```
     pub fn floor_division(numerator: i128, denominator: i128) -> i128 {
         assert!(denominator != 0, "division by zero");
-        numerator / denominator  // Rust's / operator truncates toward zero for integer division
+        numerator / denominator // Rust's / operator truncates toward zero for integer division
     }
 
     /// Performs floor division with validation for decimal conversion edge cases.
@@ -197,7 +197,7 @@ impl RoundingPolicy {
         // Check: result * denominator <= numerator (within integer arithmetic)
         match result.checked_mul(denominator) {
             Some(product) => product <= numerator,
-            None => false,  // Overflow means we can't verify safety
+            None => false, // Overflow means we can't verify safety
         }
     }
 

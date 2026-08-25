@@ -266,7 +266,7 @@ fn test_deposit_and_withdraw_emit_events() {
     vault.initialize(&admin, &usdc.address);
 
     vault.deposit(&user, &100);
-    
+
     let events = env.events().all();
     let mut deposit_found = false;
     for event in events.iter() {
@@ -285,7 +285,7 @@ fn test_deposit_and_withdraw_emit_events() {
     assert!(deposit_found, "Deposit event not found");
 
     vault.withdraw(&user, &50);
-    
+
     let events_after = env.events().all();
     let mut withdraw_found = false;
     for event in events_after.iter() {

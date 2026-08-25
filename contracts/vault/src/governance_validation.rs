@@ -3,8 +3,8 @@
 //! This module ensures that governance operations are only executed when all
 //! required conditions are met, preventing stale proposals and invalid state transitions.
 
-use soroban_sdk::{Address, Env, Vec};
 use crate::VaultError;
+use soroban_sdk::{Address, Env, Vec};
 
 /// Configuration for governance validation.
 ///
@@ -53,7 +53,10 @@ impl GovernanceValidator {
     /// ```ignore
     /// GovernanceValidator::validate_quorum(5, &config)?;
     /// ```
-    pub fn validate_quorum(votes_received: u32, config: &GovernanceConfig) -> Result<(), VaultError> {
+    pub fn validate_quorum(
+        votes_received: u32,
+        config: &GovernanceConfig,
+    ) -> Result<(), VaultError> {
         if votes_received < config.quorum {
             return Err(VaultError::InsufficientGovernanceVotes);
         }
@@ -144,9 +147,9 @@ impl GovernanceValidator {
             // Execution from approved state
             (ProposalState::Approved, ProposalState::Executed) => true,
             // Terminal states cannot transition
-            (ProposalState::Stale, _) | (ProposalState::Rejected, _) | (ProposalState::Executed, _) => {
-                false
-            }
+            (ProposalState::Stale, _)
+            | (ProposalState::Rejected, _)
+            | (ProposalState::Executed, _) => false,
             _ => false,
         };
 
@@ -222,7 +225,11 @@ impl GovernanceValidator {
         Self::validate_quorum(votes_received, config)?;
 
         // Check 2: Not stale
-        Self::validate_proposal_freshness(proposal_created_at, current_timestamp, config.proposal_max_age_seconds)?;
+        Self::validate_proposal_freshness(
+            proposal_created_at,
+            current_timestamp,
+            config.proposal_max_age_seconds,
+        )?;
 
         // Check 3: Minimum voting period elapsed
         Self::validate_minimum_voting_period(
@@ -255,8 +262,8 @@ mod tests {
         GovernanceConfig {
             quorum: 2,
             total_signers: 3,
-            proposal_max_age_seconds: 86400,      // 1 day
-            min_voting_period_seconds: 3600,      // 1 hour
+            proposal_max_age_seconds: 86400, // 1 day
+            min_voting_period_seconds: 3600, // 1 hour
         }
     }
 
