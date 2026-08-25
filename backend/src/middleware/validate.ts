@@ -92,6 +92,9 @@ export const RefreshSchema = z
 export const WEBHOOK_EVENT_TYPES = [
   'transaction.deposit.created',
   'transaction.withdrawal.created',
+  'vault.deposit.created',
+  'vault.withdrawal.created',
+  'vault.strategy.changed',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

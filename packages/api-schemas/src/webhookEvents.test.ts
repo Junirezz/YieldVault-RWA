@@ -25,6 +25,9 @@ describe("WebhookEventTypeSchema", () => {
   it("accepts every currently-emitted event type", () => {
     expect(WebhookEventTypeSchema.safeParse("transaction.deposit.created").success).toBe(true);
     expect(WebhookEventTypeSchema.safeParse("transaction.withdrawal.created").success).toBe(true);
+    expect(WebhookEventTypeSchema.safeParse("vault.deposit.created").success).toBe(true);
+    expect(WebhookEventTypeSchema.safeParse("vault.withdrawal.created").success).toBe(true);
+    expect(WebhookEventTypeSchema.safeParse("vault.strategy.changed").success).toBe(true);
   });
 
   it("rejects event types the backend does not emit", () => {
@@ -103,6 +106,38 @@ describe("parseWebhookEnvelope", () => {
     });
 
     expect(envelope.eventType).toBe("transaction.withdrawal.created");
+  });
+
+  it("validates vault deposit payloads with vault identity", () => {
+    const envelope = parseWebhookEnvelope({
+      schemaVersion: WEBHOOK_SCHEMA_VERSION,
+      eventType: "vault.deposit.created",
+      sentAt: "2026-05-26T00:00:00.000Z",
+      payload: {
+        ...validPayload,
+        vaultId: "primary",
+      },
+    });
+
+    expect(envelope.eventType).toBe("vault.deposit.created");
+  });
+
+  it("validates vault strategy change payloads", () => {
+    const envelope = parseWebhookEnvelope({
+      schemaVersion: WEBHOOK_SCHEMA_VERSION,
+      eventType: "vault.strategy.changed",
+      sentAt: "2026-05-26T00:00:00.000Z",
+      payload: {
+        ...validPayload,
+        walletAddress: "unknown",
+        asset: "RWA",
+        vaultId: "primary",
+        strategyId: "conservative",
+        previousStrategyId: "balanced",
+      },
+    });
+
+    expect(envelope.eventType).toBe("vault.strategy.changed");
   });
 
   it("throws for an envelope with an unrecognized eventType", () => {

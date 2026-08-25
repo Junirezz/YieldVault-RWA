@@ -6,12 +6,11 @@ import { z } from "zod";
  * consumer receives from the backend's delivery service
  * (`backend/src/webhookDelivery.ts`). It is intentionally narrower than the
  * on-chain Soroban contract event catalog documented in
- * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits ~28 distinct
+ * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits many distinct
  * ledger events (admin rotation, emergency actions, fee changes, strategy
- * bookkeeping, etc.), but only transaction-level activity is currently
- * surfaced through the webhook delivery pipeline. Consumers that need the
- * full contract event set should query Soroban RPC directly rather than
- * relying on webhooks for those events.
+ * bookkeeping, etc.), while webhooks surface the operational deposit,
+ * withdrawal, and strategy-change events consumers need for off-chain
+ * automation.
  *
  * Keep this list in sync with `TransactionEventType` in
  * `backend/src/webhookDelivery.ts` — that file is the source of truth for
@@ -36,6 +35,9 @@ export type TransactionWithdrawalCreatedPayload = z.infer<typeof TransactionWith
 export declare const WebhookEventPayloadSchemas: {
     readonly "transaction.deposit.created": any;
     readonly "transaction.withdrawal.created": any;
+    readonly "vault.deposit.created": any;
+    readonly "vault.withdrawal.created": any;
+    readonly "vault.strategy.changed": any;
 };
 /**
  * The full outbound envelope written to the wire and stored in

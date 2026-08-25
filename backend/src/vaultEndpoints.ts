@@ -442,23 +442,39 @@ async function handleVaultOperation(
       // transaction and dispatching the webhook delivery.
       const eventType: TransactionEventType =
         type === 'deposit' ? 'transaction.deposit.created' : 'transaction.withdrawal.created';
+      const vaultEventType: TransactionEventType =
+        type === 'deposit' ? 'vault.deposit.created' : 'vault.withdrawal.created';
+      const webhookPayload = {
+        transactionId: body.id,
+        amount: String(body.amount),
+        asset: String(body.asset),
+        walletAddress: String(body.walletAddress),
+        transactionHash: String(body.transactionHash),
+        status: String(body.status),
+        timestamp: String(body.timestamp),
+        vaultId: 'primary',
+      };
       void eventOutboxService.writeEvent({
         eventType,
-        payload: {
-          transactionId: body.id,
-          amount: String(body.amount),
-          asset: String(body.asset),
-          walletAddress: String(body.walletAddress),
-          transactionHash: String(body.transactionHash),
-          status: String(body.status),
-          timestamp: String(body.timestamp),
-        },
+        payload: webhookPayload,
         aggregateType: 'transaction',
         aggregateId: body.id,
       }).catch((error) => {
         logger.log('error', 'Failed to write event to outbox', {
           error: error instanceof Error ? error.message : String(error),
           eventType,
+          transactionId: body.id,
+        });
+      });
+      void eventOutboxService.writeEvent({
+        eventType: vaultEventType,
+        payload: webhookPayload,
+        aggregateType: 'vault',
+        aggregateId: 'primary',
+      }).catch((error) => {
+        logger.log('error', 'Failed to write vault event to outbox', {
+          error: error instanceof Error ? error.message : String(error),
+          eventType: vaultEventType,
           transactionId: body.id,
         });
       });
@@ -657,7 +673,34 @@ router.post(
  * POST /api/v1/vault/strategy
  * Gated behind the "strategy-selection" feature flag.
  */
-router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (_req: Request, res: Response) => {
+router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (req: Request, res: Response) => {
+  const strategyId = typeof req.body?.strategyId === 'string' ? req.body.strategyId : 'default';
+  const previousStrategyId =
+    typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
+
+  void eventOutboxService.writeEvent({
+    eventType: 'vault.strategy.changed',
+    payload: {
+      transactionId: `strategy-${crypto.randomBytes(4).toString('hex')}`,
+      amount: '0',
+      asset: 'RWA',
+      walletAddress: String(req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'unknown'),
+      transactionHash: 'strategy-change',
+      status: 'accepted',
+      timestamp: new Date().toISOString(),
+      vaultId: 'primary',
+      strategyId,
+      previousStrategyId,
+    },
+    aggregateType: 'vault',
+    aggregateId: 'primary',
+  }).catch((error) => {
+    logger.log('error', 'Failed to write strategy change webhook event', {
+      error: error instanceof Error ? error.message : String(error),
+      strategyId,
+    });
+  });
+
   res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
 });
 

@@ -4,12 +4,13 @@ import type { Request, Response, NextFunction } from 'express';
 
 /** The single version currently served by this API. */
 export const CURRENT_VERSION = '1.0.0';
+export const V2_PREVIEW_VERSION = '2.0.0-preview';
 
 /**
  * All version strings that are accepted and mapped to the current release.
  * Any request bearing one of these values is treated as a supported request.
  */
-export const SUPPORTED_VERSIONS: readonly string[] = ['1.0.0'];
+export const SUPPORTED_VERSIONS: readonly string[] = [CURRENT_VERSION, V2_PREVIEW_VERSION];
 
 /**
  * RFC 8594 Sunset date for the legacy unversioned API surface.
@@ -25,13 +26,24 @@ export const LEGACY_SUNSET_DATE = 'Fri, 31 Dec 2027 23:59:59 GMT';
  * Returns true when `raw` resolves to one of the supported v1 version strings.
  * Accepts: "1", "v1", "1.0.0", or any "1.x.y" patch/minor variant.
  */
+function isV2PreviewVersion(raw: string): boolean {
+  const v = raw.trim();
+  return (
+    v === '2' ||
+    v.toLowerCase() === 'v2' ||
+    v === '2.0.0' ||
+    v.toLowerCase() === V2_PREVIEW_VERSION
+  );
+}
+
 function isSupportedVersion(raw: string): boolean {
   const v = raw.trim();
   return (
     v === '1' ||
     v.toLowerCase() === 'v1' ||
     SUPPORTED_VERSIONS.includes(v) ||
-    /^1\.\d+(\.\d+)?$/.test(v)
+    /^1\.\d+(\.\d+)?$/.test(v) ||
+    isV2PreviewVersion(v)
   );
 }
 
@@ -83,6 +95,8 @@ function extractRequestedVersion(req: Request): string | null {
 export function apiVersionMiddleware(req: Request, res: Response, next: NextFunction): void {
   // ── 1. Version negotiation ──────────────────────────────────────────────────
   const requestedVersion = extractRequestedVersion(req);
+  const isPreviewRequest =
+    requestedVersion !== null && isV2PreviewVersion(requestedVersion);
 
   if (requestedVersion !== null && !isSupportedVersion(requestedVersion)) {
     res.status(406).json({
@@ -95,8 +109,15 @@ export function apiVersionMiddleware(req: Request, res: Response, next: NextFunc
   }
 
   // Always advertise the current version and the full supported list.
-  res.set('X-API-Version', CURRENT_VERSION);
+  res.set('X-API-Version', isPreviewRequest ? V2_PREVIEW_VERSION : CURRENT_VERSION);
   res.set('X-API-Version-Supported', SUPPORTED_VERSIONS.join(', '));
+  if (isPreviewRequest || req.path.startsWith('/api/v2/')) {
+    res.set('X-API-Preview', 'v2');
+    res.set(
+      'X-API-Preview-Info',
+      'API v2 is a breaking-changes preview. Pin Accept-Version: 1.0.0 for stable v1 behavior.',
+    );
+  }
 
   // ── 2. Deprecation detection for legacy unversioned routes ─────────────────
   const path = req.path;
@@ -107,8 +128,9 @@ export function apiVersionMiddleware(req: Request, res: Response, next: NextFunc
     path.startsWith('/transactions') ||
     path.startsWith('/portfolio');
 
-  // /api/* is legacy unless it is already /api/v1/
-  const isLegacyApi = path.startsWith('/api/') && !path.startsWith('/api/v1/');
+  // /api/* is legacy unless it is already a canonical versioned route.
+  const isLegacyApi =
+    path.startsWith('/api/') && !path.startsWith('/api/v1/') && !path.startsWith('/api/v2/');
 
   if (isLegacyUnversioned || isLegacyApi) {
     let successorPath: string;
