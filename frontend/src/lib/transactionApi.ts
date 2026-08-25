@@ -27,6 +27,12 @@ interface HorizonPaymentOperation {
   asset_issuer?: string;
   created_at: string;
   transaction_hash: string;
+  /**
+   * Present on Horizon operation records. `false` means the surrounding
+   * transaction was applied to the ledger but failed, so the operation had
+   * no effect.
+   */
+  transaction_successful?: boolean;
 }
 
 interface HorizonOperationsResponse {
@@ -43,9 +49,10 @@ export function normalizeOperation(
   return {
     id: op.id,
     type: isDeposit ? "deposit" : "withdrawal",
-    // Horizon operations are always settled on-chain; default to "completed".
-    // Future API versions may expose a real status field.
-    status: "completed",
+    // Horizon operations are always settled on-chain, so they are never
+    // "pending" here, but the surrounding transaction can have failed —
+    // surface that so the status filter reflects reality.
+    status: op.transaction_successful === false ? "failed" : "completed",
     amount: op.amount ?? null,
     asset: op.asset_type === "native" ? "XLM" : (op.asset_code ?? null),
     timestamp: op.created_at,
