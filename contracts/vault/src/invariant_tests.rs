@@ -429,11 +429,17 @@ fn test_invariant_share_price_monotonicity_under_yield_accrual() {
 
     vault.accrue_yield(&500);
     let price_1 = vault.share_price();
-    assert!(price_1 >= price_0, "share price must not decrease on yield accrual");
+    assert!(
+        price_1 >= price_0,
+        "share price must not decrease on yield accrual"
+    );
 
     vault.accrue_yield(&1_200);
     let price_2 = vault.share_price();
-    assert!(price_2 >= price_1, "share price must not decrease on subsequent yield accrual");
+    assert!(
+        price_2 >= price_1,
+        "share price must not decrease on subsequent yield accrual"
+    );
 
     assert_vault_invariants(&vault, &users);
 }

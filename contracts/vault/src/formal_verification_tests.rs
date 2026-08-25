@@ -13,11 +13,17 @@ use soroban_sdk::{token, Address, Env};
 
 use crate::{YieldVault, YieldVaultClient};
 
-fn create_test_token<'a>(e: &Env, admin: &Address) -> (token::Client<'a>, token::StellarAssetClient<'a>) {
+fn create_test_token<'a>(
+    e: &Env,
+    admin: &Address,
+) -> (token::Client<'a>, token::StellarAssetClient<'a>) {
     let addr = e
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    (token::Client::new(e, &addr), token::StellarAssetClient::new(e, &addr))
+    (
+        token::Client::new(e, &addr),
+        token::StellarAssetClient::new(e, &addr),
+    )
 }
 
 fn setup_formal_vault(e: &Env) -> (YieldVaultClient<'_>, token::StellarAssetClient<'_>, Address) {

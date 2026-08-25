@@ -42,7 +42,10 @@ pub fn require_pauser_or_admin_auth(caller: &Address, admin: &Address, pauser: O
     caller.require_auth();
     let is_admin = caller == admin;
     let is_pauser = pauser.map_or(false, |p| caller == p);
-    assert!(is_admin || is_pauser, "unauthorized: caller must be admin or pauser");
+    assert!(
+        is_admin || is_pauser,
+        "unauthorized: caller must be admin or pauser"
+    );
 }
 
 /// Multi-signer threshold validator for governance operations.

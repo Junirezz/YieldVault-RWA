@@ -2710,3 +2710,23 @@ fn test_set_strategy_promotes_pending_registration_to_active() {
         Some(STATE_ACTIVE)
     );
 }
+
+#[test]
+fn test_overflow_protection_near_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token = create_token_contract(&env, &admin);
+    let vault = create_vault_contract(&env, &admin, &token.address);
+    let user = Address::generate(&env);
+
+    token.mint(&user, &1000);
+    vault.deposit(&user, &1000); // 1000 shares for 1000 assets
+
+    let res_shares = vault.try_calculate_shares(&i128::MAX);
+    assert_eq!(res_shares, Err(Ok(crate::errors::VaultError::MathOverflow)));
+
+    let res_assets = vault.try_calculate_assets(&i128::MAX);
+    assert_eq!(res_assets, Err(Ok(crate::errors::VaultError::MathOverflow)));
+}
