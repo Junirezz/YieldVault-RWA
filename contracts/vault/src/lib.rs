@@ -755,6 +755,38 @@ impl YieldVault {
         env.storage().instance().get(&DataKey::Strategy)
     }
 
+    /// Validates the strategy's advertised asset and value before using them in
+    /// vault accounting. This prevents malformed or malicious strategy responses
+    /// from silently distorting share pricing or draining funds through an
+    /// unexpected asset mismatch.
+    fn validate_strategy_response(
+        env: &Env,
+        strategy_addr: &Address,
+        expected_asset: &Address,
+    ) -> Result<i128, VaultError> {
+        let strategy_client = StrategyClient::new(env, strategy_addr);
+        let actual_asset = strategy_client.asset();
+        if actual_asset != *expected_asset {
+            return Err(VaultError::UnauthorizedStrategy);
+        }
+
+        let value = strategy_client.total_value();
+        if value < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        Ok(value)
+    }
+
+    fn require_valid_strategy_response(
+        env: &Env,
+        strategy_addr: &Address,
+        expected_asset: &Address,
+    ) -> i128 {
+        Self::validate_strategy_response(env, strategy_addr, expected_asset)
+            .unwrap_or_else(|_| soroban_sdk::panic_with_error!(env, VaultError::UnauthorizedStrategy))
+    }
+
     /// Configures the designated pauser role address.
     /// Only the admin can call this.
     pub fn set_pauser(env: Env, pauser: Option<Address>) -> Result<(), VaultError> {
@@ -1155,8 +1187,8 @@ impl YieldVault {
                     .expect("OracleValidationFailed");
                 }
             }
-            let strategy_client = StrategyClient::new(&env, &strategy_addr);
-            strategy_client.total_value()
+            let token = Self::token(env.clone());
+            Self::require_valid_strategy_response(&env, &strategy_addr, &token)
         } else {
             0
         };
@@ -2574,6 +2606,8 @@ impl YieldVault {
         strategy_registration::require_active_registration(&env, &strategy_addr)
             .map_err(Self::map_registration_error)?;
         let strategy_client = StrategyClient::new(&env, &strategy_addr);
+        let token_addr = Self::token(env.clone());
+        let total_invested = Self::validate_strategy_response(&env, &strategy_addr, &token_addr)?;
 
         let idle_ta = env
             .storage()
@@ -2590,7 +2624,6 @@ impl YieldVault {
             .instance()
             .get(&DataKey::StrategyCap(strategy_addr.clone()))
             .unwrap_or(i128::MAX);
-        let total_invested = strategy_client.total_value();
         if total_invested.checked_add(amount).expect("overflow") > cap {
             return Err(VaultError::ExceedsStrategyCap);
         }
@@ -2624,7 +2657,6 @@ impl YieldVault {
         }
 
         // Approve and deposit to strategy
-        let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
         token_client.approve(
             &env.current_contract_address(),
@@ -2761,7 +2793,8 @@ impl YieldVault {
         }
 
         // Record strategy state before invest
-        let to_strategy_val_before = to_client.total_value();
+        let to_strategy_val_before =
+            Self::validate_strategy_response(&env, &to_strategy, &token_addr)?;
 
         // Invest into new strategy
         token_client.approve(
@@ -2774,7 +2807,8 @@ impl YieldVault {
         to_client.deposit(&withdrawn_assets);
 
         // Verify invest slippage
-        let to_strategy_val_after = to_client.total_value();
+        let to_strategy_val_after =
+            Self::validate_strategy_response(&env, &to_strategy, &token_addr)?;
         let invested_value = to_strategy_val_after
             .checked_sub(to_strategy_val_before)
             .unwrap_or(0);
@@ -2812,6 +2846,15 @@ impl YieldVault {
         let net_yield = amount
             .checked_sub(fee_amount)
             .ok_or(VaultError::MathOverflow)?;
+        assert!(
+            fee_amount >= 0 && net_yield >= 0,
+            "fee accounting invariant violated: negative fee share"
+        );
+        assert_eq!(
+            fee_amount + net_yield,
+            amount,
+            "fee accounting invariant violated: fee + net != amount"
+        );
 
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
@@ -3233,6 +3276,15 @@ impl YieldVault {
             .unwrap_or(0);
 
         let total_claimable = balance.saturating_add(rollover);
+        assert!(
+            balance >= 0 && rollover >= 0,
+            "fee accounting invariant violated: negative treasury balances"
+        );
+        assert_eq!(
+            total_claimable,
+            balance.saturating_add(rollover),
+            "fee accounting invariant violated: claimable total mismatch"
+        );
         if total_claimable == 0 {
             return Err(VaultError::NoFeesToClaim);
         }
@@ -3280,6 +3332,10 @@ impl YieldVault {
             .instance()
             .get(&DataKey::TreasuryBalance)
             .unwrap_or(0);
+        assert!(
+            balance >= 0,
+            "fee accounting invariant violated: negative treasury balance"
+        );
         if balance == 0 {
             return Err(VaultError::NoFeesToClaim);
         }
