@@ -33,6 +33,26 @@ export function clearLastWalletProvider(): void {
   localStorage.removeItem(WALLET_LAST_PROVIDER_KEY);
 }
 
+/** Persisted connected wallet address for reload recovery. */
+export const WALLET_CONNECTED_ADDRESS_KEY = "yieldvault_connected_wallet_address";
+
+const STELLAR_PUBLIC_KEY = /^G[A-Z2-7]{55}$/;
+
+export function getPersistedWalletAddress(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = localStorage.getItem(WALLET_CONNECTED_ADDRESS_KEY);
+  return value && STELLAR_PUBLIC_KEY.test(value) ? value : null;
+}
+
+export function setPersistedWalletAddress(address: string): void {
+  if (!STELLAR_PUBLIC_KEY.test(address)) return;
+  localStorage.setItem(WALLET_CONNECTED_ADDRESS_KEY, address);
+}
+
+export function clearPersistedWalletAddress(): void {
+  localStorage.removeItem(WALLET_CONNECTED_ADDRESS_KEY);
+}
+
 /** Session-scoped flag: user dismissed reconnect prompt in this session; prevent repeated prompts. */
 export const WALLET_RECONNECT_PROMPT_DISMISS_KEY = "yieldvault_wallet_reconnect_prompt_dismissed";
 

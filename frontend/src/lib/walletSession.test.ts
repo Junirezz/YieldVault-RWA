@@ -9,6 +9,10 @@ import {
   clearReconnectPromptDismissed,
   WALLET_RECONNECT_PROMPT_DISMISS_KEY,
   isProviderAvailable,
+  getPersistedWalletAddress,
+  setPersistedWalletAddress,
+  clearPersistedWalletAddress,
+  WALLET_CONNECTED_ADDRESS_KEY,
 } from "./walletSession";
 
 vi.mock("@stellar/freighter-api");
@@ -38,6 +42,40 @@ describe("walletSession provider helpers", () => {
   it("ignores unknown values in localStorage", () => {
     localStorage.setItem(WALLET_LAST_PROVIDER_KEY, "metamask");
     expect(getLastWalletProvider()).toBeNull();
+  });
+});
+
+describe("walletSession connected address helpers", () => {
+  const validAddress = `G${"A".repeat(55)}`;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("returns null when no connected address is stored", () => {
+    expect(getPersistedWalletAddress()).toBeNull();
+  });
+
+  it("persists and restores a valid Stellar public key", () => {
+    setPersistedWalletAddress(validAddress);
+    expect(getPersistedWalletAddress()).toBe(validAddress);
+  });
+
+  it("ignores malformed stored wallet addresses", () => {
+    localStorage.setItem(WALLET_CONNECTED_ADDRESS_KEY, "not-a-wallet");
+    expect(getPersistedWalletAddress()).toBeNull();
+  });
+
+  it("does not persist malformed wallet addresses", () => {
+    setPersistedWalletAddress("not-a-wallet");
+    expect(localStorage.getItem(WALLET_CONNECTED_ADDRESS_KEY)).toBeNull();
+  });
+
+  it("clears the persisted connected address", () => {
+    setPersistedWalletAddress(validAddress);
+    clearPersistedWalletAddress();
+    expect(getPersistedWalletAddress()).toBeNull();
   });
 });
 
