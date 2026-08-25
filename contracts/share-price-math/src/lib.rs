@@ -2,6 +2,15 @@
 //!
 //! Host-buildable library used by the Soroban vault contract, proptest suite,
 //! and `cargo fuzz` targets.
+//!
+//! ## Numeric Boundaries and Constraints
+//! - Maximum `i128` (3.4e38) represents the theoretical absolute upper limit for assets or shares.
+//! - The conversion math uses intermediate multiplication: `assets * total_shares` and `shares * total_assets`.
+//! - These multiplications must not exceed `i128::MAX`. If they do, the `try_` functions will return `None`.
+//! - For practical usage, to prevent overflow during standard operations, total vault shares and assets
+//!   should generally be kept significantly below `i128::MAX / expected_deposit_size`.
+//! - Specifically, if `total_shares` and `total_assets` are bounded by `2^64`, then any operation with 
+//!   values up to `2^63` will never overflow an `i128`.
 
 pub mod fuzz_invariants;
 pub mod rounding;

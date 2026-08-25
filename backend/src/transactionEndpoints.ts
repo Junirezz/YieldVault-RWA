@@ -63,7 +63,7 @@ router.get('/',
 
       if (!walletAddress) {
         try {
-          const response = buildTransactionsResponse({
+          const response = await buildTransactionsResponse({
             limit: typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined,
             cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
             page: typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : undefined,

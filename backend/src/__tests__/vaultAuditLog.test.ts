@@ -39,6 +39,27 @@ describe('vaultAuditLog', () => {
     expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('records policy changes and admin actions correctly', () => {
+    const policyEntry = recordVaultLifecycleEvent({
+      operation: 'policy_change',
+      phase: 'confirmed',
+      actor: 'GADMIN',
+      correlationId: 'corr-2',
+    });
+    
+    expect(policyEntry.action).toBe('vault.policy_change.confirmed');
+    expect(policyEntry.outcome).toBe('success');
+
+    const adminEntry = recordVaultLifecycleEvent({
+      operation: 'admin_action',
+      phase: 'confirmed',
+      actor: 'GADMIN',
+    });
+
+    expect(adminEntry.action).toBe('vault.admin_action.confirmed');
+    expect(adminEntry.outcome).toBe('success');
+  });
+
   it('classifies confirmed as success and failed as failure', () => {
     const confirmed = recordVaultLifecycleEvent({
       operation: 'withdrawal',

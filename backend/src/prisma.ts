@@ -24,23 +24,21 @@ function buildDatasourceUrl(): string | undefined {
     return rawUrl;
   }
 
+  // schema.prisma's datasource provider is "sqlite" — its generated client
+  // can only ever accept file: URLs, regardless of what DATABASE_URL holds.
+  // DATABASE_URL pointing at Postgres/MySQL is for the separate raw `pg`
+  // pool in database.ts (its own migrations, its own tables); overriding
+  // Prisma's datasource with that URL here would fail schema validation
+  // outright, so fall back to the schema-declared sqlite file instead of
+  // crashing every Prisma-backed query.
   try {
     const url = new URL(rawUrl);
-    if (url.protocol.startsWith('postgres')) {
-      url.searchParams.set('connection_limit', String(POOL_MAX));
-      url.searchParams.set('pool_timeout', String(Math.round(POOL_TIMEOUT_MS / 1000)));
-      return url.toString();
+    if (url.protocol.startsWith('postgres') || url.protocol.startsWith('mysql')) {
+      return undefined;
     }
-
-    if (url.protocol.startsWith('mysql')) {
-      url.searchParams.set('connection_limit', String(POOL_MAX));
-      url.searchParams.set('pool_timeout', String(POOL_TIMEOUT_MS));
-      return url.toString();
-    }
-
     return rawUrl;
   } catch {
-    return rawUrl;
+    return undefined;
   }
 }
 

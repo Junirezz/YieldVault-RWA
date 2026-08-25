@@ -240,15 +240,6 @@ void walletAliasMappingService.loadFromDatabase().catch((error) => {
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
 
-function buildVaultSummaryResponse() {
-  return {
-    totalAssets: 0,
-    totalShares: 0,
-    apy: 0,
-    timestamp: new Date().toISOString(),
-  };
-}
-
 /**
  * Reads the vault summary from the VaultState table and the most recent
  * SharePriceSnapshot for the share price. Falls back to zeroed values when
@@ -410,7 +401,10 @@ async function buildImpersonatedVaultState(wallet: string) {
   const normalizedWallet = normalizeWalletAddress(wallet);
   return {
     walletAddress: normalizedWallet,
-    summary: buildVaultSummaryResponse(),
+    // Impersonation must show an admin exactly what the wallet's own
+    // dashboard would show, so read the same DB-backed summary
+    // GET /api/v1/vault/summary serves.
+    summary: await buildVaultSummaryResponseFromDb(),
     transactions: await buildWalletTransactionsSnapshot(normalizedWallet),
     portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: normalizedWallet }),
     vaultHistory: buildVaultHistoryResponse({}),
@@ -5133,9 +5127,21 @@ app.post('/admin/withdrawals/recovery/sweep', validateApiKey, async (req: Reques
 // suites drive the sweeper explicitly.
 if (process.env.NODE_ENV !== 'test') {
   withdrawalRecoveryCoordinator.startSweeper();
-  
+
   // Initialize job governance from persisted dead-letter records
   void initializeJobGovernance();
 }
+
+// Catch-all 404 handler. Must be the last middleware registered so it only
+// fires for requests no route above matched, instead of Express's default
+// plain-text/HTML 404 page.
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    error: 'Not Found',
+    status: 404,
+    path: req.originalUrl,
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+  });
+});
 
 export default app;

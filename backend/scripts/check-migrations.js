@@ -80,14 +80,17 @@ function checkFile(file) {
   // Safe opt-out: add `-- migration-safety: canary-safe` at the top of the
   // file to acknowledge the risk (e.g. zero-downtime step 2 of 3).
   //
-  // The regex looks for ADD COLUMN ... NOT NULL within a 300-char window and
-  // checks that DEFAULT does NOT appear in that window.
-  const addColumnNotNullPattern = /\badd\s+column\b[^;]{0,300}\bnot\s+null\b/gi;
+  // The regex captures the whole ADD COLUMN statement (up to 300 chars or the
+  // next semicolon) and checks that whole window for NOT NULL and DEFAULT,
+  // since either can come first — "NOT NULL DEFAULT x" (Prisma's own
+  // convention) and "DEFAULT x NOT NULL" are equally valid SQL.
+  const addColumnStatementPattern = /\badd\s+column\b[^;]{0,300}/gi;
   let match;
-  while ((match = addColumnNotNullPattern.exec(content)) !== null) {
+  while ((match = addColumnStatementPattern.exec(content)) !== null) {
     const snippet = match[0];
+    const hasNotNull = /\bnot\s+null\b/i.test(snippet);
     const hasDefault = /\bdefault\b/i.test(snippet);
-    if (!hasDefault && !isCanarySafeOptIn) {
+    if (hasNotNull && !hasDefault && !isCanarySafeOptIn) {
       results.push({
         file,
         severity: 'error',

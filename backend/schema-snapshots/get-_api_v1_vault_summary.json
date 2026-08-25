@@ -2,10 +2,13 @@
   "type": "object",
   "properties": {
     "totalAssets": {
-      "type": "number"
+      "type": "string"
     },
     "totalShares": {
-      "type": "number"
+      "type": "string"
+    },
+    "sharePrice": {
+      "type": "string"
     },
     "apy": {
       "type": "number"
@@ -17,6 +20,7 @@
   "required": [
     "totalAssets",
     "totalShares",
+    "sharePrice",
     "apy",
     "timestamp"
   ],

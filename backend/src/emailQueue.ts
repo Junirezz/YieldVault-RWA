@@ -130,6 +130,7 @@ export class EmailQueueService {
         emailId: email.id,
         error: errorMessage,
       });
+      void this.sendDeadLetterAlert(email.id, email.to, errorMessage);
     } else {
       const nextRetryAt = this.calculateNextRetry(newRetryCount);
       await this.queueDelegate.update({
@@ -171,6 +172,26 @@ export class EmailQueueService {
         nextRetryAt: null,
       },
     });
+  }
+
+  private async sendDeadLetterAlert(emailId: string, toAddress: string, error: string): Promise<void> {
+    const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
+    if (!webhookUrl) return;
+
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `:rotating_light: *YieldVault Email Dead-Lettered*\nFailed to send email to \`${toAddress}\` (ID: ${emailId}).\nLatest error: \`${error}\``
+        })
+      });
+    } catch (err) {
+      logger.log('error', 'Failed to send email dead-letter alert', {
+        error: err instanceof Error ? err.message : String(err),
+        emailId
+      });
+    }
   }
 
   startWorker(intervalMs: number = 5000): void {

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { prisma } from './prisma';
+import { logger } from './middleware/structuredLogging';
 
 export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot';
 
@@ -176,6 +177,8 @@ class JobGovernanceStore {
 
     if (failures >= JOB_POLICIES[fullRecord.jobName].deadLetterThreshold) {
       console.warn(`Recurring failures detected for ${fullRecord.jobName}: ${failures}`);
+      // Fire-and-forget alert
+      void this.sendDeadLetterAlert(fullRecord.jobName, failures, fullRecord.error);
     }
 
     // Persist to database asynchronously (fire-and-forget)
@@ -204,6 +207,26 @@ class JobGovernanceStore {
     } catch (error) {
       console.error('Failed to persist dead-letter record to database:', error);
       // Continue operation even if persistence fails
+    }
+  }
+
+  private async sendDeadLetterAlert(jobName: JobName, failures: number, error: string): Promise<void> {
+    const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
+    if (!webhookUrl) return;
+    
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `:rotating_light: *YieldVault Job Dead-Lettered*\nJob \`${jobName}\` reached dead-letter threshold with ${failures} failures.\nLatest error: \`${error}\``
+        })
+      });
+    } catch (err) {
+      logger.log('error', 'Failed to send dead-letter alert', {
+        error: err instanceof Error ? err.message : String(err),
+        jobName
+      });
     }
   }
 
