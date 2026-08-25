@@ -1,5 +1,7 @@
 # Recurring Dependency Review Process and Ownership
 
+> **Policy companion:** See [Dependency Update Policy](./DEPENDENCY_UPDATE_POLICY.md) for the authoritative rules on upgrade cadence, testing gates, high-risk library list, CVE severity SLAs, and major-update owner requirements. This document covers the recurring *workflow* — how reviews are scheduled, executed, and documented.
+
 This document defines a recurring process for reviewing third-party dependencies, assigning accountable owners, tracking outcomes, and keeping updates safe for YieldVault-RWA.
 
 ---

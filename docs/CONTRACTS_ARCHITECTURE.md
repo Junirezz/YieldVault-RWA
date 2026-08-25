@@ -5,6 +5,8 @@
 **soroban-sdk Version:** 22.0.0  
 **Last Updated:** May 29, 2026
 
+> **See also:** [System Ownership & Data Flow](./SYSTEM_OWNERSHIP_AND_DATA_FLOW.md) for layer ownership boundaries, the backend ↔ contract interface assumptions (§5.2), and the full event flow map showing how on-chain events propagate to webhook subscribers.
+
 ---
 
 ## 1. Project Overview
