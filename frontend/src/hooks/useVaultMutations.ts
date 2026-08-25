@@ -16,6 +16,15 @@ interface MutationParams {
   idempotencyKey?: string;
 }
 
+interface MutationResult {
+  walletAddress: string;
+  amount: number;
+  referralCode?: string;
+  idempotencyKey?: string;
+  /** On-chain hash returned by the API; undefined in mock/stub modes. */
+  txHash?: string;
+}
+
 /**
  * Deposit mutation with production-hardened optimistic UI cache updates.
  *
@@ -30,8 +39,8 @@ export function useDepositMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ walletAddress, amount, referralCode, idempotencyKey }: MutationParams) => {
-      await submitDeposit(
+    mutationFn: async ({ walletAddress, amount, referralCode, idempotencyKey }: MutationParams): Promise<MutationResult> => {
+      const txHash = await submitDeposit(
         {
           walletAddress,
           amount: amount.toString(),
@@ -40,7 +49,7 @@ export function useDepositMutation() {
         },
         { idempotencyKey },
       );
-      return { walletAddress, amount, referralCode, idempotencyKey };
+      return { walletAddress, amount, referralCode, idempotencyKey, txHash };
     },
     onMutate: async ({ walletAddress, amount }): Promise<VaultOptimisticSnapshot> => {
       await cancelVaultOptimisticQueries(queryClient, walletAddress);
@@ -67,8 +76,8 @@ export function useWithdrawMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ walletAddress, amount, idempotencyKey }: MutationParams) => {
-      await submitWithdrawal(
+    mutationFn: async ({ walletAddress, amount, idempotencyKey }: MutationParams): Promise<MutationResult> => {
+      const txHash = await submitWithdrawal(
         {
           walletAddress,
           amount: amount.toString(),
@@ -76,7 +85,7 @@ export function useWithdrawMutation() {
         },
         { idempotencyKey },
       );
-      return { walletAddress, amount, idempotencyKey };
+      return { walletAddress, amount, idempotencyKey, txHash };
     },
     onMutate: async ({ walletAddress, amount }): Promise<VaultOptimisticSnapshot> => {
       await cancelVaultOptimisticQueries(queryClient, walletAddress);

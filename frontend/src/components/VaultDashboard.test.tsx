@@ -299,6 +299,44 @@ describe("VaultDashboard", () => {
     expect(localStorage.getItem("yieldvault:first-deposit:GFIRSTDEPOSITWALLET000000000000000000000000000000")).toBe("true");
   });
 
+  it("shows a View on Explorer link after a successful deposit that returns a transaction hash", async () => {
+    const txHash = "ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890";
+    mockDepositMutateAsync.mockResolvedValue({ txHash });
+
+    renderDashboard("GEXPLORERWALLET000000000000000000000000000000000");
+
+    const input = await screen.findByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
+
+    const explorerLink = await screen.findByRole(
+      "link",
+      { name: /view on stellar explorer/i },
+      { timeout: 10000 },
+    );
+    expect(explorerLink).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/testnet/tx/${txHash}`,
+    );
+  }, 15000);
+
+  it("omits the explorer link when no transaction hash is returned", async () => {
+    mockDepositMutateAsync.mockResolvedValue({});
+
+    renderDashboard("GEXPLORERWALLET000000000000000000000000000000000");
+
+    const input = await screen.findByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
+
+    expect(await screen.findByText(/Finalized/i, {}, { timeout: 10000 })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /view on stellar explorer/i }),
+    ).not.toBeInTheDocument();
+  }, 15000);
+
   it("fills the deposit input with max allowable amount via MAX button", async () => {
     renderDashboard("GABC123");
 

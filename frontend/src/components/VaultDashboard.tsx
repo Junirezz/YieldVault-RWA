@@ -638,8 +638,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
       setTxTimelineStatus("submitting");
 
+      let submittedTxHash: string | undefined;
+
       if (actionType === "deposit") {
-        await depositMutation.mutateAsync(mutationParams);
+        const depositResult = await depositMutation.mutateAsync(mutationParams);
 
         try {
           const depositKey = `${FIRST_DEPOSIT_PREFIX}${walletAddress}`;
@@ -652,8 +654,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           console.warn("Storage access failed while tracking first deposit state", storageErr);
           runDepositConfetti();
         }
+
+        submittedTxHash = depositResult?.txHash;
       } else {
-        await withdrawMutation.mutateAsync(mutationParams);
+        const withdrawResult = await withdrawMutation.mutateAsync(mutationParams);
+        submittedTxHash = withdrawResult?.txHash;
       }
 
       transactionIntent.clearIntent();
@@ -665,6 +670,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         message: actionType === "deposit"
           ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
           : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
+        txHash: submittedTxHash,
       });
       setTxTimelineStatus("finalized");
 
@@ -1730,6 +1736,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         <TransactionTimeline
                           status={txTimelineStatus}
                           errorMessage={transactionResult?.message}
+                          txHash={transactionResult?.txHash}
                         />
 
                         {(txTimelineStatus === "finalized" || txTimelineStatus === "failed") && (

@@ -1,116 +1,75 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Account } from "@stellar/stellar-sdk";
-import {
-  decodeSharePrice,
-  getSharePrice,
-  SharePriceFetchError,
-} from "./vaultApi";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const VALID_CONTRACT_ID = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
-const VALID_ACCOUNT_ID = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+const postMock = vi.hoisted(() => vi.fn());
 
-const { mockNetworkConfig, simulateTransaction, getAccount } = vi.hoisted(() => ({
-  mockNetworkConfig: {
-    contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    networkPassphrase: "Test SDF Network ; September 2015",
-  },
-  simulateTransaction: vi.fn(),
-  getAccount: vi.fn(),
+vi.mock("./apiClient", () => ({
+  apiClient: { post: postMock },
 }));
 
-vi.mock("../config/network", () => ({
-  networkConfig: mockNetworkConfig,
-}));
+import { submitDeposit, submitWithdrawal } from "./vaultApi";
 
-vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
-  return {
-    ...actual,
-    rpc: {
-      ...actual.rpc,
-      Server: class MockRpcServer {
-        getAccount = getAccount;
-        simulateTransaction = simulateTransaction;
-      },
-    },
-  };
-});
+const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const DEPOSIT_PARAMS = {
+  walletAddress: WALLET,
+  amount: "100",
+  asset: "USDC",
+};
 
-function mockI128ReturnValue(value: bigint) {
-  const lo = value & ((1n << 64n) - 1n);
-  const hi = value >> 64n;
-
-  return {
-    i128: () => ({
-      hi: () => ({ toString: () => hi.toString() }),
-      lo: () => ({ toString: () => lo.toString() }),
-    }),
-  };
-}
-
-describe("decodeSharePrice", () => {
-  it("decodes 1:1 share price", () => {
-    expect(decodeSharePrice(1_000_000_000_000_000_000n)).toBe(1);
-  });
-
-  it("decodes fractional share price", () => {
-    expect(decodeSharePrice(1_084_200_000_000_000_000n)).toBeCloseTo(1.0842, 4);
-  });
-
-  it("decodes zero", () => {
-    expect(decodeSharePrice(0n)).toBe(0);
-  });
-});
-
-describe("getSharePrice", () => {
+describe("vaultApi — transaction hash propagation", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockNetworkConfig.contractId = VALID_CONTRACT_ID;
-    getAccount.mockResolvedValue(new Account(VALID_ACCOUNT_ID, "0"));
+    postMock.mockReset();
+    vi.unstubAllEnvs();
+    // Force the real-API code path; mock mode short-circuits below.
+    vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test");
+    vi.stubEnv("VITE_E2E_STUB_BALANCES", "");
   });
 
-  it("throws SharePriceFetchError when contract ID is empty", async () => {
-    mockNetworkConfig.contractId = "";
-
-    await expect(getSharePrice()).rejects.toBeInstanceOf(SharePriceFetchError);
-    expect(simulateTransaction).not.toHaveBeenCalled();
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
-  it("returns decoded share price from simulation", async () => {
-    simulateTransaction.mockResolvedValue({
-      result: {
-        retval: mockI128ReturnValue(1_000_000_000_000_000_000n),
-      },
-    });
+  it("returns the camelCase transactionHash from a deposit response", async () => {
+    postMock.mockResolvedValue({ id: "op-1", transactionHash: "abc123" });
 
-    await expect(getSharePrice()).resolves.toBe(1);
-    expect(simulateTransaction).toHaveBeenCalledOnce();
+    await expect(submitDeposit(DEPOSIT_PARAMS)).resolves.toBe("abc123");
   });
 
-  it("wraps RPC failures in SharePriceFetchError", async () => {
-    const rpcError = new Error("network timeout");
-    simulateTransaction.mockRejectedValue(rpcError);
+  it("accepts a snake_case tx_hash from a withdrawal response", async () => {
+    postMock.mockResolvedValue({ id: "op-2", tx_hash: "def456" });
 
-    await expect(getSharePrice()).rejects.toMatchObject({
-      name: "SharePriceFetchError",
-      cause: rpcError,
-    });
+    await expect(
+      submitWithdrawal({ ...DEPOSIT_PARAMS }),
+    ).resolves.toBe("def456");
   });
 
-  it("throws SharePriceFetchError on simulation errors", async () => {
-    simulateTransaction.mockResolvedValue({
-      error: "contract not found",
-    });
+  it("returns undefined when the response carries no hash", async () => {
+    postMock.mockResolvedValue({ id: "op-3", status: "accepted" });
 
-    await expect(getSharePrice()).rejects.toBeInstanceOf(SharePriceFetchError);
+    await expect(submitDeposit(DEPOSIT_PARAMS)).resolves.toBeUndefined();
   });
 
-  it("throws SharePriceFetchError when contract returns no value", async () => {
-    simulateTransaction.mockResolvedValue({
-      result: {},
-    });
+  it("returns undefined for non-object responses", async () => {
+    postMock.mockResolvedValue(null);
 
-    await expect(getSharePrice()).rejects.toThrow("Contract returned no value");
+    await expect(submitDeposit(DEPOSIT_PARAMS)).resolves.toBeUndefined();
+  });
+
+  it("ignores empty-string hashes", async () => {
+    postMock.mockResolvedValue({ transactionHash: "" });
+
+    await expect(submitDeposit(DEPOSIT_PARAMS)).resolves.toBeUndefined();
+  });
+
+  it("propagates request failures untouched", async () => {
+    postMock.mockRejectedValue(new Error("network down"));
+
+    await expect(submitDeposit(DEPOSIT_PARAMS)).rejects.toThrow("network down");
+  });
+
+  it("resolves undefined in e2e stub mode without calling the API", async () => {
+    vi.stubEnv("VITE_E2E_STUB_BALANCES", "true");
+
+    await expect(submitDeposit(DEPOSIT_PARAMS)).resolves.toBeUndefined();
+    expect(postMock).not.toHaveBeenCalled();
   });
 });
