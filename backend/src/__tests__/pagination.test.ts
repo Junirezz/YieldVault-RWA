@@ -1,7 +1,12 @@
 import request from 'supertest';
 import app from '../index';
+import { ensurePaginationFixtureTransactions } from './setup';
 
 describe('Pagination', () => {
+  beforeAll(async () => {
+    await ensurePaginationFixtureTransactions('fixture-pagination', 30);
+  });
+
   // ─── Transactions Endpoint Tests ─────────────────────────────────────────
 
   describe('GET /api/transactions', () => {

@@ -62,6 +62,22 @@ router.get('/',
       const to = req.query.to as string | undefined;
 
       if (!walletAddress) {
+        // Validate type filter if provided
+        const { error: typeError } = parseTypeFilter(typeof type === 'string' ? type : undefined);
+        if (typeError) {
+          res.status(400).json({ error: 'Bad Request', status: 400, message: typeError });
+          return;
+        }
+
+        // Validate status filter if provided
+        const { error: statusError } = parseStatusFilter(
+          typeof status === 'string' ? status : undefined,
+        );
+        if (statusError) {
+          res.status(400).json({ error: 'Bad Request', status: 400, message: statusError });
+          return;
+        }
+
         try {
           const response = await buildTransactionsResponse({
             limit: typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined,
