@@ -199,8 +199,11 @@ describe("TransactionHistory", () => {
 
     renderPage(WALLET);
 
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-    expect(screen.getByRole("alert")).toHaveTextContent("Data unavailable");
+    // The banner and the contextual error empty state are both announced.
+    const alerts = await screen.findAllByRole("alert");
+    expect(
+      alerts.some((alert) => alert.textContent?.includes("Data unavailable")),
+    ).toBe(true);
   });
 
   // Req 3.1 — correct column headers
@@ -1613,5 +1616,24 @@ describe("TransactionHistory — advanced filters", () => {
     expect(
       screen.getByRole("columnheader", { name: /^Amount$/i }),
     ).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("shows an error empty state instead of deposit guidance when the history fails to load", async () => {
+    mockGetTransactions.mockRejectedValueOnce(new Error("horizon down"));
+
+    renderAt(["/"]);
+
+    expect(
+      await screen.findByText(/transactions unavailable/i),
+    ).toBeInTheDocument();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    expect(retry).toBeInTheDocument();
+    // Failure guidance must not tell the user there are simply no transactions.
+    expect(screen.queryByText(/no transactions yet/i)).toBeNull();
+
+    mockGetTransactions.mockResolvedValue([makeTransaction()]);
+    fireEvent.click(retry);
+
+    await screen.findByRole("table");
   });
 });

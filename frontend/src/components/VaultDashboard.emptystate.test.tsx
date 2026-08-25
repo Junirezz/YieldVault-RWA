@@ -192,4 +192,27 @@ describe("VaultDashboard — empty state", () => {
     // Wallet overlay should be shown instead
     expect(screen.getByText(/Wallet Not Connected/i)).toBeInTheDocument();
   });
+
+  it("shows a strategy-data-unavailable state with retry when the summary query fails", async () => {
+    const refetch = vi.fn();
+    vi.mocked(vaultDataHooks.useVaultSummary).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("summary endpoint down"),
+      refetch,
+    } as unknown as UseQueryResult<VaultSummary, Error>);
+
+    renderDashboard("GABC123", 1250.5);
+
+    expect(
+      await screen.findByText(/strategy data unavailable/i),
+    ).toBeInTheDocument();
+    // The panel must not present placeholder strategy facts as live data.
+    expect(screen.queryByText("BENJI Strategy")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => {
+      expect(refetch).toHaveBeenCalled();
+    });
+  });
 });

@@ -396,4 +396,39 @@ describe("Portfolio — empty state", () => {
 
     expect(screen.getByText("Position Details")).toBeInTheDocument();
   });
+
+  it("shows an error empty state with retry when loading positions fails", async () => {
+    vi.mocked(portfolioApi.getPortfolioHoldings).mockRejectedValue(
+      new Error("portfolio api down"),
+    );
+
+    renderPortfolio("/portfolio", "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+
+    expect(
+      await screen.findByText(/positions unavailable/i),
+    ).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: /try again/i });
+    // Failure guidance must not read as "you have no positions yet".
+    expect(screen.queryByRole("region", { name: /getting started guide/i })).not.toBeInTheDocument();
+    vi.mocked(portfolioApi.getPortfolioHoldings).mockResolvedValue([
+      {
+        id: "pos-1",
+        asset: "USDC",
+        vaultId: "vault-1",
+        vaultName: "RWA Vault",
+        symbol: "yvUSDC",
+        issuer: "G...",
+        shares: 100,
+        apy: 8.45,
+        valueUsd: 1000,
+        unrealizedGainUsd: 50,
+        status: "active",
+      },
+    ]);
+    fireEvent.click(retry);
+
+    await waitFor(() => {
+      expect(screen.getByText("Position Details")).toBeInTheDocument();
+    });
+  });
 });

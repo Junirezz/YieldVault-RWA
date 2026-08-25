@@ -87,7 +87,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     setTransactionPageSize,
     toggleTransactionColumnVisibility,
   } = useUserPreferenceStore(walletAddress);
-  const { data: queryTransactions, isLoading, error: queryError } = useTransactionHistory(walletAddress);
+  const { data: queryTransactions, isLoading, error: queryError, refetch: refetchTransactions } = useTransactionHistory(walletAddress);
   const delayedLoading = useDelayedLoading(isLoading);
   const transactions = React.useMemo(
     () => queryTransactions ?? [],
@@ -411,7 +411,18 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     hasDeposits &&
     !hasWithdrawals;
 
-  const emptyMessage = (
+  const emptyMessage = error ? (
+    <EmptyState
+      kind="error"
+      title={t("txHistory.unavailable.title")}
+      description={t("txHistory.unavailable.desc")}
+      icon={<Activity size={24} />}
+      action={{
+        label: t("common.retry"),
+        onClick: () => void refetchTransactions(),
+      }}
+    />
+  ) : (
     <EmptyState
       kind={hasActiveFilters ? "search" : "no-data"}
       title={
@@ -448,7 +459,6 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       }
     />
   );
-
   // Determine which rows to show based on view mode
   const displayRows = viewMode === "infinite" ? infiniteScrollRows : rows;
   const useVirtualizedTable = shouldVirtualizeTransactionList(displayRows.length);

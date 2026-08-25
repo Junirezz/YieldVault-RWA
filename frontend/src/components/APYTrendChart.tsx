@@ -16,6 +16,7 @@ import { usePreferencesContext } from "../context/PreferencesContext";
 import { formatDate } from "../lib/formatters";
 import { type TimeRange, getCutoffDate, getNow } from "../lib/dateUtils";
 import RefreshControl from "./RefreshControl";
+import ChartWidgetPlaceholder from "./ui/ChartWidgetPlaceholder";
 import { usePolling } from "../hooks/usePolling";
 import { useStaleIndicator } from "../hooks/useStaleIndicator";
 import { sampleChartSeries } from "../lib/chartSeries";
@@ -352,7 +353,13 @@ const APYTrendChart: React.FC<APYTrendChartProps> = ({ data = ALL_HISTORY }) => 
 
       {/* Chart */}
       <div style={{ height: "240px", position: "relative" }}>
-        {isTest ? (
+        {data.length === 0 ? (
+          <ChartWidgetPlaceholder
+            variant="empty"
+            title="No APY history yet"
+            description="Yield history will appear once the vault records its first observations."
+          />
+        ) : isTest ? (
           <LineChart {...sharedChartProps} width={400} height={240}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
             <XAxis
