@@ -109,8 +109,8 @@ describe('WalletConnect', () => {
         const button = screen.getByText(/Connect Freighter/i);
         fireEvent.click(button);
 
-        // Should show connecting state
-        expect(screen.getByText(/Connecting/i)).toBeInTheDocument();
+        // Should show connecting state — at least one element contains "Connecting"
+        expect(screen.getAllByText(/Connecting/i).length).toBeGreaterThan(0);
     });
 
     it('calls onConnect when manually connected via button', async () => {

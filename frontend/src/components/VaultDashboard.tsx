@@ -24,7 +24,7 @@ import { validate, type ValidationSchema } from "../forms/validate";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
 import { useTokenAllowance } from "../hooks/useTokenAllowance";
 import { usePortfolioHoldings } from "../hooks/usePortfolioData";
-import { createDepositFormSchema, MIN_DEPOSIT_AMOUNT } from "../forms/schemas/depositFormSchema";
+import { createDepositFormSchema, MIN_DEPOSIT_AMOUNT, MAX_DEPOSIT_AMOUNT, USDC_DISPLAY_DECIMALS } from "../forms/schemas/depositFormSchema";
 import { createWithdrawFormSchema } from "../forms/schemas/withdrawFormSchema";
 import { mapServerError } from "../lib/errorMappers";
 import confetti from "canvas-confetti";
@@ -1219,7 +1219,14 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                             onBlur={handleBlur}
                             disabled={isBusy || (tab === "deposit" && isCapReached)}
                             error={showInlineError ? activeAmountError ?? undefined : undefined}
-                            helperText={tab === "deposit" ? t("vaultDashboard.minDeposit").replace("{{amount}}", MIN_DEPOSIT_AMOUNT.toFixed(2)) : t("vaultDashboard.maxWithdraw").replace("{{amount}}", tabBalance.toFixed(2))}
+                            helperText={
+                              tab === "deposit"
+                                ? t("vaultDashboard.depositHelperText")
+                                    .replace("{{min}}", MIN_DEPOSIT_AMOUNT.toFixed(2))
+                                    .replace("{{max}}", MAX_DEPOSIT_AMOUNT.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                                    .replace("{{decimals}}", String(USDC_DISPLAY_DECIMALS))
+                                : t("vaultDashboard.maxWithdraw").replace("{{amount}}", tabBalance.toFixed(2))
+                            }
                             className={isValidAmount ? "input-valid" : ""}
                           />
 

@@ -17,6 +17,7 @@ describe("reduceWalletConnection", () => {
       status: "disconnected",
       address: null,
       error: null,
+      retryCount: 0,
     });
   });
 
@@ -53,6 +54,7 @@ describe("reduceWalletConnection", () => {
       status: "connected",
       address: "GABC123",
       error: null,
+      retryCount: 0,
     });
     expect(isWalletConnected(next)).toBe(true);
   });
@@ -111,15 +113,17 @@ describe("reduceWalletConnection", () => {
     expect(next.address).toBe("GSYNCED");
   });
 
-  it("RETRY from error returns to connecting and clears error", () => {
+  it("RETRY from error returns to retrying and clears error", () => {
     const errored: WalletConnectionState = {
       status: "error",
       address: null,
       error: createWalletConnectionError("UNKNOWN", "boom", true),
+      retryCount: 1,
     };
     const next = reduceWalletConnection(errored, { type: "RETRY" });
-    expect(next.status).toBe("connecting");
+    expect(next.status).toBe("retrying");
     expect(next.error).toBeNull();
+    expect(next.retryCount).toBe(2);
   });
 
   it("CLEAR_ERROR returns to disconnected", () => {
