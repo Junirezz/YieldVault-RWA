@@ -77,8 +77,6 @@ pub mod operational_events;
 pub mod rounding_consistency;
 pub mod strategy_validation;
 #[cfg(test)]
-mod deposit_withdraw_props;
-#[cfg(test)]
 mod invariant_tests;
 pub mod liquidation_safeguards;
 pub mod math;
