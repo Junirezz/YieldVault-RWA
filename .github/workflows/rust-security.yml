@@ -76,7 +76,7 @@ jobs:
 
       - name: Run cargo-deny (supply chain security)
         run: |
-          cargo install cargo-deny
+          cargo install cargo-deny --version 0.18.3 --locked
           cargo deny check advisories
 
       - name: Check for unsafe code
