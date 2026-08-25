@@ -1,6 +1,8 @@
 import React from "react";
 import { Wallet, Layers, TrendingUp } from "./icons";
 import { useTranslation } from "../i18n";
+import type { WalletConnectionStatus as WalletStatusValue } from "../lib/walletConnectionState";
+import WalletConnectionStatus from "./WalletConnectionStatus";
 import "./OnboardingPanel.css";
 
 interface OnboardingStep {
@@ -14,19 +16,62 @@ interface OnboardingStep {
 }
 
 interface OnboardingPanelProps {
+  /**
+   * Pass either the legacy boolean (backward compatible) or the full
+   * wallet connection status string for richer state rendering.
+   */
   walletConnected: boolean;
+  /**
+   * Optional: full wallet connection status from the state machine.
+   * When provided, the onboarding panel shows connecting/retrying/error
+   * feedback directly in the first step rather than a binary connected/not.
+   */
+  walletStatus?: WalletStatusValue;
+  /**
+   * Optional: error title for the error state (resolved i18n string).
+   */
+  walletErrorTitle?: string | null;
+  /**
+   * Optional: error description for the error state (resolved i18n string).
+   */
+  walletErrorDescription?: string | null;
+  /** Whether the wallet error is retryable. */
+  walletErrorRetryable?: boolean;
+  /** Retry attempt count (shown in retrying state). */
+  walletRetryCount?: number;
   onConnectWallet: () => void;
   onReviewVault: () => void;
   onDeposit: () => void;
+  /** Called when the user clicks Retry in the error state on step 1. */
+  onRetryWallet?: () => void;
 }
 
 const OnboardingPanel: React.FC<OnboardingPanelProps> = ({
   walletConnected,
+  walletStatus,
+  walletErrorTitle,
+  walletErrorDescription,
+  walletErrorRetryable = true,
+  walletRetryCount = 0,
   onConnectWallet,
   onReviewVault,
   onDeposit,
+  onRetryWallet,
 }) => {
   const { t } = useTranslation();
+
+  // Derive connecting/error/retrying from walletStatus if provided.
+  const isConnecting = walletStatus === "connecting";
+  const isRetrying = walletStatus === "retrying";
+  const isBusy = isConnecting || isRetrying;
+
+  // Show the "connecting" label on the button when the wallet is in-flight.
+  const step1ActionLabel = (() => {
+    if (walletConnected) return t("onboarding.step1.connected");
+    if (isRetrying) return t("wallet.retrying");
+    if (isConnecting) return t("wallet.connecting");
+    return t("onboarding.step1.action");
+  })();
 
   const steps: OnboardingStep[] = [
     {
@@ -34,7 +79,7 @@ const OnboardingPanel: React.FC<OnboardingPanelProps> = ({
       icon: <Wallet size={24} />,
       title: t("onboarding.step1.title"),
       description: t("onboarding.step1.description"),
-      actionLabel: walletConnected ? t("onboarding.step1.connected") : t("onboarding.step1.action"),
+      actionLabel: step1ActionLabel,
       onAction: onConnectWallet,
       completed: walletConnected,
     },
@@ -103,14 +148,29 @@ const OnboardingPanel: React.FC<OnboardingPanelProps> = ({
               <div className="onboarding-step-content">
                 <h3 className="onboarding-step-title">{s.title}</h3>
                 <p className="onboarding-step-description">{s.description}</p>
+
+                {/* Inline status for step 1 only */}
+                {idx === 0 && walletStatus && !walletConnected && (
+                  <WalletConnectionStatus
+                    status={walletStatus}
+                    errorTitle={walletErrorTitle}
+                    errorDescription={walletErrorDescription}
+                    retryable={walletErrorRetryable}
+                    retryCount={walletRetryCount}
+                    onRetry={onRetryWallet ?? onConnectWallet}
+                    className="onboarding-wallet-status"
+                    style={{ marginTop: "8px" }}
+                  />
+                )}
               </div>
 
               <button
                 type="button"
                 className={`btn ${isActive ? "btn-primary" : "btn-outline"} onboarding-step-action`}
                 onClick={s.onAction}
-                disabled={isPast || isFuture}
+                disabled={isPast || isFuture || (idx === 0 && isBusy)}
                 aria-label={s.actionLabel}
+                aria-busy={idx === 0 && isBusy ? true : undefined}
               >
                 {s.actionLabel}
               </button>

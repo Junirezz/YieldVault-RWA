@@ -34,6 +34,7 @@ export const en = {
   },
   wallet: {
     connecting: "Connecting...",
+    retrying: "Retrying...",
     checkingFreighter: "Checking wallet…",
     connectFreighter: "Connect Freighter",
     rpcPrefix: "RPC:",
@@ -47,6 +48,7 @@ export const en = {
       connecting: "Connecting to wallet...",
       disconnected: "Not connected",
       error: "Connection error",
+      retrying: "Retrying connection...",
     },
     error: {
       notInstalled: "Freighter wallet extension not detected. Install Freighter to proceed.",
@@ -60,6 +62,7 @@ export const en = {
       connectingStatus: "Establishing connection...",
       checkingStatus: "Looking for an existing Freighter session on this device",
       errorStatus: "Connection failed - try again or check Freighter",
+      retryingStatus: "Retrying wallet connection...",
     },
     heartbeat: {
       healthy: "Wallet session healthy",
@@ -777,6 +780,7 @@ export const en = {
     withdrawalAmountLabel: "Withdrawal amount",
     minDeposit: "Min: {{amount}} USDC",
     maxWithdraw: "Max: {{amount}} USDC",
+    depositHelperText: "Min: {{min}} USDC · Max: {{max}} USDC · Up to {{decimals}} decimal places",
     assetUsdc: "Asset: USDC",
     shareLink: "Share Link",
     maxButton: "MAX",

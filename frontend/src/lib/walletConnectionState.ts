@@ -8,6 +8,7 @@
 export type WalletConnectionStatus =
   | "disconnected"
   | "connecting"
+  | "retrying"
   | "connected"
   | "error";
 
@@ -30,6 +31,8 @@ export interface WalletConnectionState {
   status: WalletConnectionStatus;
   address: string | null;
   error: WalletConnectionError | null;
+  /** Number of retry attempts since last successful connect (reset to 0 on success). */
+  retryCount: number;
 }
 
 export type WalletConnectionEvent =
@@ -41,12 +44,14 @@ export type WalletConnectionEvent =
   | { type: "ADDRESS_SYNCED"; address: string }
   | { type: "CLEAR_ERROR" }
   | { type: "RETRY" }
+  | { type: "RETRY_REQUESTED" }
   | { type: "PARENT_ADDRESS_CLEARED" };
 
 export const initialWalletConnectionState: WalletConnectionState = {
   status: "disconnected",
   address: null,
   error: null,
+  retryCount: 0,
 };
 
 const ERROR_I18N_KEYS: Record<
@@ -151,22 +156,34 @@ export function reduceWalletConnection(
   event: WalletConnectionEvent,
 ): WalletConnectionState {
   switch (event.type) {
-    case "CONNECT_REQUESTED":
-    case "RETRY": {
-      if (state.status === "connecting") {
-        return state;
-      }
-      if (
-        event.type === "RETRY" &&
-        state.status !== "error" &&
-        state.status !== "disconnected"
-      ) {
+    case "CONNECT_REQUESTED": {
+      if (state.status === "connecting" || state.status === "retrying") {
         return state;
       }
       return {
         status: "connecting",
         address: null,
         error: null,
+        retryCount: 0,
+      };
+    }
+
+    case "RETRY_REQUESTED":
+    case "RETRY": {
+      if (state.status === "connecting" || state.status === "retrying") {
+        return state;
+      }
+      if (
+        state.status !== "error" &&
+        state.status !== "disconnected"
+      ) {
+        return state;
+      }
+      return {
+        status: "retrying",
+        address: null,
+        error: null,
+        retryCount: state.retryCount + 1,
       };
     }
 
@@ -176,6 +193,7 @@ export function reduceWalletConnection(
         status: "connected",
         address: event.address,
         error: null,
+        retryCount: 0,
       };
 
     case "CONNECT_FAILED":
@@ -183,6 +201,7 @@ export function reduceWalletConnection(
         status: "error",
         address: null,
         error: event.error,
+        retryCount: state.retryCount,
       };
 
     case "DISCONNECT_REQUESTED":
@@ -199,6 +218,7 @@ export function reduceWalletConnection(
           "Freighter is no longer connected to this session.",
           true,
         ),
+        retryCount: state.retryCount,
       };
 
     case "CLEAR_ERROR":
@@ -215,7 +235,7 @@ export function reduceWalletConnection(
         return state;
       }
       // Do not interrupt an in-flight connect attempt.
-      if (state.status === "connecting") {
+      if (state.status === "connecting" || state.status === "retrying") {
         return state;
       }
       return {
@@ -228,7 +248,11 @@ export function reduceWalletConnection(
 }
 
 export function isWalletConnecting(state: WalletConnectionState): boolean {
-  return state.status === "connecting";
+  return state.status === "connecting" || state.status === "retrying";
+}
+
+export function isWalletRetrying(state: WalletConnectionState): boolean {
+  return state.status === "retrying";
 }
 
 export function isWalletConnected(state: WalletConnectionState): boolean {
