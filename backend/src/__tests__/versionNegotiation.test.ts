@@ -19,7 +19,7 @@ describe('API Version Negotiation and Deprecation Headers', () => {
     it('returns X-API-Version headers on normal requests (legacy assertions)', async () => {
       const res = await request(app).get('/health');
       expect(res.headers['x-api-version']).toBe('1.0.0');
-      expect(res.headers['x-api-version-supported']).toBe('1.0.0');
+      expect(res.headers['x-api-version-supported']).toContain('1.0.0');
     });
   });
 
@@ -48,11 +48,17 @@ describe('API Version Negotiation and Deprecation Headers', () => {
       expect(res.status).toBe(200);
     });
 
-    it('rejects unsupported version "2.0.0" with 406 Not Acceptable', async () => {
+    it('accepts version "2.0.0" as the v2 breaking-changes preview', async () => {
       const res = await request(app).get('/health').set('Accept-Version', '2.0.0');
-      expect(res.status).toBe(406);
-      expect(res.body.error).toBe('Not Acceptable');
-      expect(res.body.message).toContain('2.0.0');
+      expect(res.status).toBe(200);
+      expect(res.headers['x-api-version']).toBe('2.0.0-preview');
+      expect(res.headers['x-api-preview']).toBe('v2');
+    });
+
+    it('accepts v2 preview aliases', async () => {
+      const res = await request(app).get('/health').set('Accept-Version', 'v2');
+      expect(res.status).toBe(200);
+      expect(res.headers['x-api-version']).toBe('2.0.0-preview');
     });
 
     it('includes supportedVersions array in 406 body', async () => {
@@ -186,6 +192,24 @@ describe('API Version Negotiation and Deprecation Headers', () => {
     it('still sets X-API-Version on canonical routes', async () => {
       const res = await request(app).get('/api/v1/vault/summary');
       expect(res.headers['x-api-version']).toBe(CURRENT_VERSION);
+    });
+  });
+
+  describe('v2 preview and vault health routes', () => {
+    it('serves the plural vault health endpoint with cache metadata', async () => {
+      const res = await request(app).get('/api/v1/vaults/primary/health');
+      expect([200, 503]).toContain(res.status);
+      expect(res.body.vaultId).toBe('primary');
+      expect(res.body).toHaveProperty('uptimeSeconds');
+      expect(res.body).toHaveProperty('metrics');
+      expect(res.body).toHaveProperty('cached', false);
+    });
+
+    it('redirects the v2 preview vault health route to the stable v1 handler', async () => {
+      const res = await request(app).get('/api/v2/vaults/primary/health');
+      expect(res.status).toBe(307);
+      expect(res.headers.location).toBe('/api/v1/vaults/primary/health');
+      expect(res.headers['x-api-preview']).toBe('v2');
     });
   });
 

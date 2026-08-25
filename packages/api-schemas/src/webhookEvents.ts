@@ -8,12 +8,11 @@ import { AssetCodeSchema, StellarAddressSchema } from "./primitives";
  * consumer receives from the backend's delivery service
  * (`backend/src/webhookDelivery.ts`). It is intentionally narrower than the
  * on-chain Soroban contract event catalog documented in
- * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits ~28 distinct
+ * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits many distinct
  * ledger events (admin rotation, emergency actions, fee changes, strategy
- * bookkeeping, etc.), but only transaction-level activity is currently
- * surfaced through the webhook delivery pipeline. Consumers that need the
- * full contract event set should query Soroban RPC directly rather than
- * relying on webhooks for those events.
+ * bookkeeping, etc.), while webhooks surface the operational deposit,
+ * withdrawal, and strategy-change events consumers need for off-chain
+ * automation.
  *
  * Keep this list in sync with `TransactionEventType` in
  * `backend/src/webhookDelivery.ts` — that file is the source of truth for
@@ -22,6 +21,9 @@ import { AssetCodeSchema, StellarAddressSchema } from "./primitives";
 export const WebhookEventTypeSchema = z.enum([
   "transaction.deposit.created",
   "transaction.withdrawal.created",
+  "vault.deposit.created",
+  "vault.withdrawal.created",
+  "vault.strategy.changed",
 ]);
 
 export type WebhookEventType = z.infer<typeof WebhookEventTypeSchema>;
@@ -52,6 +54,25 @@ const BaseTransactionEventPayloadSchema = z
   })
   .strict();
 
+const VaultEventPayloadSchema = BaseTransactionEventPayloadSchema.extend({
+  vaultId: z.string().min(1),
+});
+
+const VaultStrategyChangedPayloadSchema = z
+  .object({
+    transactionId: z.string().min(1),
+    amount: z.string().min(1),
+    asset: AssetCodeSchema,
+    walletAddress: z.string().min(1),
+    transactionHash: z.string().min(1),
+    status: z.string().min(1),
+    timestamp: z.iso.datetime(),
+    vaultId: z.string().min(1),
+    strategyId: z.string().min(1),
+    previousStrategyId: z.string().min(1).optional(),
+  })
+  .strict();
+
 /** Payload for `transaction.deposit.created`. */
 export const TransactionDepositCreatedPayloadSchema =
   BaseTransactionEventPayloadSchema;
@@ -70,6 +91,9 @@ export type TransactionWithdrawalCreatedPayload = z.infer<
 export const WebhookEventPayloadSchemas = {
   "transaction.deposit.created": TransactionDepositCreatedPayloadSchema,
   "transaction.withdrawal.created": TransactionWithdrawalCreatedPayloadSchema,
+  "vault.deposit.created": VaultEventPayloadSchema,
+  "vault.withdrawal.created": VaultEventPayloadSchema,
+  "vault.strategy.changed": VaultStrategyChangedPayloadSchema,
 } as const satisfies Record<WebhookEventType, z.ZodTypeAny>;
 
 /**
@@ -82,7 +106,11 @@ export const WebhookEnvelopeSchema = z
     schemaVersion: z.number().int().positive(),
     eventType: WebhookEventTypeSchema,
     sentAt: z.iso.datetime(),
-    payload: BaseTransactionEventPayloadSchema,
+    payload: z.union([
+      BaseTransactionEventPayloadSchema,
+      VaultEventPayloadSchema,
+      VaultStrategyChangedPayloadSchema,
+    ]),
   })
   .strict();
 
@@ -97,7 +125,8 @@ export type WebhookEnvelope = z.infer<typeof WebhookEnvelopeSchema>;
  */
 export function parseWebhookEnvelope(data: unknown): WebhookEnvelope {
   const envelope = WebhookEnvelopeSchema.parse(data);
-  const payloadSchema = WebhookEventPayloadSchemas[envelope.eventType];
+  const payloadSchema =
+    WebhookEventPayloadSchemas[envelope.eventType as WebhookEventType];
   payloadSchema.parse(envelope.payload);
   return envelope;
 }

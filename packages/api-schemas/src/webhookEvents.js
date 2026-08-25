@@ -10,12 +10,11 @@ const primitives_1 = require("./primitives");
  * consumer receives from the backend's delivery service
  * (`backend/src/webhookDelivery.ts`). It is intentionally narrower than the
  * on-chain Soroban contract event catalog documented in
- * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits ~28 distinct
+ * `docs/WEBHOOK_INTEGRATION.md`: the vault contract emits many distinct
  * ledger events (admin rotation, emergency actions, fee changes, strategy
- * bookkeeping, etc.), but only transaction-level activity is currently
- * surfaced through the webhook delivery pipeline. Consumers that need the
- * full contract event set should query Soroban RPC directly rather than
- * relying on webhooks for those events.
+ * bookkeeping, etc.), while webhooks surface the operational deposit,
+ * withdrawal, and strategy-change events consumers need for off-chain
+ * automation.
  *
  * Keep this list in sync with `TransactionEventType` in
  * `backend/src/webhookDelivery.ts` — that file is the source of truth for
@@ -24,6 +23,9 @@ const primitives_1 = require("./primitives");
 exports.WebhookEventTypeSchema = zod_1.z.enum([
     "transaction.deposit.created",
     "transaction.withdrawal.created",
+    "vault.deposit.created",
+    "vault.withdrawal.created",
+    "vault.strategy.changed",
 ]);
 /**
  * Monotonically increasing schema version for the outbound webhook envelope.
@@ -49,6 +51,23 @@ const BaseTransactionEventPayloadSchema = zod_1.z
     timestamp: zod_1.z.iso.datetime(),
 })
     .strict();
+const VaultEventPayloadSchema = BaseTransactionEventPayloadSchema.extend({
+    vaultId: zod_1.z.string().min(1),
+});
+const VaultStrategyChangedPayloadSchema = zod_1.z
+    .object({
+    transactionId: zod_1.z.string().min(1),
+    amount: zod_1.z.string().min(1),
+    asset: primitives_1.AssetCodeSchema,
+    walletAddress: zod_1.z.string().min(1),
+    transactionHash: zod_1.z.string().min(1),
+    status: zod_1.z.string().min(1),
+    timestamp: zod_1.z.iso.datetime(),
+    vaultId: zod_1.z.string().min(1),
+    strategyId: zod_1.z.string().min(1),
+    previousStrategyId: zod_1.z.string().min(1).optional(),
+})
+    .strict();
 /** Payload for `transaction.deposit.created`. */
 exports.TransactionDepositCreatedPayloadSchema = BaseTransactionEventPayloadSchema;
 /** Payload for `transaction.withdrawal.created`. */
@@ -57,6 +76,9 @@ exports.TransactionWithdrawalCreatedPayloadSchema = BaseTransactionEventPayloadS
 exports.WebhookEventPayloadSchemas = {
     "transaction.deposit.created": exports.TransactionDepositCreatedPayloadSchema,
     "transaction.withdrawal.created": exports.TransactionWithdrawalCreatedPayloadSchema,
+    "vault.deposit.created": VaultEventPayloadSchema,
+    "vault.withdrawal.created": VaultEventPayloadSchema,
+    "vault.strategy.changed": VaultStrategyChangedPayloadSchema,
 };
 /**
  * The full outbound envelope written to the wire and stored in
@@ -68,7 +90,11 @@ exports.WebhookEnvelopeSchema = zod_1.z
     schemaVersion: zod_1.z.number().int().positive(),
     eventType: exports.WebhookEventTypeSchema,
     sentAt: zod_1.z.iso.datetime(),
-    payload: BaseTransactionEventPayloadSchema,
+    payload: zod_1.z.union([
+        BaseTransactionEventPayloadSchema,
+        VaultEventPayloadSchema,
+        VaultStrategyChangedPayloadSchema,
+    ]),
 })
     .strict();
 /**

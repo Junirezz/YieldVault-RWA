@@ -153,7 +153,12 @@ but clients should branch on `code`, not on `message`.
 ## 5. Soroban contract errors (`VaultError`)
 
 Returned when invoking the vault contract directly (simulation or failed transaction).
-Numeric codes match `#[contracterror]` in `contracts/vault/src/errors.rs`.
+Numeric codes match the canonical enum in `contracts/vault/src/errors.rs` and are the
+source of truth for contract failure behavior.
+
+> This catalog intentionally documents the same error names and semantics as the on-chain
+> `VaultError` enum so operators, wallets, and integrators do not need to reverse-engineer
+> failures from raw transaction output.
 
 | Code | Name | When raised | Remediation |
 |------|------|-------------|-------------|
@@ -204,6 +209,120 @@ Numeric codes match `#[contracterror]` in `contracts/vault/src/errors.rs`.
 **Large withdrawals:** Above `LargeWithdrawalThreshold`, `withdraw` emits
 `pndwdraw` and returns `0` assets until `execute_withdrawal` after timelock.
 See contract events in architecture docs.
+
+### 5.1 Troubleshooting flows for common contract failures
+
+These are the most common operator and integrator failure patterns and the actions that
+restore normal behavior.
+
+#### A. Deposit fails with `InvalidAmount`, `MinDepositNotMet`, or `ExceedsUserCap`
+
+Typical symptoms:
+- deposit amount is `0`, negative, or rounds to zero shares
+- a user tries to deposit less than the configured minimum
+- the per-user cap has been reached
+
+Likely causes:
+- incorrect amount formatting or negative value in the wallet transaction
+- too-small stake relative to `min_deposit`
+- the vault has a strict user cap enabled for the current account
+
+Recovery:
+1. Confirm the value is positive and in the smallest denomination expected by the vault.
+2. Check the configured minimum deposit and user cap before resubmitting.
+3. Retry with a larger amount or after a new cap/window is available.
+
+#### B. Withdrawal or timelocked action stalls with `TimelockNotExpired`, `NoPendingWithdrawal`, or `WithdrawalCooldownActive`
+
+Typical symptoms:
+- withdraw is simulated successfully but cannot execute immediately
+- a large withdrawal is queued and requires a later execution step
+- a deposit cooldown is still active after a recent transaction
+
+Likely causes:
+- the large-withdrawal timelock has not elapsed yet
+- the user never queued the pending withdrawal or used the wrong action sequence
+- a recent deposit is still within the configured cooldown window
+
+Recovery:
+1. Wait until the required timelock or cooldown has elapsed.
+2. Re-check the pending action state before calling `execute_withdrawal` or retrying.
+3. Re-run the correct queue/execute sequence rather than repeating the original request.
+
+#### C. Strategy deployment or liquidity errors (`LiquidityBufferNotMet`, `InsufficientLiquidity`, `StrategyNotConfigured`, `UnauthorizedStrategy`)
+
+Typical symptoms:
+- a strategy allocation or rebalance is rejected
+- vault liquidity is insufficient to satisfy a request
+- the caller is using the wrong strategy address or a strategy is not enabled
+
+Likely causes:
+- idle liquidity is below the configured buffer
+- a strategy address is not configured or has not been whitelisted
+- the caller is not the strategy that the vault expects for the action
+
+Recovery:
+1. Verify the strategy is configured and whitelisted.
+2. Reduce requested allocation or wait for liquidity to accumulate.
+3. Ensure the operator or wallet address matches the authorized strategy/relayer.
+
+#### D. Governance and emergency actions (`GovernanceThresholdNotMet`, `DisputeWindowActive`, `ProposalCancelled`, `RescueUnauthorized`)
+
+Typical symptoms:
+- action reaches the contract but governance approvals are insufficient
+- an emergency proposal cannot be confirmed before the dispute window closes
+- rescue authorization is rejected for a non-approver or invalid destination
+
+Likely causes:
+- required signer set is not configured or quorum is not reached
+- a proposal is still in dispute or was cancelled before confirmation
+- rescue parameters are invalid, such as a destination equal to the vault itself
+
+Recovery:
+1. Check signer approvals and quorum thresholds before resubmitting governance actions.
+2. Wait for the dispute window to close or cancel the proposal correctly.
+3. Use only valid emergency approvers and permitted destination addresses.
+
+#### E. Batch and relayer failure (`BatchTooLarge`, `RelayerNotAuthorized`, `RapidAction`)
+
+Typical symptoms:
+- batch deposit fails even though individual deposits succeed
+- only a whitelisted relayer can submit batch entries
+- a deposit and withdrawal happen in the same ledger and are rejected
+
+Likely causes:
+- batch size exceeds the configured limit
+- the caller is not the relayer configured for the vault
+- the same ledger contains conflicting actions for the same user or vault state
+
+Recovery:
+1. Split large deposits into multiple smaller batches.
+2. Use the configured relayer and verify the relayer is authorized.
+3. Space out actions across ledger boundaries or retry after the conflicting ledger closes.
+
+### 5.2 Typical misuse and recovery patterns
+
+The following examples capture common mistakes and what to do instead:
+
+1. Misuse: sending a negative or zero `amount` to `deposit`.
+   - Result: `VaultError::InvalidAmount`.
+   - Recovery: send a positive amount greater than the minimum deposit requirement.
+
+2. Misuse: trying to claim a withdrawal before the timelock expires.
+   - Result: `VaultError::TimelockNotExpired`.
+   - Recovery: wait for the queued action to mature, then call the execution step.
+
+3. Misuse: using an unapproved relayer on batch deposits.
+   - Result: `VaultError::RelayerNotAuthorized`.
+   - Recovery: configure or use an approved relayer and re-submit the batch.
+
+4. Misuse: resubmitting the same idempotency key with a different payload.
+   - Result: API `409 Conflict` at the backend layer.
+   - Recovery: regenerate the idempotency key or replay the exact same payload.
+
+5. Misuse: calling emergency rescue with a disallowed destination or unauthorized approver.
+   - Result: `VaultError::RescueUnauthorized`.
+   - Recovery: use only approved approvers and valid vault-safe destination addresses.
 
 ---
 
@@ -333,6 +452,31 @@ retry non-idempotent mutations without an idempotency key. See
 ```
 
 **Remediation:** Retry once; if persistent, open support ticket with `correlationId`.
+
+### Contract misuse example: invalid deposit scenario
+
+```rust
+// In a contract call, the wallet sends an amount that is zero or negative.
+let result = vault.deposit(&user, &0);
+// result == Err(VaultError::InvalidAmount)
+```
+
+**Recovery:** Correct the amount and retry with a positive value above any configured
+minimum deposit threshold.
+
+### Contract recovery example: queued withdrawal executes after lock expiry
+
+```rust
+// Large withdrawal successfully queued
+let queued = vault.withdraw(&user, &large_share_amount);
+
+// Once the lock has expired, the admin or user can execute the queued withdrawal
+let executed = vault.execute_withdrawal(&user);
+// result == Ok(amount_released)
+```
+
+**Recovery:** Wait for timelock expiry and execute the queued action instead of retrying the
+original withdrawal in the same ledger or before the lock expires.
 
 ---
 
