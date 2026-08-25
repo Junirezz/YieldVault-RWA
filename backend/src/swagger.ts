@@ -71,23 +71,7 @@ const options: swaggerJsdoc.Options = {
   apis: ['./src/**/*.ts', './src/index.ts', './src/listEndpoints.ts', './src/swagger.ts'], // Files containing annotations
 };
 
-const isGeneratingOpenApi = process.argv.some(arg => arg.includes('generate-openapi'));
-
-export const specs = isGeneratingOpenApi
-  ? {
-      openapi: '3.1.0',
-      info: {
-        title: 'YieldVault Stellar RWA API',
-        version: '1.0.0',
-      },
-      servers: [
-        {
-          url: '/api/v1',
-          description: 'API v1',
-        },
-      ],
-    }
-  : swaggerJsdoc(options);
+export const specs = swaggerJsdoc(options);
 
 export function setupSwagger(app: Express) {
   const nodeEnv = process.env.NODE_ENV || 'development';

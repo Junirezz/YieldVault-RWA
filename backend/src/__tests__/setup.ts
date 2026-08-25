@@ -99,3 +99,38 @@ export const SECOND_TEST_WALLET =
 /** Third valid wallet for multi-wallet test scenarios. */
 export const THIRD_TEST_WALLET =
   'GASEUS2QGJBV5OX2J6AKIORVEA242PQLMRZXCJYN5CZR5G5A65ONOI3N';
+
+/**
+ * Seeds a deterministic block of Transaction rows directly via Prisma so
+ * tests exercising the unscoped (no walletAddress filter) transaction
+ * listing endpoints — which page/filter over the real Transaction table,
+ * not the in-memory export fixture — have enough data to page and
+ * date-range across. Idempotent and safe to call from multiple test files:
+ * each row's id is derived from `prefix`, and upsert makes re-seeding a
+ * no-op once the block already exists.
+ */
+export async function ensurePaginationFixtureTransactions(
+  prefix: string,
+  count: number,
+): Promise<void> {
+  const { getPrismaClient } = require('../prismaClient') as typeof import('../prismaClient');
+  const prisma = getPrismaClient();
+  const wallet = 'GFIXTUREPAGINATIONWALLET000000000000000000000000000001';
+  const now = Date.now();
+
+  for (let i = 0; i < count; i++) {
+    const id = `${prefix}-${i + 1}`;
+    await prisma.transaction.upsert({
+      where: { id },
+      update: {},
+      create: {
+        id,
+        user: wallet,
+        amount: ((i + 1) * 10).toFixed(2),
+        type: i % 2 === 0 ? 'deposit' : 'withdrawal',
+        status: i % 5 === 0 ? 'pending' : 'completed',
+        timestamp: new Date(now - i * 3600000),
+      },
+    });
+  }
+}

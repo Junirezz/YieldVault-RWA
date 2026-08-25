@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../index';
 import { registerApiKey } from '../middleware/apiKeyAuth';
-import { VALID_TEST_WALLET, SECOND_TEST_WALLET } from './setup';
+import { VALID_TEST_WALLET, SECOND_TEST_WALLET, ensurePaginationFixtureTransactions } from './setup';
 
 const DEFAULT_WALLET = VALID_TEST_WALLET;
 
@@ -12,6 +12,10 @@ async function issueAccessToken(walletAddress: string): Promise<string> {
 }
 
 describe('GET /api/v1/transactions', () => {
+  beforeAll(async () => {
+    await ensurePaginationFixtureTransactions('fixture-pagination', 30);
+  });
+
   it('returns total count with cursor-based pagination and no duplicate results across pages', async () => {
     const firstPage = await request(app).get('/api/v1/transactions?limit=10');
 

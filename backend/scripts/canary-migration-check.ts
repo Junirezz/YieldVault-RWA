@@ -116,12 +116,18 @@ const rules: Array<{
       'that inserts without the new column. Use a two-phase approach: add nullable first, then add constraint.',
     check: (_, lower) => {
       const matches: Array<{ message: string; index: number }> = [];
-      // Match: ADD COLUMN ... NOT NULL (not followed by DEFAULT within ~120 chars before NOT NULL)
+      // Match: ADD COLUMN ... NOT NULL (not followed by DEFAULT before the
+      // statement ends). Bounded by the next `;` (or 300 chars, whichever
+      // comes first) so this can't bleed into an unrelated CREATE TABLE
+      // that happens to follow within the naive lookahead window and has
+      // its own NOT NULL columns.
       const re = /\badd\s+column\b/gi;
       let m: RegExpExecArray | null;
       while ((m = re.exec(lower)) !== null) {
-        // Look ahead ~200 chars for NOT NULL and presence/absence of DEFAULT
-        const slice = lower.slice(m.index, m.index + 200);
+        const statementEnd = lower.indexOf(';', m.index);
+        const windowEnd =
+          statementEnd === -1 ? m.index + 300 : Math.min(statementEnd, m.index + 300);
+        const slice = lower.slice(m.index, windowEnd);
         const hasNotNull = /\bnot\s+null\b/i.test(slice);
         const hasDefault = /\bdefault\b/i.test(slice);
         if (hasNotNull && !hasDefault) {
