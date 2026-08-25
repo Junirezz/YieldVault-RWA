@@ -317,7 +317,9 @@ fn test_role_restricted_pausability_controls() {
 
     let admin = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let usdc = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
 
     let vault_id = env.register(crate::YieldVault, ());
     let vault = crate::YieldVaultClient::new(&env, &vault_id);
@@ -334,7 +336,9 @@ fn test_role_restricted_pausability_controls() {
     assert_eq!(vault.pauser(), Some(pauser.clone()));
 
     // Designated pauser can pause with role
-    vault.pause_with_role(&pauser, &PauseReason::SecurityIncident).unwrap();
+    vault
+        .pause_with_role(&pauser, &PauseReason::SecurityIncident)
+        .unwrap();
     assert!(vault.is_paused());
     assert_eq!(vault.pause_reason(), Some(PauseReason::SecurityIncident));
 
@@ -344,7 +348,9 @@ fn test_role_restricted_pausability_controls() {
     assert_eq!(vault.pause_reason(), None);
 
     // Admin can also pause and unpause with role
-    vault.pause_with_role(&admin, &PauseReason::Maintenance).unwrap();
+    vault
+        .pause_with_role(&admin, &PauseReason::Maintenance)
+        .unwrap();
     assert!(vault.is_paused());
 
     vault.unpause_with_role(&admin).unwrap();

@@ -22,7 +22,7 @@ import { logger } from './middleware/structuredLogging';
 import { redactSensitiveAttributes } from './redaction';
 
 /** Vault operations that emit lifecycle audit entries. */
-export type VaultOperation = 'deposit' | 'withdrawal';
+export type VaultOperation = 'deposit' | 'withdrawal' | 'policy_change' | 'admin_action';
 
 /** Lifecycle phase of a vault operation. */
 export type VaultLifecyclePhase = 'initiated' | 'submitted' | 'confirmed' | 'failed';

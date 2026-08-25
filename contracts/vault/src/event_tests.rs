@@ -248,3 +248,58 @@ fn test_claim_fees_panics_when_no_treasury() {
 
     vault.claim_fees(); // should panic — no treasury set
 }
+
+#[test]
+fn test_deposit_and_withdraw_emit_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let usdc = create_token_contract(&env, &token_admin);
+    let usdc_admin = token::StellarAssetClient::new(&env, &usdc.address);
+    usdc_admin.mint(&user, &1000);
+
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    vault.initialize(&admin, &usdc.address);
+
+    vault.deposit(&user, &100);
+    
+    let events = env.events().all();
+    let mut deposit_found = false;
+    for event in events.iter() {
+        if event.1.len() > 0 {
+            if let Ok(topic_0) = event.1.get(0).unwrap().try_into_val(&env) {
+                let topic_sym: soroban_sdk::Symbol = topic_0;
+                if topic_sym == symbol_short!("deposit") {
+                    deposit_found = true;
+                    // Check if second topic is the user
+                    let topic_1: Address = event.1.get(1).unwrap().try_into_val(&env).unwrap();
+                    assert_eq!(topic_1, user);
+                }
+            }
+        }
+    }
+    assert!(deposit_found, "Deposit event not found");
+
+    vault.withdraw(&user, &50);
+    
+    let events_after = env.events().all();
+    let mut withdraw_found = false;
+    for event in events_after.iter() {
+        if event.1.len() > 0 {
+            if let Ok(topic_0) = event.1.get(0).unwrap().try_into_val(&env) {
+                let topic_sym: soroban_sdk::Symbol = topic_0;
+                if topic_sym == symbol_short!("withdraw") {
+                    withdraw_found = true;
+                    // Check if second topic is the user
+                    let topic_1: Address = event.1.get(1).unwrap().try_into_val(&env).unwrap();
+                    assert_eq!(topic_1, user);
+                }
+            }
+        }
+    }
+    assert!(withdraw_found, "Withdraw event not found");
+}
