@@ -19,6 +19,11 @@ import { useUsdcBalance, useXlmBalance } from "./hooks/useBalanceData";
 import { queryClient } from "./lib/queryClient";
 import { clearWalletSessionState } from "./lib/sessionCleanup";
 import {
+  clearPersistedWalletAddress,
+  getPersistedWalletAddress,
+  setPersistedWalletAddress,
+} from "./lib/walletSession";
+import {
   clearVaultFormDraft,
   hasMeaningfulDraft,
   loadVaultFormDraft,
@@ -55,7 +60,9 @@ const Admin = lazy(() => import("./pages/Admin"));
 // Removed simple fallback in favor of components/ErrorFallback
 
 function AppContent() {
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(() =>
+    getPersistedWalletAddress(),
+  );
   const [pendingDraft, setPendingDraft] = useState<VaultFormDraft | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -95,6 +102,7 @@ function AppContent() {
   const handleConnect = useCallback((address: string) => {
     renewSession();
     clearSessionExpired();
+    setPersistedWalletAddress(address);
     setWalletAddress(address);
     setPendingDraft(null);
   }, [renewSession, clearSessionExpired]);
@@ -120,6 +128,7 @@ function AppContent() {
     }
 
     clearWalletSessionState(queryClient);
+    clearPersistedWalletAddress();
     setWalletAddress(null);
     navigate("/", { replace: true });
   }, [clearSessionExpired, location.pathname, navigate, setSessionExpired]);
