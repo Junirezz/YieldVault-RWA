@@ -49,6 +49,7 @@ import { useRestoreGuardedRoute } from "./hooks/useRestoreGuardedRoute";
 const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
 const TransactionReceipt = lazy(() => import("./pages/TransactionReceipt"));
+const StrategyDetail = lazy(() => import("./pages/StrategyDetail"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 // Removed simple fallback in favor of components/ErrorFallback
@@ -193,6 +194,7 @@ function AppContent() {
                 />
                 <Route path="/transactions" element={<LazyTransactionHistory walletAddress={walletAddress} />} />
                 <Route path="/compare" element={<LazyVaultComparison />} />
+                <Route path="/strategies/:strategyId" element={<StrategyDetail walletAddress={walletAddress} />} />
                 <Route path="/receipt/:txHash" element={<TransactionReceipt />} />
                 <Route path="/settings" element={<LazySettings />} />
                 <Route path="/ui-kit" element={<LazyUIPreview />} />
