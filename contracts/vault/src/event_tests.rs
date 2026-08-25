@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Events as _};
 use soroban_sdk::{token, Address, Env};
 
 fn create_token_contract<'a>(env: &Env, admin: &Address) -> token::Client<'a> {
@@ -213,7 +213,7 @@ fn test_pause_and_unpause_emit_state_transition_events() {
 
     let admin = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let usdc = create_token(&env, &token_admin);
+    let usdc = create_token_contract(&env, &token_admin);
 
     let vault_id = env.register(YieldVault, ());
     let vault = YieldVaultClient::new(&env, &vault_id);
