@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
 import { logger } from './structuredLogging';
+import { sendApiError } from './apiError';
 
 /**
  * CORS Configuration Middleware
@@ -66,10 +67,11 @@ export const corsOptions: CorsOptions = {
 export const corsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   return cors(corsOptions)(req, res, (err) => {
     if (err) {
-      res.status(403).json({
-        error: 'Forbidden',
+      sendApiError(req, res, {
         status: 403,
+        code: 'AUTH_ORIGIN_FORBIDDEN',
         message: 'CORS policy: This origin is not allowed access.',
+        retryable: false,
       });
       return;
     }

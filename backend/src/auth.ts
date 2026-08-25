@@ -38,6 +38,7 @@
 import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './middleware/structuredLogging';
+import { sendApiError } from './middleware/apiError';
 import Redis from 'ioredis';
 import { normalizeWalletAddress } from './walletUtils';
 import { walletAliasMappingService } from './walletAliasService';
@@ -550,10 +551,11 @@ export function requireAuth(
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
 
   if (!match) {
-    res.status(401).json({
-      error: 'Unauthorized',
+    sendApiError(req, res, {
       status: 401,
+      code: 'AUTH_BEARER_MISSING',
       message: 'Missing or malformed Authorization header. Expected: Bearer <token>',
+      retryable: false,
     });
     return;
   }
@@ -562,10 +564,11 @@ export function requireAuth(
     req.jwtPayload = verifyJwt(match[1]);
     next();
   } catch (err) {
-    res.status(401).json({
-      error: 'Unauthorized',
+    sendApiError(req, res, {
       status: 401,
+      code: 'AUTH_TOKEN_INVALID',
       message: err instanceof Error ? err.message : 'Invalid token',
+      retryable: false,
     });
   }
 }

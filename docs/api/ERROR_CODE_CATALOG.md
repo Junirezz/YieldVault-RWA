@@ -8,11 +8,9 @@ For client-side TypeScript error **shapes** (`ApiError`, `ValidationError`), see
 [ERROR_FORMAT.md](./ERROR_FORMAT.md). For pagination failures that surface as
 `400 Bad Request`, see [PAGINATION.md](./PAGINATION.md).
 
-> **Note:** REST responses today use the `error` + `status` + `message` triad.
-> A formal machine-readable registry on every endpoint is tracked in
-> [Issue #571](https://github.com/Junirezz/YieldVault-RWA/issues/571). Catalog
-> IDs below (e.g. `API_400_VALIDATION`) are **documentation-stable** identifiers
-> for integrators until that work lands.
+> **Note:** REST responses use the `error` + `status` + `code` + `message`+
+> `retryable` envelope. Catalog IDs below (e.g. `API_400_VALIDATION`) are
+> documentation-stable groupings; use the response `code` for branching.
 
 ---
 
@@ -48,7 +46,7 @@ guarantee an on-chain transaction succeeded until you confirm the ledger entry.
 
 ## 2. REST error shape
 
-### Canonical shape (preferred)
+### Canonical shape
 
 Most endpoints return JSON with at least:
 
@@ -56,24 +54,19 @@ Most endpoints return JSON with at least:
 {
   "error": "Bad Request",
   "status": 400,
+  "code": "VALIDATION_ERROR",
+  "retryable": false,
   "message": "Human-readable explanation"
 }
 ```
 
-Optional fields depend on the scenario (see catalog). The `error` field is a
-short **category label** (often mirroring the HTTP reason phrase). The `message`
-field carries **actionable detail**.
+Optional `details`, `correlationId`, and `traceId` fields depend on the
+scenario. The `error` field is a short category label; `code` is the stable
+machine-readable discriminator.
 
-### Minimal shape (legacy / admin helpers)
-
-Some admin routes return only:
-
-```json
-{ "error": "Missing or invalid walletAddress in request body" }
-```
-
-Treat missing `status` as implied by the HTTP response code. Prefer migrating
-callers to the canonical shape when building new integrations.
+All backend middleware and the application-level error handler use the
+canonical shape. Endpoint-specific `details` may contain additional context,
+but clients should branch on `code`, not on `message`.
 
 ---
 
@@ -422,12 +415,18 @@ curl -s -X POST "http://localhost:3000/api/v1/vault/deposits" \
 {
   "error": "Rate limit exceeded",
   "status": 429,
+  "code": "RATE_LIMIT_EXCEEDED",
   "message": "Too many requests. Please try again in 42 seconds.",
-  "retryAfter": 42
+  "retryable": true,
+  "retryAfter": 42,
+  "retryAfterSeconds": 42
 }
 ```
 
-**Remediation:** Sleep `retryAfter` seconds; reduce request rate.
+**Remediation:** Honor the `Retry-After` header, sleep `retryAfterSeconds`
+seconds, and retry with exponential backoff and jitter. Do not immediately
+retry non-idempotent mutations without an idempotency key. See
+[RATE_LIMITING.md](./RATE_LIMITING.md) for tier limits and recovery behavior.
 
 ### Idempotency conflict (409)
 

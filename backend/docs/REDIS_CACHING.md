@@ -14,6 +14,7 @@ LRU store when Redis is absent or temporarily unreachable.
 | `GET /api/v1/vault/apy` | 60 s | APY data from the nightly snapshot job |
 | `GET /api/v1/vault/metrics` | 60 s | High-level vault metrics |
 | `GET /api/v1/vault/apy/history` | 60 s | Historical APY chart data |
+| `GET /api/v1/vault/strategy` | 30 s | Read-only strategy selection preview |
 
 ---
 
@@ -63,6 +64,7 @@ All variables are optional. The backend runs fully without Redis.
 | `REDIS_URL` | _(unset)_ | Redis connection URL. Enables Redis caching **and** Redis-backed rate limiting when set. Example: `redis://localhost:6379` |
 | `CACHE_TTL_MS` | `60000` | Response cache TTL in milliseconds for vault/price endpoints |
 | `CACHE_VAULT_METRICS_TTL_MS` | _(alias for `CACHE_TTL_MS`)_ | Legacy alias, accepted in addition to `CACHE_TTL_MS` |
+| `CACHE_STRATEGY_TTL_MS` | `30000` | Response cache TTL for the strategy preview read endpoint |
 | `CACHE_MAX_ENTRIES` | `500` | Maximum entries kept in the in-memory LRU fallback store |
 | `REDIS_CACHE_KEY_PREFIX` | `cache:` | Redis key namespace. Useful when sharing a Redis instance across multiple services |
 | `REDIS_CACHE_CONNECT_TIMEOUT_MS` | `2000` | Timeout (ms) for the initial Redis TCP connection |
@@ -90,6 +92,10 @@ Cache entries are invalidated:
 
 2. **On APY snapshot** (nightly job): `apySnapshot.ts` calls
    `invalidateCache('GET:/api/v1/vault/apy')` after persisting the new snapshot.
+
+3. **On strategy configuration changes**: invalidate
+  `GET:/api/v1/vault/strategy` after a strategy mutation is introduced. The
+  current strategy route is a static preview and has no mutable state.
 
 3. **Admin API** (manual): operators can clear cache via:
    - `DELETE /admin/cache` — clears all entries (or a regex-filtered subset via

@@ -1,15 +1,37 @@
 # API Error Format
 
 This document defines the **canonical error shapes** returned by the YieldVault
-API client layer. All errors — whether from the network, an HTTP status, or
-client-side request validation — conform to one of the two shapes below.
+API and its frontend client layer. Backend failures use the REST envelope below;
+the frontend client preserves its stable backend `code` as `serverCode`.
 
 For a full list of REST, Soroban, and remediation guidance for integrators, see
 [ERROR_CODE_CATALOG.md](./ERROR_CODE_CATALOG.md).
 
 ---
 
-## 1. `ApiError` — Network & HTTP errors
+## 1. REST API error envelope
+
+Every backend error response uses this shape:
+
+```ts
+interface ApiErrorResponse {
+  error: string;             // HTTP category label
+  status: number;             // HTTP status code
+  code: string;               // Stable machine-readable code
+  message: string;            // Safe, actionable explanation
+  retryable: boolean;         // Whether retrying is appropriate
+  details?: unknown;          // Validation or endpoint-specific details
+  correlationId?: string;     // Support and distributed-tracing identifier
+  traceId?: string;            // Trace identifier when tracing is enabled
+}
+```
+
+Validation errors use `code: "VALIDATION_ERROR"` and `details` is an array of
+`{ code, field, message }` entries. Authentication failures use the stable
+codes `AUTH_BEARER_MISSING`, `AUTH_TOKEN_INVALID`, `AUTH_API_KEY_MISSING`, and
+`AUTH_API_KEY_INVALID`.
+
+## 2. `ApiError` — Network & HTTP errors
 
 Thrown by the `ApiClient` for any transport-level or HTTP-level failure.
 
@@ -28,6 +50,8 @@ interface ApiErrorShape {
   traceId?: string;         // x-trace-id header echoed from server
   correlationId?: string;   // X-Correlation-ID for distributed tracing
   details?: unknown;        // Raw response body (if parseable)
+  serverCode?: string;      // Backend ApiErrorResponse.code
+  serverError?: string;     // Backend ApiErrorResponse.error
 }
 ```
 

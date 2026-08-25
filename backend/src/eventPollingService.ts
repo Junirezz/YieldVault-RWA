@@ -31,6 +31,10 @@ export class EventPollingService {
   private lockValue: string = '';
   private lockRenewalTimer?: NodeJS.Timeout;
   private isLeader = false;
+  private lastSuccessfulPollAt: string | null = null;
+  private lastPollError: string | null = null;
+  private lastPollErrorAt: string | null = null;
+  private consecutivePollFailures = 0;
 
   constructor(config: EventPollingConfig) {
     this.config = config;
@@ -202,6 +206,34 @@ export class EventPollingService {
     return this.isLeader;
   }
 
+  public getHealth(): {
+    status: 'up' | 'degraded' | 'down';
+    running: boolean;
+    leader: boolean;
+    lastSuccessfulPollAt: string | null;
+    lastError: string | null;
+    lastErrorAt: string | null;
+    consecutiveFailures: number;
+  } {
+    const stale = !this.lastSuccessfulPollAt ||
+      Date.now() - Date.parse(this.lastSuccessfulPollAt) > this.config.pollIntervalMs * 3;
+    const status = !this.isRunning || (stale && this.consecutivePollFailures >= 3)
+      ? 'down'
+      : stale || this.consecutivePollFailures > 0
+        ? 'degraded'
+        : 'up';
+
+    return {
+      status,
+      running: this.isRunning,
+      leader: this.isLeader,
+      lastSuccessfulPollAt: this.lastSuccessfulPollAt,
+      lastError: this.lastPollError,
+      lastErrorAt: this.lastPollErrorAt,
+      consecutiveFailures: this.consecutivePollFailures,
+    };
+  }
+
   /**
    * Replays events for a specific ledger range.
    * Used by admin endpoint to trigger manual replay of known ledger ranges.
@@ -318,7 +350,10 @@ export class EventPollingService {
       const lastLedger = await this.getLastProcessedLedger();
       const currentLedger = await this.getCurrentLedger();
 
-      if (currentLedger <= lastLedger) return;
+      if (currentLedger <= lastLedger) {
+        this.recordPollSuccess();
+        return;
+      }
 
       const events = await this.fetchEventsForLedgerRange(lastLedger + 1, currentLedger);
 
@@ -330,11 +365,22 @@ export class EventPollingService {
       }
 
       await this.updateCursor(currentLedger);
+      this.recordPollSuccess();
     } catch (error) {
+      this.consecutivePollFailures += 1;
+      this.lastPollError = error instanceof Error ? error.message : 'Unknown error';
+      this.lastPollErrorAt = new Date().toISOString();
       logger.log('error', 'Event polling failed', {
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: this.lastPollError,
       });
     }
+  }
+
+  private recordPollSuccess(): void {
+    this.lastSuccessfulPollAt = new Date().toISOString();
+    this.lastPollError = null;
+    this.lastPollErrorAt = null;
+    this.consecutivePollFailures = 0;
   }
 
   private async getLastProcessedLedger(): Promise<number> {
@@ -545,6 +591,18 @@ export function stopEventPollingService(): void {
     });
     pollingService = null;
   }
+}
+
+export function getEventPollingHealth(): ReturnType<EventPollingService['getHealth']> {
+  return pollingService?.getHealth() ?? {
+    status: 'down',
+    running: false,
+    leader: false,
+    lastSuccessfulPollAt: null,
+    lastError: 'Event polling service is not initialized',
+    lastErrorAt: null,
+    consecutiveFailures: 0,
+  };
 }
 
 /**

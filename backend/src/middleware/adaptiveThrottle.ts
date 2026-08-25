@@ -126,8 +126,11 @@ export function adaptiveThrottleMiddleware(req: Request, res: Response, next: Ne
         res.status(429).json({
           error: 'Too many invalid requests',
           status: 429,
+          code: 'ADAPTIVE_THROTTLE',
           message: 'Adaptive throttle activated due to repeated invalid requests.',
+          retryable: true,
           retryAfter,
+          retryAfterSeconds: retryAfter,
         });
         return;
       }

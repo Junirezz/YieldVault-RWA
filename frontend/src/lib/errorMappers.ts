@@ -18,10 +18,13 @@
 export interface ServerErrorResponse {
   code?: string;
   message: string;
-  details?: {
-    field?: string;
-    [key: string]: unknown;
-  };
+  details?: ServerErrorDetail | ServerErrorDetail[];
+}
+
+interface ServerErrorDetail {
+  field?: string;
+  message?: string;
+  [key: string]: unknown;
 }
 
 export interface MappedFieldError {
@@ -59,19 +62,30 @@ export function mapServerError(
   if (error && typeof error === "object") {
     const err = error as ServerErrorResponse;
 
-    // Check if this is a field-level error
-    if (err.details?.field) {
+    const details = Array.isArray(err.details)
+      ? err.details
+      : err.details
+        ? [err.details]
+        : [];
+
+    // Validation responses may contain several field-level failures.
+    for (const detail of details) {
+      if (typeof detail.field !== "string" || !detail.field) {
+        continue;
+      }
       const fieldMessage =
-        typeof err.details.message === "string" ? err.details.message : err.message;
+        typeof detail.message === "string" ? detail.message : err.message;
       fieldErrors.push({
-        fieldName: err.details.field,
+        fieldName: detail.field,
         message: sanitizeErrorMessage(fieldMessage),
       });
-    } else if (err.message) {
+    }
+
+    if (fieldErrors.length === 0 && err.message) {
       // General error message
       generalError = sanitizeErrorMessage(err.message);
-    } else {
-      generalError = "An error occurred. Please try again.";
+    } else if (err.message) {
+      generalError = null;
     }
 
     if (fieldErrors.length === 0 && !generalError) {

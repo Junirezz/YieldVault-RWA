@@ -197,6 +197,25 @@ export function extractRateLimitKey(req: Request): string {
   return 'unknown';
 }
 
+/** Returns the authenticated/request wallet identity used for user quotas. */
+export function extractRateLimitUserKey(req: Request): string {
+  const authRequest = req as Request & {
+    jwtPayload?: { sub?: string };
+    authApiKeyTenantId?: string;
+  };
+  return authRequest.jwtPayload?.sub ||
+    authRequest.authApiKeyTenantId ||
+    (req.body?.walletAddress as string | undefined) ||
+    (Array.isArray(req.headers['x-wallet-address'])
+      ? req.headers['x-wallet-address'][0]
+      : req.headers['x-wallet-address']) ||
+    'anonymous';
+}
+
+export function extractRateLimitIpKey(req: Request): string {
+  return req.ip || 'unknown';
+}
+
 // ─── Redis Key Builder ───────────────────────────────────────────────────────
 
 /**
@@ -239,12 +258,18 @@ function sendRateLimitResponse(req: Request, res: Response, config: EndpointLimi
   res.status(429).json({
     error: 'Rate limit exceeded',
     status: 429,
+    code: 'RATE_LIMIT_EXCEEDED',
     message: `Too many requests. Please try again in ${retryAfter} seconds.`,
+    retryable: true,
     retryAfter,
+    retryAfterSeconds: retryAfter,
   });
 }
 
-function createInMemoryLimiter(config: EndpointLimiterConfig): RequestHandler {
+function createInMemoryLimiter(
+  config: EndpointLimiterConfig,
+  keyExtractor: (req: Request) => string = extractRateLimitKey,
+): RequestHandler {
   const entries = new Map<string, MemoryRateLimitEntry>();
   const appIds = new WeakMap<object, number>();
   let nextAppId = 1;
@@ -266,7 +291,7 @@ function createInMemoryLimiter(config: EndpointLimiterConfig): RequestHandler {
       appIds.set(appKey, appId);
     }
     const routePrefix = `${appId}:${tier}:${req.baseUrl || ''}${req.path || req.originalUrl || ''}`;
-    const key = buildRedisKey(routePrefix, extractRateLimitKey(req));
+    const key = buildRedisKey(routePrefix, keyExtractor(req));
     const isTierHarnessRoute =
       process.env.NODE_ENV === 'test' &&
       !req.baseUrl &&
@@ -309,14 +334,17 @@ function createInMemoryLimiter(config: EndpointLimiterConfig): RequestHandler {
  * Uses Redis store when available; falls back to in-memory store otherwise.
  * Fail-open: skips enforcement when Redis was configured but is currently unreachable.
  */
-export function createLimiter(config: EndpointLimiterConfig): RequestHandler {
+export function createLimiter(
+  config: EndpointLimiterConfig,
+  keyExtractor: (req: Request) => string = extractRateLimitKey,
+): RequestHandler {
   const client = redisClientManager.getClient();
   const redisConfigured = client !== null;
   const redisReady = redisConfigured && redisClientManager.isReady();
   const usingRedis = redisConfigured && redisReady;
 
   if (!redisConfigured) {
-    return createInMemoryLimiter(config);
+    return createInMemoryLimiter(config, keyExtractor);
   }
 
   const store = usingRedis
@@ -333,7 +361,7 @@ export function createLimiter(config: EndpointLimiterConfig): RequestHandler {
     standardHeaders: true,
     legacyHeaders: false,
     validate: false,
-    keyGenerator: (req: Request) => extractRateLimitKey(req),
+    keyGenerator: (req: Request) => keyExtractor(req),
     skip: (_req: Request) => {
       // Fail-open: bypass enforcement when Redis was configured but is unavailable
       if (redisConfigured && !redisReady) {
@@ -361,6 +389,16 @@ export const authLimiter: RequestHandler = createLimiter({
   max: config.auth.max,
   windowMs: config.auth.windowMs,
 });
+export const authIpLimiter: RequestHandler = createLimiter({
+  tier: 'auth-ip',
+  max: config.auth.max,
+  windowMs: config.auth.windowMs,
+}, extractRateLimitIpKey);
+export const authUserLimiter: RequestHandler = createLimiter({
+  tier: 'auth-user',
+  max: config.auth.max,
+  windowMs: config.auth.windowMs,
+}, extractRateLimitUserKey);
 
 /** Strict policy: prevents spamming mutation operations (deposits, withdrawals, admin writes). */
 export const writesLimiter: RequestHandler = createLimiter({
@@ -403,6 +441,11 @@ export const depositsLimiter: RequestHandler = (() => {
   }
   return createLimiter({ tier: 'deposits', max: config.deposits.max, windowMs: config.deposits.windowMs });
 })();
+export const depositsUserLimiter: RequestHandler = createLimiter({
+  tier: 'deposits-user',
+  max: config.deposits.max,
+  windowMs: config.deposits.windowMs,
+}, extractRateLimitUserKey);
 
 /** Backward-compatibility aliases */
 export const summaryLimiter = readsLimiter;

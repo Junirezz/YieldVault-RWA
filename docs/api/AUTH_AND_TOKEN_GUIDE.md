@@ -92,7 +92,10 @@ Client                          Server
 3. POST /api/v1/auth/login  →  { walletAddress, nonce, signature }
 ```
 
-All auth endpoints are rate-limited to 5 requests per minute per IP via `authLimiter`.
+All auth endpoints are limited to 5 requests per minute independently per IP
+and wallet identity via `authLimiter`. Clients must honor `Retry-After` on 429
+responses and use exponential backoff; do not immediately repeat login or
+nonce requests.
 
 ### Token Structure
 

@@ -13,6 +13,8 @@ import NodeCache from 'node-cache';
 import { loginHandler, nonceHandler, refreshHandler, requireAuth, verifyJwt } from './auth';
 import {
   authLimiter,
+  authIpLimiter,
+  authUserLimiter,
   writesLimiter,
   readsLimiter,
   adminLimiter,
@@ -108,7 +110,7 @@ import {
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
-import { startEventPollingService, stopEventPollingService } from './eventPollingService';
+import { getEventPollingHealth, startEventPollingService, stopEventPollingService } from './eventPollingService';
 import { eventOutboxService } from './eventOutbox';
 import { prisma, getPrismaRuntimeConfig } from './prisma';
 import { getPrismaClient } from './prismaClient';
@@ -198,6 +200,7 @@ import {
 } from './reconciliationReport';
 import { diagnosticsBundleHandler } from './diagnosticsBundle';
 import { errorBoundaryMiddleware } from './middleware/errorBoundary';
+import { apiErrorContractMiddleware, sendApiError } from './middleware/apiError';
 import {
   exportGovernanceSnapshots,
   listGovernanceSnapshots,
@@ -631,6 +634,7 @@ app.use(corsMiddleware);
 
 // Correlation ID must be first to inject on all requests
 app.use(correlationIdMiddleware);
+app.use(apiErrorContractMiddleware);
 
 // Structured logging with correlation IDs
 app.use(structuredLoggingMiddleware);
@@ -745,6 +749,7 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
 app.get('/health', async (_req: Request, res: Response) => {
   const dbHealth = await getDatabaseHealth();
   const prismaHealth = await getPrismaHealth();
+  const indexerHealth = getEventPollingHealth();
   const circuitSnapshot = sorobanCircuitBreaker.toHealthSnapshot();
   const lastIndexedLedger = await (async () => {
     try {
@@ -756,7 +761,7 @@ app.get('/health', async (_req: Request, res: Response) => {
   })();
 
   const health = {
-    status: 'healthy',
+    status: 'healthy' as 'healthy' | 'degraded' | 'unhealthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: nodeEnv,
@@ -769,6 +774,7 @@ app.get('/health', async (_req: Request, res: Response) => {
       databaseReplica: dbHealth.replica,
       prisma: prismaHealth,
       jobs: getJobHealthStatus(),
+      indexer: indexerHealth.status,
     },
     sorobanCircuitBreaker: circuitSnapshot,
   };
@@ -778,6 +784,9 @@ app.get('/health', async (_req: Request, res: Response) => {
     if (key === 'cache') return check === 'up' || check === 'degraded';
     return check === 'up';
   });
+
+  const anyOperational = Object.values(health.checks).some((check) => check === 'up' || check === 'degraded');
+  health.status = allHealthy ? 'healthy' : anyOperational ? 'degraded' : 'unhealthy';
 
   res.status(allHealthy ? 200 : 503).json(health);
 });
@@ -800,6 +809,7 @@ app.get('/ready', async (_req: Request, res: Response) => {
       stellarRpc: checkStellarRpcDependency(),
       database: dbHealth.primary === 'up',
       prisma: prismaHealth === 'up',
+      indexer: getEventPollingHealth().status === 'up',
     },
   };
 
@@ -808,7 +818,8 @@ app.get('/ready', async (_req: Request, res: Response) => {
     readiness.dependencies.cache &&
     readiness.dependencies.stellarRpc &&
     readiness.dependencies.database &&
-    readiness.dependencies.prisma;
+    readiness.dependencies.prisma &&
+    readiness.dependencies.indexer;
 
   readiness.ready = isReady;
 
@@ -847,14 +858,14 @@ app.use('/api', listRouter);
  * POST /api/v1/auth/login
  * Issue 15-min access JWT + 7-day refresh token on wallet authentication.
  */
-apiV1.post('/auth/nonce', authLimiter, validate({ body: NonceRequestSchema }), nonceHandler);
-apiV1.post('/auth/login', authLimiter, validate({ body: LoginSchema }), requireSignedWalletAction('login'), loginHandler);
+apiV1.post('/auth/nonce', authIpLimiter, authLimiter, authUserLimiter, validate({ body: NonceRequestSchema }), nonceHandler);
+apiV1.post('/auth/login', authIpLimiter, authLimiter, authUserLimiter, validate({ body: LoginSchema }), requireSignedWalletAction('login'), loginHandler);
 
 /**
  * POST /api/v1/auth/refresh
  * Rotate the refresh token and issue a new access JWT.
  */
-apiV1.post('/auth/refresh', authLimiter, validate({ body: RefreshSchema }), refreshHandler);
+apiV1.post('/auth/refresh', authIpLimiter, authLimiter, authUserLimiter, validate({ body: RefreshSchema }), refreshHandler);
 
 // Admin routes share API-key authentication and role-based authorization.
 app.use('/admin', validateApiKey, adminRbacMiddleware);
@@ -4771,6 +4782,9 @@ healthProbeService.register('prisma', async () => {
 healthProbeService.register('queue', async () => {
   return getJobHealthStatus() === 'up' ? 'up' : 'down';
 });
+healthProbeService.register('indexer', async () => {
+  return getEventPollingHealth().status === 'up' ? 'up' : 'down';
+});
 
 /**
  * GET /health/probes
@@ -5216,15 +5230,43 @@ if (process.env.NODE_ENV !== 'test') {
   void initializeJobGovernance();
 }
 
+// Normalize dependency and unhandled application failures before the 404 route.
+app.use(errorBoundaryMiddleware);
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  const status =
+    typeof err === 'object' && err !== null && 'statusCode' in err &&
+    typeof (err as { statusCode?: unknown }).statusCode === 'number'
+      ? (err as { statusCode: number }).statusCode
+      : 500;
+
+  sendApiError(req, res, {
+    status: status >= 400 && status < 600 ? status : 500,
+    code: status >= 400 && status < 500 ? 'REQUEST_ERROR' : 'INTERNAL_ERROR',
+    message:
+      status >= 500
+        ? 'An unexpected server error occurred. Please retry shortly.'
+        : err instanceof Error
+          ? err.message
+          : 'The request could not be completed.',
+    retryable: status >= 500,
+  });
+});
+
 // Catch-all 404 handler. Must be the last middleware registered so it only
 // fires for requests no route above matched, instead of Express's default
 // plain-text/HTML 404 page.
 app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Not Found',
+  sendApiError(req, res, {
     status: 404,
-    path: req.originalUrl,
+    code: 'ROUTE_NOT_FOUND',
     message: `Cannot ${req.method} ${req.originalUrl}`,
+    details: { path: req.originalUrl },
+    retryable: false,
   });
 });
 

@@ -3,7 +3,8 @@ import { emailService } from './emailService';
 import { logger } from './middleware/structuredLogging';
 import { allowlistMiddleware } from './middleware/allowlist';
 import { triggerCacheInvalidation, registerInvalidationHook } from './middleware/cache';
-import { depositsLimiter } from './rateLimiter';
+import { depositsLimiter, depositsUserLimiter } from './rateLimiter';
+import { cacheMiddleware } from './middleware/cache';
 import {
   idempotencyStore,
   IdempotencyConflictError,
@@ -39,6 +40,7 @@ import Decimal from 'decimal.js';
 const router = Router();
 const ZERO = new Decimal(0);
 const DEFAULT_SHARE_PRICE = new Decimal(1);
+const STRATEGY_CACHE_TTL_MS = parseInt(process.env.CACHE_STRATEGY_TTL_MS || '30000', 10);
 
 // Register cache invalidation hooks for transaction state changes
 registerInvalidationHook((eventType) => {
@@ -629,6 +631,7 @@ router.post(
   depositsLimiter,
   invalidateReadCaches,
   requireSignedWalletAction('deposit'),
+  depositsUserLimiter,
   allowlistMiddleware,
   validate({ body: VaultDepositBodySchema }),
   createTimeoutFor.write(),
@@ -645,6 +648,7 @@ router.post(
   depositsLimiter,
   invalidateReadCaches,
   requireSignedWalletAction('withdrawal'),
+  depositsUserLimiter,
   allowlistMiddleware,
   validate({ body: VaultWithdrawalBodySchema }),
   withdrawalDailyLimitMiddleware(),
@@ -664,6 +668,7 @@ router.post(
   depositsLimiter,
   invalidateReadCaches,
   requireSignedWalletAction('deposit'),
+  depositsUserLimiter,
   requireFlag('deposit-v2'),
   validate({ body: VaultDepositBodySchema }),
   (req: Request, res: Response) => handleVaultOperation(req, res, 'deposit'),
@@ -673,6 +678,14 @@ router.post(
  * POST /api/v1/vault/strategy
  * Gated behind the "strategy-selection" feature flag.
  */
+router.get('/strategy', cacheMiddleware({ ttl: STRATEGY_CACHE_TTL_MS }), (_req: Request, res: Response) => {
+  res.status(200).json({
+    message: 'Strategy selection endpoint (v2 preview)',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (_req: Request, res: Response) => {
 router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (req: Request, res: Response) => {
   const strategyId = typeof req.body?.strategyId === 'string' ? req.body.strategyId : 'default';
   const previousStrategyId =

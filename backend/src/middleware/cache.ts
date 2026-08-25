@@ -145,8 +145,12 @@ export function cacheMiddleware(options: CacheOptions) {
       return;
     }
 
-    // R10: skip caching for authenticated requests unless explicitly opted-in
-    if (!options.sharedCache && req.headers['authorization']) {
+    // R10: skip caching for authenticated or identity-scoped requests unless explicitly opted-in.
+    // The cache key does not include credentials, so these responses must never be shared.
+    if (
+      !options.sharedCache &&
+      (req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-wallet-address'])
+    ) {
       next();
       return;
     }
