@@ -10,7 +10,8 @@ export type FunnelStage =
   | "withdrawal_initiated"
   | "withdrawal_completed"
   | "withdrawal_failed"
-  | "vault_selected";
+  | "vault_selected"
+  | "error";
 
 export interface AnalyticsEvent {
   stage: FunnelStage;

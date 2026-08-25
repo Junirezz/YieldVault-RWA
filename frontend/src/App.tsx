@@ -178,44 +178,50 @@ function AppContent() {
                 <Route
                   path="/"
                   element={
-                    <LazyHome
-                      walletAddress={walletAddress}
-                      usdcBalance={usdcBalance}
-                      xlmBalance={xlmBalance}
-                    />
+                    <ErrorBoundary>
+                      <LazyHome
+                        walletAddress={walletAddress}
+                        usdcBalance={usdcBalance}
+                        xlmBalance={xlmBalance}
+                      />
+                    </ErrorBoundary>
                   }
                 />
                 <Route
                   path="/portfolio"
                   element={
-                    <LazyPortfolio
-                      walletAddress={walletAddress}
-                    />
+                    <ErrorBoundary>
+                      <LazyPortfolio walletAddress={walletAddress} />
+                    </ErrorBoundary>
                   }
                 />
                 <Route
                   path="/analytics"
                   element={
-                    <FeatureGate flag="ANALYTICS_PAGE">
-                      <LazyAnalytics />
-                    </FeatureGate>
+                    <ErrorBoundary>
+                      <FeatureGate flag="ANALYTICS_PAGE">
+                        <LazyAnalytics />
+                      </FeatureGate>
+                    </ErrorBoundary>
                   }
                 />
-                <Route path="/transactions" element={<LazyTransactionHistory walletAddress={walletAddress} />} />
-                <Route path="/compare" element={<LazyVaultComparison />} />
-                <Route path="/strategies/:strategyId" element={<StrategyDetail walletAddress={walletAddress} />} />
-                <Route path="/receipt/:txHash" element={<TransactionReceipt />} />
-                <Route path="/settings" element={<LazySettings />} />
-                <Route path="/ui-kit" element={<LazyUIPreview />} />
+                <Route path="/transactions" element={<ErrorBoundary><LazyTransactionHistory walletAddress={walletAddress} /></ErrorBoundary>} />
+                <Route path="/compare" element={<ErrorBoundary><LazyVaultComparison /></ErrorBoundary>} />
+                <Route path="/strategies/:strategyId" element={<ErrorBoundary><StrategyDetail walletAddress={walletAddress} /></ErrorBoundary>} />
+                <Route path="/receipt/:txHash" element={<ErrorBoundary><TransactionReceipt /></ErrorBoundary>} />
+                <Route path="/settings" element={<ErrorBoundary><LazySettings /></ErrorBoundary>} />
+                <Route path="/ui-kit" element={<ErrorBoundary><LazyUIPreview /></ErrorBoundary>} />
                 <Route
                   path="/admin"
                   element={
-                    <ProtectedRoute role={role} allow={["admin"]}>
-                      <Admin walletAddress={walletAddress} />
-                    </ProtectedRoute>
+                    <ErrorBoundary>
+                      <ProtectedRoute role={role} allow={["admin"]}>
+                        <Admin walletAddress={walletAddress} />
+                      </ProtectedRoute>
+                    </ErrorBoundary>
                   }
                 />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
               </SentryRoutes>
             </Suspense>
           </main>

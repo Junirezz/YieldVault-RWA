@@ -47,7 +47,11 @@ export function useVaultAnalytics() {
     emitAnalytics(stage, amount != null ? { amount } : undefined);
   }, []);
 
-  return { trackDeposit, trackWithdrawal };
+  const trackError = useCallback((error: Error, context?: string) => {
+    emitAnalytics("error", { message: error.message, context });
+  }, []);
+
+  return { trackDeposit, trackWithdrawal, trackError };
 }
 
 export { subscribeToAnalytics };
