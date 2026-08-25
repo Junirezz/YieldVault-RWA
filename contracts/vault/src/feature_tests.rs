@@ -101,8 +101,8 @@ fn test_emergency_proposal_rejects_non_primary() {
     );
     assert_eq!(
         result.unwrap_err().unwrap(),
-        VaultError::UnauthorizedCaller,
-        "non-primary approver must be rejected with UnauthorizedCaller"
+        VaultError::RescueUnauthorized,
+        "non-primary approver must be rejected with RescueUnauthorized"
     );
 }
 
@@ -321,7 +321,7 @@ fn test_role_restricted_pausability_controls() {
 
     let vault_id = env.register(crate::YieldVault, ());
     let vault = crate::YieldVaultClient::new(&env, &vault_id);
-    vault.initialize(&admin, &usdc).unwrap();
+    vault.initialize(&admin, &usdc);
 
     let pauser = Address::generate(&env);
     let unauthorized = Address::generate(&env);
@@ -330,27 +330,106 @@ fn test_role_restricted_pausability_controls() {
     assert_eq!(vault.pauser(), None);
 
     // Admin configures pauser role
-    vault.set_pauser(&Some(pauser.clone())).unwrap();
+    vault.set_pauser(&Some(pauser.clone()));
     assert_eq!(vault.pauser(), Some(pauser.clone()));
 
     // Designated pauser can pause with role
-    vault.pause_with_role(&pauser, &PauseReason::SecurityIncident).unwrap();
+    vault.pause_with_role(&pauser, &PauseReason::SecurityIncident);
     assert!(vault.is_paused());
     assert_eq!(vault.pause_reason(), Some(PauseReason::SecurityIncident));
 
     // Designated pauser can unpause with role
-    vault.unpause_with_role(&pauser).unwrap();
+    vault.unpause_with_role(&pauser);
     assert!(!vault.is_paused());
     assert_eq!(vault.pause_reason(), None);
 
     // Admin can also pause and unpause with role
-    vault.pause_with_role(&admin, &PauseReason::Maintenance).unwrap();
+    vault.pause_with_role(&admin, &PauseReason::Maintenance);
     assert!(vault.is_paused());
 
-    vault.unpause_with_role(&admin).unwrap();
+    vault.unpause_with_role(&admin);
     assert!(!vault.is_paused());
 
     // Admin clears pauser role
-    vault.set_pauser(&None).unwrap();
+    vault.set_pauser(&None);
     assert_eq!(vault.pauser(), None);
+}
+
+// ── Telemetry & debugging hooks (Issue #1174) ───────────────────────────────
+
+#[test]
+fn test_diagnostics_are_gated_off_by_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, _, _) = setup_vault(&env);
+
+    assert!(
+        !vault.diagnostics_enabled(),
+        "the debug hook must not be open on a freshly initialised vault"
+    );
+    assert_eq!(
+        vault.try_diagnostics(),
+        Err(Ok(VaultError::ContractPaused)),
+        "a disabled diagnostics hook must refuse to answer"
+    );
+}
+
+#[test]
+fn test_diagnostics_snapshot_reports_live_vault_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &10_000);
+    vault.deposit(&user, &10_000);
+
+    vault.set_diagnostics_enabled(&true);
+    assert!(vault.diagnostics_enabled());
+
+    let snap = vault.diagnostics();
+    assert_eq!(snap.total_shares, vault.total_shares());
+    assert_eq!(snap.idle_assets, 10_000);
+    assert_eq!(snap.share_price, vault.share_price());
+    assert_eq!(snap.fee_bps, vault.fee_bps());
+    assert_eq!(snap.storage_version, vault.storage_version());
+    assert_eq!(snap.withdrawal_queue_length, 0);
+    assert!(!snap.paused);
+    assert_eq!(snap.health, crate::telemetry::VaultHealth::Nominal);
+    assert_eq!(snap.ledger_sequence, env.ledger().sequence());
+}
+
+#[test]
+fn test_diagnostics_report_halted_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &5_000);
+    vault.deposit(&user, &5_000);
+
+    vault.set_diagnostics_enabled(&true);
+    vault.pause(&PauseReason::SecurityIncident);
+
+    // The hook must keep answering while the vault is halted — that is exactly
+    // when an operator needs it.
+    let snap = vault.diagnostics();
+    assert!(snap.paused);
+    assert_eq!(snap.health, crate::telemetry::VaultHealth::Halted);
+}
+
+#[test]
+fn test_diagnostics_can_be_disabled_again() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, _, _) = setup_vault(&env);
+
+    vault.set_diagnostics_enabled(&true);
+    assert!(vault.diagnostics().total_shares == 0);
+
+    vault.set_diagnostics_enabled(&false);
+    assert_eq!(vault.try_diagnostics(), Err(Ok(VaultError::ContractPaused)));
 }

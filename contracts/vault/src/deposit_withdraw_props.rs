@@ -235,8 +235,13 @@ proptest! {
         let user = Address::generate(&env);
         let treasury = Address::generate(&env);
 
-        client.set_fee_bps(&fee_bps);
-        client.set_treasury(&treasury);
+        // Fee bps and treasury are behind the sensitive-parameter timelock
+        // (#969): queue the change, then execute it immediately — the default
+        // delay is zero until an admin configures one.
+        client.queue_fee_bps_change(&fee_bps);
+        client.execute_fee_bps_change();
+        client.queue_treasury_change(&treasury);
+        client.execute_treasury_change();
 
         mint(&env, &token, &user, deposit_amount);
         match client.try_deposit(&user, &deposit_amount) {
@@ -301,11 +306,11 @@ proptest! {
         amount_a in 100i128..=500_000i128,
         amount_b in 100i128..=500_000i128,
     ) {
-        use crate::{DepositEntry, VaultError};
+        use crate::DepositEntry;
         use soroban_sdk::Vec;
 
         // ── Vault A: individual deposits ──────────────────────────────────────
-        let (env_a, client_a, admin_a, token_a) = setup();
+        let (env_a, client_a, _admin_a, token_a) = setup();
         let user_a1 = Address::generate(&env_a);
         let user_a2 = Address::generate(&env_a);
 

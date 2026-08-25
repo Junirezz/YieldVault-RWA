@@ -72,11 +72,13 @@ mod fuzz_math;
 mod deposit_withdraw_props;
 #[cfg(test)]
 mod invariant_tests;
+pub mod liquidation_safeguards;
 pub mod math;
 #[cfg(test)]
 mod oracle_tests;
 pub mod packed_storage;
 pub mod permissions;
+pub mod recovery_sequence;
 #[cfg(test)]
 pub mod proxy_tests;
 pub mod storage_registry;
@@ -92,6 +94,7 @@ pub mod withdrawal_queue_safety;
 pub mod oracle;
 pub mod strategy_heartbeat;
 pub mod strategy_registration;
+pub mod telemetry;
 pub mod timelock;
 pub mod whitelist;
 
@@ -230,6 +233,9 @@ pub enum DataKeyExt {
     PendingFeeBps,
     PendingTreasury,
     PendingPriceOracle,
+
+    // Issue #1174: gate for the contract telemetry / debugging hook
+    DiagnosticsEnabled,
 }
 
 #[contracttype]
@@ -2495,24 +2501,6 @@ impl YieldVault {
             .unwrap_or(0)
     }
 
-    /// Test helper: appends a synthetic queue entry for `process_withdrawal_queue` tests.
-    /// Only compiled and callable in test builds — not available on mainnet WASM.
-    #[cfg(test)]
-    #[doc(hidden)]
-    pub fn test_seed_withdrawal_queue_entry(env: Env, user: Address, shares: i128, assets: i128) {
-        let tail = Self::withdrawal_queue_tail(&env);
-        let entry = WithdrawalQueueEntry {
-            user,
-            shares,
-            assets,
-            enqueued_at: env.ledger().timestamp(),
-        };
-        env.storage()
-            .instance()
-            .set(&DataKey::WithdrawalQueueEntry(tail), &entry);
-        Self::set_withdrawal_queue_tail(&env, tail.checked_add(1).expect("queue overflow"));
-    }
-
     /// Process queued withdrawals in deterministic FIFO order while liquidity allows.
     pub fn process_withdrawal_queue(env: Env, max_entries: u32) -> u32 {
         if max_entries == 0 {
@@ -3782,6 +3770,64 @@ impl YieldVault {
             Ok(()) => storage_registry::ValidateRegistryResult { keys, valid: true },
             Err(_) => storage_registry::ValidateRegistryResult { keys, valid: false },
         }
+    }
+
+    // ── Telemetry & debugging hooks (Issue #1174) ───────────────────────────
+
+    /// Enables or disables the diagnostics hook. Admin-only.
+    ///
+    /// Diagnostics are off by default, so turning them on is an explicit,
+    /// auditable admin action rather than a permanently open entry point.
+    pub fn set_diagnostics_enabled(env: Env, enabled: bool) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).ok_or(VaultError::RescueUnauthorized)?;
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::DiagnosticsEnabled, &enabled);
+        env.events()
+            .publish((symbol_short!("diagset"),), (enabled,));
+        Ok(())
+    }
+
+    /// Whether the diagnostics hook is currently enabled.
+    pub fn diagnostics_enabled(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::DiagnosticsEnabled)
+            .unwrap_or(false)
+    }
+
+    /// Returns a consistent, aggregate-only snapshot of vault state.
+    ///
+    /// Gated behind [`Self::set_diagnostics_enabled`]. The snapshot contains no
+    /// addresses, per-user balances, or credentials — see [`telemetry`] for the
+    /// field policy and the tests that enforce it.
+    ///
+    /// Reads only vault-local storage: unlike [`Self::total_assets`] it never
+    /// calls the strategy or the oracle, so it stays callable while an external
+    /// dependency is exactly what is broken.
+    ///
+    /// # Errors
+    /// - [`VaultError::ContractPaused`] — diagnostics are disabled.
+    pub fn diagnostics(env: Env) -> Result<telemetry::VaultDiagnostics, VaultError> {
+        telemetry::require_enabled(Self::diagnostics_enabled(env.clone()))?;
+
+        let state = Self::get_state(&env);
+        let queue_length = Self::withdrawal_queue_length(env.clone());
+        let inputs = telemetry::DiagnosticInputs {
+            ledger_sequence: env.ledger().sequence(),
+            timestamp: env.ledger().timestamp(),
+            storage_version: Self::storage_version(env.clone()),
+            total_shares: state.total_shares,
+            idle_assets: state.total_assets,
+            share_price: Self::share_price(env.clone()),
+            treasury_balance: Self::treasury_balance(env.clone()),
+            fee_bps: Self::fee_bps(env.clone()),
+            withdrawal_queue_length: queue_length,
+            paused: state.is_paused,
+            min_liquidity_buffer: Self::min_liquidity_buffer(env.clone()),
+        };
+        Ok(telemetry::build_snapshot(&inputs))
     }
 
     /// Read-only: returns contract metadata such as version and simple config flags.

@@ -65,7 +65,8 @@ fn test_formal_theorem_2_solvency_and_balance_conservation() {
     env.mock_all_auths();
 
     let (vault, usdc_sa, _) = setup_formal_vault(&env);
-    let users: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
+    // Fixed-size array keeps this `no_std` test module free of an `alloc` dependency.
+    let users: [Address; 5] = core::array::from_fn(|_| Address::generate(&env));
 
     for (i, user) in users.iter().enumerate() {
         let amount = ((i + 1) * 2000) as i128;
