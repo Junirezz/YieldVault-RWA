@@ -6,7 +6,7 @@
 use soroban_sdk::{symbol_short, Address, Env};
 
 /// Emitted when the vault is paused.
-/// 
+///
 /// # Fields
 /// - `actor`: The address that initiated the pause (typically admin)
 /// - `reason`: Enumerated pause reason code (0=None, 1=SecurityIncident, 2=OracleFailure, 3=LiquidityCrisis, 4=Governance, 5=Maintenance, 6=Other)

@@ -75,9 +75,8 @@ jobs:
         continue-on-error: true
 
       - name: Run cargo-deny (supply chain security)
-        continue-on-error: true
         run: |
-          cargo install cargo-deny
+          cargo install cargo-deny --version 0.18.3 --locked
           cargo deny check advisories
 
       - name: Check for unsafe code
@@ -102,3 +101,21 @@ jobs:
         run: |
           cd contracts/vault
           cargo +nightly fuzz run share_price_math -- -max_total_time=60
+
+      - name: Notify Slack on security audit failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SECURITY_SLACK_WEBHOOK_URL secret is not set; skipping Slack notification."
+            exit 0
+          fi
+
+          text="🚨 Security audit failed on *${GITHUB_REPOSITORY}* (${GITHUB_REF_NAME}, run <${RUN_URL}|#${GITHUB_RUN_ID}>). Review cargo-audit / cargo-deny / fuzz findings before merging."
+          payload=$(jq -n --arg text "$text" '{text: $text}')
+          curl --fail --silent --show-error -X POST \
+            -H "Content-Type: application/json" \
+            --data "$payload" \
+            "$SLACK_WEBHOOK_URL"

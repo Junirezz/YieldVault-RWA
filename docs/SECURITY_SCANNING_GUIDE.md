@@ -235,6 +235,21 @@ This allows Slither to run analysis even if your project doesn't compile (e.g., 
 
 ---
 
+## 🔔 Slack Notifications on Critical Findings
+
+`rust-security.yml` posts to Slack whenever the dependency-audit job fails (unfixable High/Critical `cargo audit`/`npm audit` findings, a `cargo-deny` advisory hit, or a share-price fuzz crash):
+
+1. Create a Slack [Incoming Webhook](https://api.slack.com/messaging/webhooks) for the channel that should receive alerts.
+2. Add its URL as the repository secret `SECURITY_SLACK_WEBHOOK_URL` (Settings → Secrets and variables → Actions).
+3. If the secret is unset (e.g. on a fork), the notification step logs a message and exits cleanly — it does not fail the build.
+
+## 🚫 CI Failure Policy
+
+- `cargo audit` / `npm audit`: fails the job on **unfixable High/Critical** dependency vulnerabilities (see `scripts/dependency-audit.js`).
+- `cargo-deny check advisories`: fails the job on any advisory not explicitly ignored in `deny.toml`.
+- `cargo fuzz run share_price_math`: fails the job on any crash found within the 60s budget.
+- `cargo clippy` on `share-price-math` remains `continue-on-error` — lint warnings are visibility-only, not a merge blocker.
+
 ## 📨 PR Integration
 
 ### Automatic Checks

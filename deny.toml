@@ -1,0 +1,11 @@
+# cargo-deny configuration for supply-chain security checks (CI: rust-security.yml).
+#
+# Only the `advisories` check is run in CI today. Entries below are ignored
+# only after triage; see contracts/.false-positives.md for the rationale and
+# docs/FALSE_POSITIVE_HANDLING.md for the process.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0097", # rand: unsound only with log+thread_rng+custom logger; not used here
+    "RUSTSEC-2024-0388", # derivative: unmaintained (informational), no known exploit
+    "RUSTSEC-2024-0436", # paste: unmaintained (informational), no known exploit
+]

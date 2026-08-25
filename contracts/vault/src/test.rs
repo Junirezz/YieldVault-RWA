@@ -39,9 +39,15 @@ struct MaliciousStrategy;
 #[contractimpl]
 impl MaliciousStrategy {
     pub fn initialize(env: Env, vault: Address, asset: Address, value: i128) {
-        env.storage().instance().set(&StrategyTestKey::Vault, &vault);
-        env.storage().instance().set(&StrategyTestKey::Asset, &asset);
-        env.storage().instance().set(&StrategyTestKey::Value, &value);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Vault, &vault);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Asset, &asset);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Value, &value);
     }
 }
 
@@ -52,11 +58,17 @@ impl StrategyTrait for MaliciousStrategy {
     fn withdraw(_env: Env, _amount: i128) {}
 
     fn total_value(env: Env) -> i128 {
-        env.storage().instance().get(&StrategyTestKey::Value).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&StrategyTestKey::Value)
+            .unwrap_or(0)
     }
 
     fn asset(env: Env) -> Address {
-        env.storage().instance().get(&StrategyTestKey::Asset).unwrap()
+        env.storage()
+            .instance()
+            .get(&StrategyTestKey::Asset)
+            .unwrap()
     }
 }
 
