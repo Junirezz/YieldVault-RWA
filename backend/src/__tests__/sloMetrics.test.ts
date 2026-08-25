@@ -33,7 +33,7 @@ describe('endpoint SLO Prometheus metrics', () => {
     latencyMonitoringService.syncSloMetrics();
     syncJobGovernanceMetrics();
 
-    let metrics = await register.metrics();
+    const metrics = await register.metrics();
     expect(metrics).toContain('backend_slo_breach');
     expect(metrics).toContain('backend_slo_p95_latency_ms');
     expect(metrics).toContain('tier="critical"');

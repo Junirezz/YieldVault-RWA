@@ -448,7 +448,7 @@ describe('EventOutboxService', () => {
 
   describe('end-to-end flow', () => {
     it('completes the full outbox lifecycle', async () => {
-      let deliveredPayloads: unknown[] = [];
+      const deliveredPayloads: unknown[] = [];
       global.fetch = jest.fn(async (_url, init) => {
         if (init?.body && String(init.body).includes('webhook.verification')) {
           const body = JSON.parse(String(init.body));

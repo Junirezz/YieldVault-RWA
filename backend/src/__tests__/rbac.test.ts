@@ -81,7 +81,7 @@ describe('RBAC', () => {
       const create = await request(app)
         .post('/admin/webhooks')
         .set('Authorization', `ApiKey ${adminKey}`)
-        .send({ url: 'https://example.com/hook', eventTypes: ['transaction.created'] });
+        .send({ url: 'https://example.com/hook', eventTypes: ['transaction.deposit.created'] });
 
       expect(create.status).toBe(201);
       const id = create.body.endpoint.id;
@@ -99,7 +99,7 @@ describe('RBAC', () => {
       const create = await request(app)
         .post('/admin/webhooks')
         .set('Authorization', `ApiKey ${adminKey}`)
-        .send({ url: 'https://example.com/hook2', eventTypes: ['transaction.created'] });
+        .send({ url: 'https://example.com/hook2', eventTypes: ['transaction.deposit.created'] });
 
       const id = create.body.endpoint.id;
 

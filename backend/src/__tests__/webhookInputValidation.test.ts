@@ -259,7 +259,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 201 for a minimal valid payload', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook' });
 
     expect(res.status).toBe(201);
@@ -271,7 +271,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 201 for a full valid payload', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({
         url: 'https://example.com/hook',
         eventTypes: ['transaction.deposit.created'],
@@ -288,7 +288,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when url is missing', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: true });
 
     expect(res.status).toBe(400);
@@ -300,7 +300,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when url is not a valid URL', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'not-a-url' });
 
     expect(res.status).toBe(400);
@@ -310,7 +310,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 for an unsupported protocol', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'ftp://example.com/hook' });
 
     expect(res.status).toBe(400);
@@ -319,7 +319,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 for an unknown event type', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook', eventTypes: ['transaction.unknown'] });
 
     expect(res.status).toBe(400);
@@ -329,7 +329,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when eventTypes is an empty array', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook', eventTypes: [] });
 
     expect(res.status).toBe(400);
@@ -338,7 +338,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when secret is too short', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook', secret: 'tiny' });
 
     expect(res.status).toBe(400);
@@ -348,7 +348,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 for unknown extra fields', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook', injected: 'bad' });
 
     expect(res.status).toBe(400);
@@ -357,7 +357,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when enabled is not a boolean', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook', enabled: 'yes' });
 
     expect(res.status).toBe(400);
@@ -366,7 +366,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('returns 400 when url is a number', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 12345 });
 
     expect(res.status).toBe(400);
@@ -375,7 +375,7 @@ describe('POST /admin/webhooks – input validation via HTTP', () => {
   it('includes structured errors array in validation failure response', async () => {
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: 'bad-value' });
 
     expect(res.status).toBe(400);
@@ -396,7 +396,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
     // Create a fresh endpoint to update in each test
     const res = await request(app)
       .post('/admin/webhooks')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'https://example.com/hook' });
 
     endpointId = res.body.endpoint.id as string;
@@ -405,7 +405,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 200 for a valid enabled update', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: false });
 
     expect(res.status).toBe(200);
@@ -415,7 +415,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 200 for a valid eventTypes update', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ eventTypes: ['transaction.deposit.created'] });
 
     expect(res.status).toBe(200);
@@ -425,7 +425,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for an empty body', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({});
 
     expect(res.status).toBe(400);
@@ -435,7 +435,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for an invalid url in update', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ url: 'javascript://xss' });
 
     expect(res.status).toBe(400);
@@ -444,7 +444,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for an empty eventTypes array in update', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ eventTypes: [] });
 
     expect(res.status).toBe(400);
@@ -453,7 +453,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for an unknown event type in update', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ eventTypes: ['transaction.bogus'] });
 
     expect(res.status).toBe(400);
@@ -462,7 +462,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for a secret shorter than 8 chars', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ secret: 'abc' });
 
     expect(res.status).toBe(400);
@@ -471,7 +471,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 400 for unknown extra fields', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: true, injected: 'bad' });
 
     expect(res.status).toBe(400);
@@ -480,7 +480,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('returns 404 for a non-existent endpoint id', async () => {
     const res = await request(app)
       .patch('/admin/webhooks/wh_nonexistent')
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: false });
 
     expect(res.status).toBe(404);
@@ -489,7 +489,7 @@ describe('PATCH /admin/webhooks/:id – input validation via HTTP', () => {
   it('includes structured errors in validation failure response', async () => {
     const res = await request(app)
       .patch(`/admin/webhooks/${endpointId}`)
-      .set('x-api-key', ADMIN_KEY)
+      .set('Authorization', `ApiKey ${ADMIN_KEY}`)
       .send({ enabled: 'not-a-bool' });
 
     expect(res.status).toBe(400);

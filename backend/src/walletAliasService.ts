@@ -354,7 +354,7 @@ export class WalletAliasMappingService {
   }
 
   private async createCanonicalId(tx: PrismaTransaction): Promise<string> {
-    while (true) {
+    for (;;) {
       this.canonicalIdCounter += 1;
       const id = `wallet-alias:${this.canonicalIdCounter}`;
       const existing = await tx.walletCanonicalIdentity.findUnique({ where: { id } });

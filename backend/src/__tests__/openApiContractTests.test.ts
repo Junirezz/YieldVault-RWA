@@ -146,8 +146,11 @@ describe('OpenAPI contract: GET /api/v1/vault/summary', () => {
 
   it('numeric fields are finite numbers', async () => {
     const res = await request(app).get('/api/v1/vault/summary');
-    expect(Number.isFinite(res.body.totalAssets)).toBe(true);
-    expect(Number.isFinite(res.body.totalShares)).toBe(true);
+    // totalAssets/totalShares/sharePrice are Decimal-backed strings (to avoid
+    // floating-point precision loss), not numbers — verify they parse cleanly.
+    expect(Number.isFinite(Number(res.body.totalAssets))).toBe(true);
+    expect(Number.isFinite(Number(res.body.totalShares))).toBe(true);
+    expect(Number.isFinite(Number(res.body.sharePrice))).toBe(true);
     expect(Number.isFinite(res.body.apy)).toBe(true);
   });
 
@@ -159,7 +162,7 @@ describe('OpenAPI contract: GET /api/v1/vault/summary', () => {
 
   it('does not contain unexpected extra fields (additionalProperties: false)', async () => {
     const res = await request(app).get('/api/v1/vault/summary');
-    const allowedKeys = new Set(['totalAssets', 'totalShares', 'apy', 'timestamp']);
+    const allowedKeys = new Set(['totalAssets', 'totalShares', 'sharePrice', 'apy', 'timestamp']);
     for (const key of Object.keys(res.body)) {
       expect(allowedKeys.has(key)).toBe(true);
     }

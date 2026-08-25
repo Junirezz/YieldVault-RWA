@@ -24,7 +24,7 @@ describe('syncJobGovernanceMetrics', () => {
     syncJobGovernanceMetrics();
 
     const metricsText = await register.metrics();
-    expect(metricsText).toMatch(/job_dead_letter_count\{job_name="priceRefresh"\}\s+1/);
+    expect(metricsText).toMatch(/job_dead_letter_count\{[^}]*job_name="priceRefresh"[^}]*\}\s+1/);
   });
 
   it('sets job_health_status=0 for jobs with recurring failures', async () => {
@@ -44,7 +44,7 @@ describe('syncJobGovernanceMetrics', () => {
     syncJobGovernanceMetrics();
 
     const metricsText = await register.metrics();
-    expect(metricsText).toMatch(/job_health_status\{job_name="positionReconciliation"\}\s+0/);
+    expect(metricsText).toMatch(/job_health_status\{[^}]*job_name="positionReconciliation"[^}]*\}\s+0/);
   });
 
   it('sets job_health_status=1 for jobs below recurring failure threshold', async () => {
@@ -62,6 +62,6 @@ describe('syncJobGovernanceMetrics', () => {
 
     // 1 failure < threshold of 3, so health should still be up (1)
     const metricsText = await register.metrics();
-    expect(metricsText).toMatch(/job_health_status\{job_name="priceRefresh"\}\s+1/);
+    expect(metricsText).toMatch(/job_health_status\{[^}]*job_name="priceRefresh"[^}]*\}\s+1/);
   });
 });

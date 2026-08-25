@@ -48,8 +48,17 @@ export class EventPollingService {
     // Acquire leader lock before starting polling
     await this.acquireLeaderLock();
 
-    // Replay missed events on startup - let errors propagate
-    await this.replayMissedEvents();
+    // Replay missed events on startup. A Soroban RPC outage here must not
+    // prevent continuous polling from ever starting — the next successful
+    // poll will re-derive the same missed range from the persisted cursor,
+    // so a failed replay is a delayed catch-up rather than lost data.
+    try {
+      await this.replayMissedEvents();
+    } catch (error) {
+      logger.log('warn', 'Event replay on startup failed — external dependency outage suspected, continuing in degraded mode', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
 
     // Start continuous polling only if we are the leader
     if (this.isLeader) {

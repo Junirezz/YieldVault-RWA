@@ -5,6 +5,7 @@ import { resetWebhookState } from '../webhookDelivery';
 import { resetAuditLogs } from '../auditLog';
 import { resetTransactionBackfillJobsForTests } from '../transactionBackfill';
 import { resetExportManifestsForTests } from '../exportManifest';
+import { eventOutboxService } from '../eventOutbox';
 
 describe('Admin backend features', () => {
   const adminKey = 'admin-feature-test-key';
@@ -52,7 +53,7 @@ describe('Admin backend features', () => {
       .send({
         amount: '125.00',
         asset: 'USDC',
-        walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz234567',
+        walletAddress: 'G234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQ',
       });
 
     if (typeof previousAllowlistEnabled === 'string') {
@@ -63,7 +64,11 @@ describe('Admin backend features', () => {
 
     expect(depositResponse.status).toBe(201);
 
+    // The deposit handler writes the event to the outbox fire-and-forget, so
+    // wait for that write to land before explicitly draining it — the
+    // background poller isn't guaranteed to run within a fixed test delay.
     await new Promise((resolve) => setTimeout(resolve, 30));
+    await eventOutboxService.processOutbox(10);
 
     const deliveriesResponse = await request(app)
       .get('/admin/webhooks/deliveries')
