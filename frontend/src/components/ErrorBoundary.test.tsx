@@ -75,4 +75,24 @@ describe("ErrorBoundary", () => {
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
     spy.mockRestore();
   });
+
+  it("normalizes non-Error thrown values before reporting them", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const onError = vi.fn();
+
+    render(
+      <ErrorBoundary onError={onError}>
+        <ThrowString />
+      </ErrorBoundary>,
+    );
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(onError.mock.calls[0][0].message).toBe("string boom");
+    spy.mockRestore();
+  });
 });
+
+function ThrowString() {
+  throw "string boom";
+}
