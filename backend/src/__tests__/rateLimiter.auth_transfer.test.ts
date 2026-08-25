@@ -3,6 +3,14 @@
  * Integration tests for request-level rate limiting on Auth and Transfer APIs (#887).
  */
 
+// This file tests the deposits tier's real, tight default (10 req/min), so it
+// must restore that default here — setup.ts globally raises
+// DEPOSITS_RATE_LIMIT_MAX for every other integration test file, since most
+// of them just exercise deposit/withdrawal routes incidentally and aren't
+// testing rate limiting at all. Must run before importing rateLimiter, whose
+// singleton limiters read this value once at module-load time.
+process.env.DEPOSITS_RATE_LIMIT_MAX = '10';
+
 import request from 'supertest';
 import express, { Request, Response } from 'express';
 import { authLimiter, depositsLimiter } from '../rateLimiter';

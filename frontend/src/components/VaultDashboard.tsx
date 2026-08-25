@@ -206,6 +206,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     summary,
     error,
     isLoading,
+    summaryUnavailable,
     utilization,
     isCapWarning,
     isCapReached,
@@ -637,8 +638,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
       setTxTimelineStatus("submitting");
 
+      let submittedTxHash: string | undefined;
+
       if (actionType === "deposit") {
-        await depositMutation.mutateAsync(mutationParams);
+        const depositResult = await depositMutation.mutateAsync(mutationParams);
 
         try {
           const depositKey = `${FIRST_DEPOSIT_PREFIX}${walletAddress}`;
@@ -651,8 +654,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           console.warn("Storage access failed while tracking first deposit state", storageErr);
           runDepositConfetti();
         }
+
+        submittedTxHash = depositResult?.txHash;
       } else {
-        await withdrawMutation.mutateAsync(mutationParams);
+        const withdrawResult = await withdrawMutation.mutateAsync(mutationParams);
+        submittedTxHash = withdrawResult?.txHash;
       }
 
       transactionIntent.clearIntent();
@@ -664,6 +670,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         message: actionType === "deposit"
           ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
           : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
+        txHash: submittedTxHash,
       });
       setTxTimelineStatus("finalized");
 
@@ -958,6 +965,36 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           <div className="glass-panel" style={{ padding: "20px", background: "var(--bg-muted)" }}>
             {delayedLoading ? (
               <DashboardCardSkeleton />
+            ) : summaryUnavailable ? (
+              <>
+                <h3
+                  style={{
+                    fontSize: "1.1rem",
+                    marginBottom: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <TrendingUp size={18} color="var(--accent-purple)" />
+                  {t("vaultDashboard.strategyOverview")}
+                </h3>
+                <EmptyState
+                  kind="error"
+                  title={t("vaultDashboard.strategyUnavailableTitle")}
+                  description={t("vaultDashboard.strategyUnavailableDesc")}
+                  icon={<TrendingUp size={24} />}
+                  action={{
+                    label: t("common.retry"),
+                    onClick: () => void refresh(),
+                  }}
+                  secondaryAction={{
+                    label: t("emptyState.compareStrategies"),
+                    href: "/compare",
+                    variant: "secondary",
+                  }}
+                />
+              </>
             ) : (
               <>
                 <h3
@@ -1046,6 +1083,15 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               <span>{t("vaultDashboard.strategyIdLabel")}</span>
               <span className="copy-field-value copy-field-value-mono">{strategy.id}</span>
               <CopyButton value={strategy.id} label="strategy ID" />
+            </div>
+            <div style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(`/strategies/${strategy.id}`)}
+              >
+                {t("vaultDashboard.viewDetails")}
+              </button>
             </div>
           </>
             )}
@@ -1690,6 +1736,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                         <TransactionTimeline
                           status={txTimelineStatus}
                           errorMessage={transactionResult?.message}
+                          txHash={transactionResult?.txHash}
                         />
 
                         {(txTimelineStatus === "finalized" || txTimelineStatus === "failed") && (

@@ -24,6 +24,12 @@ interface VaultContextType {
   formattedApy: string;
   lastUpdate: Date;
   isLoading: boolean;
+  /**
+   * True when the vault summary query finished without data (e.g. the API
+   * failed). Consumers must not present `summary` as live while this is set —
+   * it is only a placeholder to keep dependents rendering.
+   */
+  summaryUnavailable: boolean;
   error: ApiError | null;
   contractPaused: boolean;
   refresh: () => Promise<void>;
@@ -64,6 +70,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const isLoading = isSummaryLoading || isHistoryLoading;
   const queryError = summaryError || historyError;
+  const summaryUnavailable = !isSummaryLoading && !data && Boolean(summaryError);
 
   const summary: VaultSummary = data
     ? {
@@ -131,6 +138,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
         formattedApy,
         lastUpdate,
         isLoading,
+        summaryUnavailable,
         error,
         contractPaused: summary.contractPaused,
         refresh,

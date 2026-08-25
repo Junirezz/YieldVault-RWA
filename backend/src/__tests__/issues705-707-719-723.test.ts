@@ -408,12 +408,12 @@ describe('Issue #719: Health probe decomposition for dependencies', () => {
 // ─── Issue #723: Permission-scoped admin tokens ─────────────────────────────
 
 describe('Issue #723: Permission-scoped admin tokens with rotating key identifiers', () => {
-  beforeEach(() => {
-    scopedAdminTokenStore.clear();
+  beforeEach(async () => {
+    await scopedAdminTokenStore.clear();
   });
 
-  it('creates a scoped token with permissions', () => {
-    const { token, secret } = scopedAdminTokenStore.create({
+  it('creates a scoped token with permissions', async () => {
+    const { token, secret } = await scopedAdminTokenStore.create({
       label: 'CI Pipeline',
       permissions: ['read:metrics', 'read:audit'],
       createdBy: 'admin-1',
@@ -427,56 +427,56 @@ describe('Issue #723: Permission-scoped admin tokens with rotating key identifie
     expect(secret.length).toBe(64);
   });
 
-  it('authenticates a valid token', () => {
-    const { token, secret } = scopedAdminTokenStore.create({
+  it('authenticates a valid token', async () => {
+    const { token, secret } = await scopedAdminTokenStore.create({
       label: 'Test Token',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
 
-    const authenticated = scopedAdminTokenStore.authenticate(token.keyId, secret);
+    const authenticated = await scopedAdminTokenStore.authenticate(token.keyId, secret);
     expect(authenticated).not.toBeNull();
     expect(authenticated!.keyId).toBe(token.keyId);
   });
 
-  it('rejects authentication with wrong secret', () => {
-    const { token } = scopedAdminTokenStore.create({
+  it('rejects authentication with wrong secret', async () => {
+    const { token } = await scopedAdminTokenStore.create({
       label: 'Test Token',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
 
-    const result = scopedAdminTokenStore.authenticate(token.keyId, 'wrong-secret');
+    const result = await scopedAdminTokenStore.authenticate(token.keyId, 'wrong-secret');
     expect(result).toBeNull();
   });
 
-  it('rejects authentication for revoked tokens', () => {
-    const { token, secret } = scopedAdminTokenStore.create({
+  it('rejects authentication for revoked tokens', async () => {
+    const { token, secret } = await scopedAdminTokenStore.create({
       label: 'Revokable',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
 
-    scopedAdminTokenStore.revoke(token.keyId);
+    await scopedAdminTokenStore.revoke(token.keyId);
 
-    const result = scopedAdminTokenStore.authenticate(token.keyId, secret);
+    const result = await scopedAdminTokenStore.authenticate(token.keyId, secret);
     expect(result).toBeNull();
   });
 
-  it('rejects authentication for expired tokens', () => {
-    const { token, secret } = scopedAdminTokenStore.create({
+  it('rejects authentication for expired tokens', async () => {
+    const { token, secret } = await scopedAdminTokenStore.create({
       label: 'Short-lived',
       permissions: ['read:metrics'],
       expiresInSeconds: -1,
       createdBy: 'admin-1',
     });
 
-    const result = scopedAdminTokenStore.authenticate(token.keyId, secret);
+    const result = await scopedAdminTokenStore.authenticate(token.keyId, secret);
     expect(result).toBeNull();
   });
 
-  it('checks individual permissions', () => {
-    const { token } = scopedAdminTokenStore.create({
+  it('checks individual permissions', async () => {
+    const { token } = await scopedAdminTokenStore.create({
       label: 'Partial',
       permissions: ['read:metrics', 'read:audit'],
       createdBy: 'admin-1',
@@ -487,8 +487,8 @@ describe('Issue #723: Permission-scoped admin tokens with rotating key identifie
     expect(scopedAdminTokenStore.hasPermission(token, 'write:config')).toBe(false);
   });
 
-  it('admin:* permission grants access to all permissions', () => {
-    const { token } = scopedAdminTokenStore.create({
+  it('admin:* permission grants access to all permissions', async () => {
+    const { token } = await scopedAdminTokenStore.create({
       label: 'Super',
       permissions: ['admin:*'],
       createdBy: 'admin-1',
@@ -499,74 +499,74 @@ describe('Issue #723: Permission-scoped admin tokens with rotating key identifie
     expect(scopedAdminTokenStore.hasPermission(token, 'write:maintenance')).toBe(true);
   });
 
-  it('rotates token secret', () => {
-    const { token, secret: oldSecret } = scopedAdminTokenStore.create({
+  it('rotates token secret', async () => {
+    const { token, secret: oldSecret } = await scopedAdminTokenStore.create({
       label: 'Rotatable',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
 
-    const result = scopedAdminTokenStore.rotate(token.keyId);
+    const result = await scopedAdminTokenStore.rotate(token.keyId);
     expect(result).not.toBeNull();
     expect(result!.newSecret).not.toBe(oldSecret);
     expect(result!.rotatedAt).toBeDefined();
 
     // Old secret no longer works
-    expect(scopedAdminTokenStore.authenticate(token.keyId, oldSecret)).toBeNull();
+    expect(await scopedAdminTokenStore.authenticate(token.keyId, oldSecret)).toBeNull();
     // New secret works
-    expect(scopedAdminTokenStore.authenticate(token.keyId, result!.newSecret)).not.toBeNull();
+    expect(await scopedAdminTokenStore.authenticate(token.keyId, result!.newSecret)).not.toBeNull();
   });
 
-  it('cannot rotate revoked token', () => {
-    const { token } = scopedAdminTokenStore.create({
+  it('cannot rotate revoked token', async () => {
+    const { token } = await scopedAdminTokenStore.create({
       label: 'Revoked',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
 
-    scopedAdminTokenStore.revoke(token.keyId);
-    const result = scopedAdminTokenStore.rotate(token.keyId);
+    await scopedAdminTokenStore.revoke(token.keyId);
+    const result = await scopedAdminTokenStore.rotate(token.keyId);
     expect(result).toBeNull();
   });
 
-  it('lists active tokens excluding revoked by default', () => {
-    scopedAdminTokenStore.create({
+  it('lists active tokens excluding revoked by default', async () => {
+    await scopedAdminTokenStore.create({
       label: 'Active',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',
     });
-    const { token: revoked } = scopedAdminTokenStore.create({
+    const { token: revoked } = await scopedAdminTokenStore.create({
       label: 'Revoked',
       permissions: ['read:audit'],
       createdBy: 'admin-1',
     });
-    scopedAdminTokenStore.revoke(revoked.keyId);
+    await scopedAdminTokenStore.revoke(revoked.keyId);
 
-    const activeOnly = scopedAdminTokenStore.list();
+    const activeOnly = await scopedAdminTokenStore.list();
     expect(activeOnly).toHaveLength(1);
 
-    const all = scopedAdminTokenStore.list({ includeRevoked: true });
+    const all = await scopedAdminTokenStore.list({ includeRevoked: true });
     expect(all).toHaveLength(2);
   });
 
-  it('rejects invalid permissions', () => {
-    expect(() =>
+  it('rejects invalid permissions', async () => {
+    await expect(
       scopedAdminTokenStore.create({
         label: 'Invalid',
         permissions: ['invalid:perm' as any],
         createdBy: 'admin-1',
       }),
-    ).toThrow('Invalid permission');
+    ).rejects.toThrow('Invalid permission');
   });
 
-  it('rejects empty permissions array', () => {
-    expect(() =>
+  it('rejects empty permissions array', async () => {
+    await expect(
       scopedAdminTokenStore.create({
         label: 'Empty',
         permissions: [],
         createdBy: 'admin-1',
       }),
-    ).toThrow('At least one permission is required');
+    ).rejects.toThrow('At least one permission is required');
   });
 
   it('returns valid permissions list', () => {
@@ -577,8 +577,8 @@ describe('Issue #723: Permission-scoped admin tokens with rotating key identifie
     expect(perms.length).toBeGreaterThan(5);
   });
 
-  it('hasAnyPermission checks multiple permissions', () => {
-    const { token } = scopedAdminTokenStore.create({
+  it('hasAnyPermission checks multiple permissions', async () => {
+    const { token } = await scopedAdminTokenStore.create({
       label: 'Multi',
       permissions: ['read:metrics'],
       createdBy: 'admin-1',

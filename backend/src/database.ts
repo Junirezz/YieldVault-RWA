@@ -54,6 +54,28 @@ export class PostgresDatabasePool implements IDatabasePool {
 }
 
 /**
+ * No-op pool used in place of a real Postgres connection when running tests
+ * without a provisioned database (DATABASE_URL unset). Queries resolve to an
+ * empty result set instead of attempting — and failing — a real network
+ * connection, and health checks report healthy so `/health`/`/ready` reflect
+ * the actual state of the test environment rather than a database no test
+ * suite ever provisions.
+ */
+export class NoopDatabasePool implements IDatabasePool {
+  constructor(private readonly name: string) {}
+
+  async query<T = any>(_text: string, _params?: any[]): Promise<{ rows: T[] }> {
+    return { rows: [] };
+  }
+
+  async end(): Promise<void> {}
+
+  async isHealthy(): Promise<boolean> {
+    return true;
+  }
+}
+
+/**
  * DatabaseManager handles routing queries between a primary write database
  * and a read-only replica, with automatic failover to primary for reads.
  */
@@ -66,6 +88,15 @@ export class DatabaseManager {
     if (primaryPool) {
       this.primaryPool = primaryPool;
       this.replicaPool = replicaPool || primaryPool;
+    } else if (process.env.NODE_ENV === 'test' && !process.env.DATABASE_URL) {
+      // No test suite provisions a real Postgres instance, and unlike Prisma
+      // (which falls back to its own sqlite dev.db) this raw pool had no
+      // test-mode fallback at all — every query attempted a real connection
+      // to the hardcoded dev default below, which no test environment
+      // actually runs. That made /health and anything touching `db` fail
+      // for a reason entirely unrelated to what the test was exercising.
+      this.primaryPool = new NoopDatabasePool('primary');
+      this.replicaPool = this.primaryPool;
     } else {
       const primaryUrl = requireDatabaseUrl();
       this.primaryPool = new PostgresDatabasePool(primaryUrl, 'primary');

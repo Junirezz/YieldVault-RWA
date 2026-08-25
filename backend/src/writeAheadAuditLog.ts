@@ -46,7 +46,7 @@ const DEFAULT_STALE_PENDING_TTL_MS = 15 * 60 * 1000;
 
 function getStalePendingTtlMs(): number {
   const parsed = parseInt(process.env.WAL_STALE_PENDING_TTL_MS || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_STALE_PENDING_TTL_MS;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_STALE_PENDING_TTL_MS;
 }
 
 /**

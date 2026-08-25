@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { prisma } from './prisma';
+import { logger } from './middleware/structuredLogging';
 
 export type TransactionEventType =
   | 'transaction.deposit.created'
@@ -733,8 +734,30 @@ async function deliverWithRetry(
     };
     deadLetters.unshift(deadLetter);
     void persistWebhookDeadLetter(deadLetter, envelope);
+    void sendWebhookDeadLetterAlert(endpoint.url, delivery.eventType, delivery.attempts, delivery.lastError || 'Unknown error');
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function sendWebhookDeadLetterAlert(endpointUrl: string, eventType: string, attempts: number, error: string): Promise<void> {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: `:rotating_light: *YieldVault Webhook Dead-Lettered*\nFailed to deliver \`${eventType}\` to \`${endpointUrl}\` after ${attempts} attempts.\nLatest error: \`${error}\``
+      })
+    });
+  } catch (err) {
+    logger.log('error', 'Failed to send webhook dead-letter alert', {
+      error: err instanceof Error ? err.message : String(err),
+      endpointUrl,
+      eventType
+    });
   }
 }
 

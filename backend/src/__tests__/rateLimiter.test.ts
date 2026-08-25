@@ -291,6 +291,12 @@ describe('depositsLimiter on vault deposit/withdrawal routes', () => {
   let app: ReturnType<typeof express>;
 
   beforeEach(() => {
+    // This suite tests the real, tight default (10 req/min) — setup.ts
+    // globally raises DEPOSITS_RATE_LIMIT_MAX for every other integration
+    // test file, so it must be restored here before the fresh require picks
+    // it up (this describe block reads process.env fresh on every test via
+    // jest.resetModules()).
+    process.env.DEPOSITS_RATE_LIMIT_MAX = '10';
     jest.resetModules();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { depositsLimiter } = require('../rateLimiter');

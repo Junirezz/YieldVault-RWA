@@ -2,6 +2,13 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   forceExit: true,
+  // Test files share a single on-disk SQLite database (prisma/dev.db).
+  // Running suites in parallel workers lets writes from one file race
+  // reads/writes in another against that shared file — e.g. two concurrent
+  // getOrCreateReferralCode() calls for the same wallet racing past its
+  // findFirst-then-create check. Serializing test files removes that
+  // cross-process race entirely.
+  maxWorkers: 1,
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],

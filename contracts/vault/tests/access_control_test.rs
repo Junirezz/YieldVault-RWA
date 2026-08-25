@@ -10,8 +10,8 @@ mod access_control {
         testutils::{Address as _, Ledger as _},
         token, Address, Env,
     };
-    use vault::{PauseReason, VaultError, YieldVault, YieldVaultClient};
     use vault::emergency::EmergencyActionKind;
+    use vault::{PauseReason, VaultError, YieldVault, YieldVaultClient};
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -77,10 +77,7 @@ mod access_control {
     #[test]
     fn test_set_fee_bps_invalid_range_rejected() {
         let (_env, client, _admin, _token) = setup();
-        let err = client
-            .try_set_fee_bps(&10_001i128)
-            .unwrap_err()
-            .unwrap();
+        let err = client.try_set_fee_bps(&10_001i128).unwrap_err().unwrap();
         assert_eq!(err, VaultError::InvalidFeeBps);
     }
 
@@ -168,7 +165,9 @@ mod access_control {
 
         // Advance past dispute window
         let env_ref = client.env();
-        env_ref.ledger().set_timestamp(env_ref.ledger().timestamp() + 3_601);
+        env_ref
+            .ledger()
+            .set_timestamp(env_ref.ledger().timestamp() + 3_601);
 
         let result = client.try_confirm_emergency_action(&outsider, &proposal_id);
         assert_eq!(
@@ -196,7 +195,9 @@ mod access_control {
 
         // Advance past dispute window; try to confirm as primary (same as initiator)
         let env_ref = client.env();
-        env_ref.ledger().set_timestamp(env_ref.ledger().timestamp() + 3_601);
+        env_ref
+            .ledger()
+            .set_timestamp(env_ref.ledger().timestamp() + 3_601);
 
         // primary != secondary so this call would be rejected by the secondary check first
         let result = client.try_confirm_emergency_action(&primary, &proposal_id);

@@ -270,6 +270,7 @@ class EventOutboxService {
               maxAttempts: entry.maxAttempts,
               error: errorMessage,
             });
+            void this.sendDeadLetterAlert(entry.id, entry.eventType, nextAttempt, errorMessage);
           } else {
             // Mark as failed for retry
             await prisma.eventOutbox.update({
@@ -304,6 +305,27 @@ class EventOutboxService {
       });
       result.errors.push(`Processor error: ${errorMessage}`);
       return result;
+    }
+  }
+
+  private async sendDeadLetterAlert(outboxId: string, eventType: string, attempts: number, error: string): Promise<void> {
+    const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
+    if (!webhookUrl) return;
+
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `:rotating_light: *YieldVault Outbox Dead-Lettered*\nEvent \`${eventType}\` (ID: ${outboxId}) failed after ${attempts} attempts.\nLatest error: \`${error}\``
+        })
+      });
+    } catch (err) {
+      logger.log('error', 'Failed to send outbox dead-letter alert', {
+        error: err instanceof Error ? err.message : String(err),
+        outboxId,
+        eventType
+      });
     }
   }
 

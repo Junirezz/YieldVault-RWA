@@ -29,6 +29,7 @@ export const HealthResponseSchema = z
     timestamp: z.string(),
     uptime: z.number(),
     environment: z.string(),
+    lastIndexedLedger: z.number(),
     checks: z.object({
       api: HealthCheckValueSchema,
       cache: HealthCheckValueSchema,
@@ -61,8 +62,12 @@ export const ReadyResponseSchema = z
 
 export const VaultSummaryResponseSchema = z
   .object({
-    totalAssets: z.number(),
-    totalShares: z.number(),
+    // Money fields are strings throughout this API (Decimal-backed, to avoid
+    // floating-point precision loss) — see buildVaultSummaryResponseFromDb in
+    // index.ts, which returns totalAssets/totalShares/sharePrice as strings.
+    totalAssets: z.string(),
+    totalShares: z.string(),
+    sharePrice: z.string(),
     apy: z.number(),
     timestamp: z.string(),
   })

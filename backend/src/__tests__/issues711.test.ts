@@ -52,6 +52,7 @@ describe('#711 API contract schema snapshots', () => {
       timestamp: new Date().toISOString(),
       uptime: 12.5,
       environment: 'test',
+      lastIndexedLedger: 0,
       checks: {
         api: 'up',
         cache: 'up',
@@ -82,8 +83,9 @@ describe('#711 API contract schema snapshots', () => {
 
   it('validates a conforming vault summary payload', () => {
     const result = validateResponseAgainstSchema('GET /api/v1/vault/summary', {
-      totalAssets: 1000,
-      totalShares: 500,
+      totalAssets: '1000',
+      totalShares: '500',
+      sharePrice: '1.000000',
       apy: 8.5,
       timestamp: new Date().toISOString(),
     });

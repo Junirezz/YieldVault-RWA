@@ -28,9 +28,45 @@ extern crate std;
 
 use super::*;
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
+use crate::strategy::{StrategyClient, StrategyTrait};
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Vec};
+
+#[contract]
+struct MaliciousStrategy;
+
+#[contractimpl]
+impl MaliciousStrategy {
+    pub fn initialize(env: Env, vault: Address, asset: Address, value: i128) {
+        env.storage().instance().set(&StrategyTestKey::Vault, &vault);
+        env.storage().instance().set(&StrategyTestKey::Asset, &asset);
+        env.storage().instance().set(&StrategyTestKey::Value, &value);
+    }
+}
+
+#[contractimpl]
+impl StrategyTrait for MaliciousStrategy {
+    fn deposit(_env: Env, _amount: i128) {}
+
+    fn withdraw(_env: Env, _amount: i128) {}
+
+    fn total_value(env: Env) -> i128 {
+        env.storage().instance().get(&StrategyTestKey::Value).unwrap_or(0)
+    }
+
+    fn asset(env: Env) -> Address {
+        env.storage().instance().get(&StrategyTestKey::Asset).unwrap()
+    }
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StrategyTestKey {
+    Vault,
+    Asset,
+    Value,
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -546,6 +582,35 @@ fn test_report_benji_yield_zero_amount_returns_error() {
 
     let result = vault.try_report_benji_yield(&strategy, &0);
     assert_eq!(result, Err(Ok(VaultError::InvalidYieldAmount)));
+}
+
+#[test]
+fn test_strategy_response_rejects_mismatched_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, _, _) = setup_vault(&env);
+    let wrong_asset = Address::generate(&env);
+    let strategy_id = env.register(MaliciousStrategy, ());
+    let strategy = StrategyClient::new(&env, &strategy_id);
+    strategy.initialize(&vault.contract_id, &wrong_asset, &100);
+
+    let result = YieldVault::validate_strategy_response(&env, &strategy_id, &usdc.address);
+    assert_eq!(result, Err(VaultError::UnauthorizedStrategy));
+}
+
+#[test]
+fn test_strategy_response_rejects_negative_total_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, _, _) = setup_vault(&env);
+    let strategy_id = env.register(MaliciousStrategy, ());
+    let strategy = StrategyClient::new(&env, &strategy_id);
+    strategy.initialize(&vault.contract_id, &usdc.address, &-1);
+
+    let result = YieldVault::validate_strategy_response(&env, &strategy_id, &usdc.address);
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
@@ -2644,4 +2709,24 @@ fn test_set_strategy_promotes_pending_registration_to_active() {
         vault.strategy_registration_state(&strategy),
         Some(STATE_ACTIVE)
     );
+}
+
+#[test]
+fn test_overflow_protection_near_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token = create_token_contract(&env, &admin);
+    let vault = create_vault_contract(&env, &admin, &token.address);
+    let user = Address::generate(&env);
+
+    token.mint(&user, &1000);
+    vault.deposit(&user, &1000); // 1000 shares for 1000 assets
+
+    let res_shares = vault.try_calculate_shares(&i128::MAX);
+    assert_eq!(res_shares, Err(Ok(crate::errors::VaultError::MathOverflow)));
+
+    let res_assets = vault.try_calculate_assets(&i128::MAX);
+    assert_eq!(res_assets, Err(Ok(crate::errors::VaultError::MathOverflow)));
 }
