@@ -4,7 +4,10 @@ import { logger } from './middleware/structuredLogging';
 
 export type TransactionEventType =
   | 'transaction.deposit.created'
-  | 'transaction.withdrawal.created';
+  | 'transaction.withdrawal.created'
+  | 'vault.deposit.created'
+  | 'vault.withdrawal.created'
+  | 'vault.strategy.changed';
 
 export const WEBHOOK_SCHEMA_VERSION = 1;
 
@@ -16,6 +19,9 @@ export interface TransactionEventPayload {
   transactionHash: string;
   status: string;
   timestamp: string;
+  vaultId?: string;
+  strategyId?: string;
+  previousStrategyId?: string;
 }
 
 export type WebhookVerificationStatus = 'pending' | 'verified' | 'failed';
@@ -109,6 +115,13 @@ interface UpdateWebhookInput {
 const endpoints = new Map<string, InternalWebhookEndpoint>();
 const deliveries: WebhookDeliveryRecord[] = [];
 let persistenceInitialized = false;
+const DEFAULT_WEBHOOK_EVENT_TYPES: TransactionEventType[] = [
+  'transaction.deposit.created',
+  'transaction.withdrawal.created',
+  'vault.deposit.created',
+  'vault.withdrawal.created',
+  'vault.strategy.changed',
+];
 
 const getMaxAttempts = (): number => parseInt(process.env.WEBHOOK_MAX_ATTEMPTS || '3', 10);
 const deliveryTimeoutMs = parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '5000', 10);
@@ -255,7 +268,7 @@ export function registerWebhookEndpoint(input: RegisterWebhookInput): WebhookEnd
     url: input.url,
     eventTypes: input.eventTypes && input.eventTypes.length > 0
       ? input.eventTypes
-      : ['transaction.deposit.created', 'transaction.withdrawal.created'],
+      : DEFAULT_WEBHOOK_EVENT_TYPES,
     enabled: input.enabled ?? isUnverifiedDeliveryAllowed(),
     secret: input.secret,
     secretHash: input.secret ? hashWebhookSecret(input.secret) : undefined,

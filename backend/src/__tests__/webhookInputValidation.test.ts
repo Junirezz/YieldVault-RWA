@@ -619,12 +619,15 @@ describe('Webhook envelope includes schemaVersion', () => {
 // ─── WEBHOOK_EVENT_TYPES constant ─────────────────────────────────────────────
 
 describe('WEBHOOK_EVENT_TYPES', () => {
-  it('contains both expected event types', () => {
+  it('contains transaction and vault event types', () => {
     expect(WEBHOOK_EVENT_TYPES).toContain('transaction.deposit.created');
     expect(WEBHOOK_EVENT_TYPES).toContain('transaction.withdrawal.created');
+    expect(WEBHOOK_EVENT_TYPES).toContain('vault.deposit.created');
+    expect(WEBHOOK_EVENT_TYPES).toContain('vault.withdrawal.created');
+    expect(WEBHOOK_EVENT_TYPES).toContain('vault.strategy.changed');
   });
 
-  it('has exactly 2 entries (keep this pinned to catch accidental additions)', () => {
-    expect(WEBHOOK_EVENT_TYPES).toHaveLength(2);
+  it('has exactly 5 entries (keep this pinned to catch accidental additions)', () => {
+    expect(WEBHOOK_EVENT_TYPES).toHaveLength(5);
   });
 });

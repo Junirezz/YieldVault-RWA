@@ -240,6 +240,21 @@ void walletAliasMappingService.loadFromDatabase().catch((error) => {
 // Health check cache to track dependency status
 const cache = new NodeCache({ stdTTL: 30 });
 
+type VaultHealthResponse = {
+  vaultId: string;
+  status: 'healthy' | 'degraded';
+  uptimeSeconds: number;
+  metrics: {
+    totalAssets: string;
+    totalShares: string;
+    sharePrice: string;
+    apy: number;
+  };
+  dependencies: Record<string, 'up' | 'down' | 'degraded'>;
+  cached: boolean;
+  timestamp: string;
+};
+
 /**
  * Reads the vault summary from the VaultState table and the most recent
  * SharePriceSnapshot for the share price. Falls back to zeroed values when
@@ -282,6 +297,41 @@ async function buildVaultSummaryResponseFromDb(): Promise<{
       timestamp: new Date().toISOString(),
     };
   }
+}
+
+async function buildVaultHealthResponse(vaultId: string): Promise<VaultHealthResponse> {
+  const cacheKey = `vault-health:${vaultId}`;
+  const cached = cache.get<Omit<VaultHealthResponse, 'cached'>>(cacheKey);
+  if (cached) {
+    return { ...cached, cached: true };
+  }
+
+  const [summary, probes] = await Promise.all([
+    buildVaultSummaryResponseFromDb(),
+    healthProbeService.checkAll().catch(
+      () => ({}) as Record<string, { status: 'up' | 'down' | 'degraded' }>,
+    ),
+  ]);
+  const dependencies = Object.fromEntries(
+    Object.entries(probes).map(([name, state]) => [name, state.status]),
+  ) as Record<string, 'up' | 'down' | 'degraded'>;
+  const degraded = Object.values(dependencies).some((state) => state !== 'up');
+  const body = {
+    vaultId,
+    status: degraded ? 'degraded' as const : 'healthy' as const,
+    uptimeSeconds: Math.floor(process.uptime()),
+    metrics: {
+      totalAssets: summary.totalAssets,
+      totalShares: summary.totalShares,
+      sharePrice: summary.sharePrice,
+      apy: summary.apy,
+    },
+    dependencies,
+    timestamp: new Date().toISOString(),
+  };
+
+  cache.set(cacheKey, body, 5);
+  return { ...body, cached: false };
 }
 
 function resolveActingAdminAddress(req: Request): string {
@@ -945,6 +995,40 @@ app.use('/portfolio', (req: Request, res: Response) => {
 app.get('/api/v1/vault/transactions/export', handleTransactionExport);
 
 // â”€â”€â”€ Versioned vault summary/metrics/apy endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+/**
+ * GET /api/v1/vaults/:id/health - monitoring-friendly vault health payload.
+ *
+ * Kept separate from /health so external monitors can target one vault and
+ * receive vault metrics, dependency state, uptime, and cache status. Responses
+ * are cached for five seconds to avoid turning health probes into DB pressure.
+ */
+app.get(
+  '/api/v1/vaults/:id/health',
+  readsLimiter,
+  createTimeoutFor.read({
+    timeoutMs: 1500,
+    routeName: '/api/v1/vaults/:id/health',
+    message: 'Vault health took too long to load',
+    fallbackResponse: () => ({
+      error: 'Service Unavailable',
+      status: 503,
+      code: 'VAULT_HEALTH_TIMEOUT',
+      message: 'Vault health is temporarily unavailable. Please retry shortly.',
+      timestamp: new Date().toISOString(),
+    }),
+  }),
+  async (req: Request, res: Response) => {
+    const health = await buildVaultHealthResponse(req.params.id);
+    res.status(health.status === 'healthy' ? 200 : 503).json(health);
+  },
+);
+
+app.get('/api/v2/vaults/:id/health', (req: Request, res: Response) => {
+  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  res.set('X-API-Preview', 'v2');
+  res.redirect(307, `/api/v1/vaults/${encodeURIComponent(req.params.id)}/health${qs}`);
+});
 
 /**
  * @openapi

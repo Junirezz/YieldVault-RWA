@@ -10,6 +10,18 @@
     {
       "eventType": "transaction.withdrawal.created",
       "payloadSchema": "./transaction.withdrawal.created.payload.schema.json"
+    },
+    {
+      "eventType": "vault.deposit.created",
+      "payloadSchema": "./vault.deposit.created.payload.schema.json"
+    },
+    {
+      "eventType": "vault.withdrawal.created",
+      "payloadSchema": "./vault.withdrawal.created.payload.schema.json"
+    },
+    {
+      "eventType": "vault.strategy.changed",
+      "payloadSchema": "./vault.strategy.changed.payload.schema.json"
     }
   ]
 }
