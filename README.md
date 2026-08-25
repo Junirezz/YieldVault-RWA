@@ -9,11 +9,13 @@ This project is structured as a monorepo containing both the Stellar Soroban sma
 - `/contracts/vault/`: Contains the Rust Soroban smart contract for handling the vault logic, fractional share minting (`yvUSDC`), scaling withdrawals, and simulated yield accrual.
 - `/contracts/mock-strategy/`: Contains test mock contracts for the Korean sovereign debt strategy and price oracle.
 - `/frontend/`: Contains the React + Vite frontend application, integrating `@stellar/freighter-api` for seamless user wallet connections and a premium UI to interact with the protocol.
-- `/docs/`: Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams and the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations.
+- `/docs/`: Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams, the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations, and the [Dependency Update Policy](./docs/DEPENDENCY_UPDATE_POLICY.md) for upgrade cadence, testing gates, CVE SLAs, and high-risk library requirements.
 
 ## Architecture
 
 For a comprehensive overview of the smart contract architecture, module responsibilities, and interaction boundaries, see **[Contracts Architecture](./docs/CONTRACTS_ARCHITECTURE.md)**.
+
+For a cross-layer view of ownership boundaries, API flow maps, event propagation, and interface assumptions between the frontend, backend, and contracts, see **[System Ownership & Data Flow](./docs/SYSTEM_OWNERSHIP_AND_DATA_FLOW.md)**.
 
 ### Contract Modules
 
