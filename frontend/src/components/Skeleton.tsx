@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { skeletonPulse } from '../motion/variants';
 
 export interface SkeletonProps {
   className?: string;
@@ -17,6 +19,7 @@ export const SkeletonBlock: React.FC<SkeletonProps> = ({
   circle,
   style,
 }) => {
+  const prefersReducedMotion = useReducedMotion();
   const baseStyle: React.CSSProperties = {
     width: width,
     height: height,
@@ -25,10 +28,12 @@ export const SkeletonBlock: React.FC<SkeletonProps> = ({
   };
 
   return (
-    <div
+    <motion.div
       className={`skeleton ${className}`}
       style={baseStyle}
       aria-hidden="true"
+      variants={prefersReducedMotion ? undefined : skeletonPulse}
+      animate={prefersReducedMotion ? undefined : 'animate'}
     />
   );
 };
@@ -229,6 +234,40 @@ export const PortfolioCardSkeleton: React.FC = () => (
     <div style={{ display: "flex", justifyContent: "space-between" }}>
       <SkeletonText width="50%" lineHeight="0.8rem" />
       <SkeletonText width="30%" lineHeight="0.8rem" />
+    </div>
+  </div>
+);
+
+export const StrategyCardSkeleton: React.FC = () => (
+  <div
+    className="glass-panel"
+    style={{
+      textAlign: "left",
+      padding: "18px",
+      borderRadius: "16px",
+      border: "1px solid var(--border-glass)",
+      background: "rgba(255, 255, 255, 0.03)",
+      display: "flex",
+      flexDirection: "column",
+      gap: "12px",
+      minHeight: "220px",
+    }}
+    aria-hidden="true"
+  >
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+      <div style={{ flex: 1 }}>
+        <SkeletonText width="80px" lineHeight="0.75rem" style={{ marginBottom: "6px" }} />
+        <SkeletonText width="70%" lineHeight="1.05rem" />
+      </div>
+      <SkeletonCircle width={28} height={28} />
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <SkeletonText width="60%" lineHeight="0.85rem" />
+      <SkeletonText width="55%" lineHeight="0.85rem" />
+      <SkeletonText width="65%" lineHeight="0.85rem" />
+    </div>
+    <div style={{ marginTop: "auto" }}>
+      <SkeletonText lines={2} lineHeight="0.85rem" />
     </div>
   </div>
 );

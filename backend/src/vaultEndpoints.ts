@@ -22,6 +22,7 @@ import {
   validate,
   VaultDepositBodySchema,
   VaultWithdrawalBodySchema,
+  VaultStrategyBodySchema,
 } from './middleware/validate';
 import { withdrawalDailyLimitMiddleware } from './middleware/withdrawalDailyLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
@@ -717,7 +718,7 @@ router.get('/strategy/cooldown', cacheMiddleware({ ttl: 5000 }), (_req: Request,
 });
 
 router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (_req: Request, res: Response) => {
-router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), (req: Request, res: Response) => {
+router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), validate({ body: VaultStrategyBodySchema }), (req: Request, res: Response) => {
   const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
   const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
   const now = Date.now();

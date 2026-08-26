@@ -1,0 +1,10 @@
+{
+  "regression_threshold_pct": 15,
+  "notes": "Host CPU/memory from Soroban Env::cost_estimate().budget(). Update when an accepted change moves costs. 15% over baseline fails nightly CI.",
+  "ops": {
+    "deposit": { "cpu": 8000000, "mem": 2000000 },
+    "withdraw": { "cpu": 8000000, "mem": 2000000 },
+    "invest": { "cpu": 12000000, "mem": 3000000 },
+    "switch_strategy": { "cpu": 8000000, "mem": 2000000 }
+  }
+}

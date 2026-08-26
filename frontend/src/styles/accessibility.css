@@ -35,7 +35,8 @@ textarea:focus-visible {
 }
 
 /* Skip to main content link */
-.skip-to-content {
+.skip-to-content,
+.skip-link {
   position: absolute;
   top: -40px;
   left: 0;
@@ -48,8 +49,15 @@ textarea:focus-visible {
   transition: top 0.2s;
 }
 
-.skip-to-content:focus {
+.skip-to-content:focus,
+.skip-link:focus {
   top: 0;
+}
+
+.skip-links:focus-within {
+  position: absolute;
+  top: 0;
+  z-index: 10000;
 }
 
 /* Reduce motion for users who prefer it */

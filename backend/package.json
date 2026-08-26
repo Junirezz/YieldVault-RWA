@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:smoke": "npm run build && npm run start &",
     "lint": "eslint src",
     "format": "prettier --write src",
@@ -19,7 +19,12 @@
     "snapshots:check": "tsx scripts/check-schema-snapshots.ts",
     "db:migrate": "node scripts/migrate-postgres.js",
     "db:check-drift": "node scripts/check-postgres-drift.js",
-    "adrs:check": "node scripts/check-adrs.js"
+    "adrs:check": "node scripts/check-adrs.js",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "prisma:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:status": "prisma migrate status --schema prisma/schema.prisma",
+    "prisma:rollback": "node scripts/prisma-rollback.js"
   },
   "keywords": [
     "stellar",

@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { TrendingUp } from "./icons";
 import ChartWidgetPlaceholder from "./ui/ChartWidgetPlaceholder";
+import SkeletonChart from "./ui/SkeletonChart";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { usePreferencesContext } from "../context/PreferencesContext";
 import { formatCurrency, formatDate } from "../lib/formatters";
@@ -30,6 +31,7 @@ interface YieldDataPoint {
 interface YieldBreakdownChartProps {
   /** Total unrealized gain used to generate mock daily yield data. */
   totalGain: number;
+  isLoading?: boolean;
 }
 
 type YieldPeriod = "7D" | "30D" | "ALL";
@@ -94,7 +96,7 @@ function YieldTooltip({ active, payload, label, locale, currency }: TooltipProps
   );
 }
 
-const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) => {
+const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain, isLoading }) => {
   const { preferences, chartModes, setChartMode } = usePreferencesContext();
   const [period, setPeriod] = useState<YieldPeriod>("30D");
   const chartMode = chartModes.yieldBreakdown;
@@ -202,7 +204,9 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain }) 
 
       {/* Chart */}
       <div style={{ height: "220px", position: "relative" }}>
-        {isEmpty ? (
+        {isLoading ? (
+          <SkeletonChart height={220} />
+        ) : isEmpty ? (
           <ChartWidgetPlaceholder
             variant="empty"
             title="No yield data yet"

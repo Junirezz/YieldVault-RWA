@@ -23,17 +23,17 @@ const stateConfig: Record<
   },
   pending: {
     label: "Pending",
-    color: "#f59e0b",
+    color: "var(--text-warning)",
     icon: <Clock size={14} />,
   },
   success: {
     label: "Confirmed",
-    color: "#22c55e",
+    color: "var(--text-success)",
     icon: <Check size={14} />,
   },
   failed: {
     label: "Failed",
-    color: "#ef4444",
+    color: "var(--text-error)",
     icon: <AlertCircle size={14} />,
   },
   cancelled: {
@@ -140,7 +140,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
                   borderRadius: "var(--radius-sm)",
                   padding: "6px 8px",
                   fontSize: "0.8rem",
-                  color: "#f59e0b",
+                  color: "var(--text-warning)",
                   marginBottom: "8px",
                 }}
               >
@@ -156,7 +156,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
                   borderRadius: "var(--radius-sm)",
                   padding: "6px 8px",
                   fontSize: "0.8rem",
-                  color: "#ef4444",
+                  color: "var(--text-error)",
                   marginBottom: "8px",
                 }}
               >
