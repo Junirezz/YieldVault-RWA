@@ -1,13 +1,14 @@
 import crypto from 'crypto';
 import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
+import {
+  WEBHOOK_EVENT_TYPES,
+  WEBHOOK_HEADERS,
+  type WebhookEventType,
+} from './types/webhooks';
 
-export type TransactionEventType =
-  | 'transaction.deposit.created'
-  | 'transaction.withdrawal.created'
-  | 'vault.deposit.created'
-  | 'vault.withdrawal.created'
-  | 'vault.strategy.changed';
+export type TransactionEventType = WebhookEventType;
+export { WEBHOOK_EVENT_TYPES, WEBHOOK_HEADERS };
 
 export const WEBHOOK_SCHEMA_VERSION = 1;
 
@@ -115,13 +116,7 @@ interface UpdateWebhookInput {
 const endpoints = new Map<string, InternalWebhookEndpoint>();
 const deliveries: WebhookDeliveryRecord[] = [];
 let persistenceInitialized = false;
-const DEFAULT_WEBHOOK_EVENT_TYPES: TransactionEventType[] = [
-  'transaction.deposit.created',
-  'transaction.withdrawal.created',
-  'vault.deposit.created',
-  'vault.withdrawal.created',
-  'vault.strategy.changed',
-];
+const DEFAULT_WEBHOOK_EVENT_TYPES: TransactionEventType[] = [...WEBHOOK_EVENT_TYPES];
 
 const getMaxAttempts = (): number => parseInt(process.env.WEBHOOK_MAX_ATTEMPTS || '3', 10);
 const deliveryTimeoutMs = parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '5000', 10);
@@ -684,16 +679,25 @@ async function deliverWithRetry(
 
   const envelope = buildWebhookSignedEnvelope(delivery, payload);
 
+  logger.log('info', 'webhook.delivery.attempt', {
+    deliveryId: delivery.id,
+    endpointId: endpoint.id,
+    eventType: delivery.eventType,
+    attempt,
+    maxAttempts: getMaxAttempts(),
+    url: endpoint.url,
+  });
+
   const body = JSON.stringify(envelope);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'User-Agent': 'YieldVault-Webhook-Delivery/1.0',
-    'X-YieldVault-Event': delivery.eventType,
-    'X-YieldVault-Delivery-Id': delivery.id,
+    [WEBHOOK_HEADERS.event]: delivery.eventType,
+    [WEBHOOK_HEADERS.deliveryId]: delivery.id,
   };
 
   if (endpoint.secret) {
-    headers['X-YieldVault-Signature'] = createWebhookSignature(endpoint.secret, envelope);
+    headers[WEBHOOK_HEADERS.signature] = createWebhookSignature(endpoint.secret, envelope);
   }
 
   const controller = new AbortController();
@@ -717,12 +721,26 @@ async function deliverWithRetry(
     delivery.deliveredAt = new Date().toISOString();
     delivery.updatedAt = delivery.deliveredAt;
     delivery.lastError = undefined;
+    logger.log('info', 'webhook.delivery.success', {
+      deliveryId: delivery.id,
+      endpointId: endpoint.id,
+      eventType: delivery.eventType,
+      attempts: attempt,
+    });
   } catch (error) {
     const normalized = error instanceof Error ? error.message : String(error);
     delivery.lastError = normalized;
 
     if (attempt < getMaxAttempts()) {
       const delayMs = calculateBackoffDelay(attempt);
+      logger.log('warn', 'webhook.delivery.retry', {
+        deliveryId: delivery.id,
+        endpointId: endpoint.id,
+        eventType: delivery.eventType,
+        attempt,
+        delayMs,
+        lastError: normalized,
+      });
       setTimeout(() => {
         void deliverWithRetry(endpoint, delivery, payload, attempt + 1);
       }, delayMs);
@@ -731,6 +749,13 @@ async function deliverWithRetry(
 
     delivery.status = 'failed';
     delivery.updatedAt = new Date().toISOString();
+    logger.log('error', 'webhook.delivery.failed', {
+      deliveryId: delivery.id,
+      endpointId: endpoint.id,
+      eventType: delivery.eventType,
+      attempts: attempt,
+      lastError: normalized,
+    });
 
     const deadLetter: WebhookDeadLetterRecord = {
       id: `whdl_${crypto.randomBytes(8).toString('hex')}`,

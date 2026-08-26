@@ -29,9 +29,11 @@
     "@tanstack/react-virtual": "^3.14.3",
     "canvas-confetti": "^1.9.4",
     "es-toolkit": "^1.33.0",
+    "i18next": "^25.4.0",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-i18next": "^15.7.0",
     "react-router-dom": "^7.13.2",
     "recharts": "^3.8.1",
     "zod": "^4.3.6"

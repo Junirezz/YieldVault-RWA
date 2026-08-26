@@ -37,6 +37,7 @@ import {
 } from './exportJobs';
 import { tenantGuard } from './middleware/tenantGuard';
 import { createTimeoutFor } from './middleware/timeoutMiddleware';
+import { validate, PaginationQuerySchema, TransactionListQuerySchema } from './middleware/validate';
 import { getPrismaClient } from './prismaClient';
 
 const router = Router();
@@ -739,6 +740,7 @@ router.get('/transactions',
     allowAdminBypass: true, 
     adminBypassPermission: Permission.ADMIN_READ 
   }),
+  validate({ query: TransactionListQuerySchema }),
   createTimeoutFor.read(),
   async (req: Request, res: Response) => {
   try {
@@ -881,7 +883,8 @@ router.get('/vault/transactions/export',
  *       200:
  *         description: List of holdings
  */
-router.get('/portfolio/holdings', 
+router.get('/portfolio/holdings',
+  validate({ query: PaginationQuerySchema }), 
   cacheMiddleware({ ttl: CACHE_TTL_MS }),
   tenantGuard({ 
     walletParamPath: 'query.walletAddress', 
@@ -930,7 +933,8 @@ router.get('/portfolio/holdings',
  *       200:
  *         description: Vault history points
  */
-router.get('/vault/history', 
+router.get('/vault/history',
+  validate({ query: PaginationQuerySchema }), 
   cacheMiddleware({ ttl: CACHE_TTL_MS }), 
   createTimeoutFor.read(), 
   (req: Request, res: Response) => {
@@ -994,7 +998,8 @@ router.get('/vault/history',
  *                 days: { type: integer }
  *                 count: { type: integer }
  */
-router.get('/vault/apy/history', 
+router.get('/vault/apy/history',
+  validate({ query: PaginationQuerySchema }), 
   cacheMiddleware({ ttl: parseInt(process.env.CACHE_TTL_MS || '60000', 10) }), 
   createTimeoutFor.read(), 
   async (req: Request, res: Response) => {

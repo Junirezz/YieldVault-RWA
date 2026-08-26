@@ -4,6 +4,7 @@ import { X, Menu } from "lucide-react";
 import WalletConnect from "./WalletConnect";
 import type { DisconnectReason } from "./WalletConnect";
 import ThemeToggle from "./ThemeToggle";
+import LanguageSwitcher from "./LanguageSwitcher";
 import TvlTicker from "./TvlTicker";
 import HealthStatusIndicator from "./HealthStatusIndicator";
 import { Layers } from "./icons";
@@ -177,6 +178,7 @@ const Navbar: FC<NavbarProps> = ({
               </span>
             )}
             <ThemeToggle />
+            <LanguageSwitcher compact />
           </div>
 
           <WalletConnect
@@ -230,6 +232,7 @@ const Navbar: FC<NavbarProps> = ({
 
           <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
             <ThemeToggle />
+            <LanguageSwitcher compact />
             {walletAddress && <span>{networkLabel}</span>}
           </div>
         </div>

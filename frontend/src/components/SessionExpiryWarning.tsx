@@ -93,7 +93,7 @@ const SessionExpiryWarning: React.FC = () => {
             lineHeight: 1.4,
           }}
         >
-          {t("session.warning.message").replace("{{minutes}}", minutesRemaining.toString())}
+          {t("session.warning.message", { minutes: minutesRemaining })}
         </p>
       </div>
 
