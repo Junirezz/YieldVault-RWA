@@ -3943,3 +3943,41 @@ details summary:hover {
     }
   }
 }
+
+/* RTL support for future locales (ar, he, fa, ur). Logical properties keep
+   LTR layouts intact while mirroring start/end spacing when dir=rtl. */
+html[dir="rtl"] {
+  direction: rtl;
+}
+
+html[dir="rtl"] .container,
+html[dir="rtl"] nav,
+html[dir="rtl"] .language-switcher {
+  text-align: start;
+}
+
+.language-switcher--compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.language-switcher__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.language-switcher__btn[data-active="true"] {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.12), rgba(112, 0, 255, 0.08));
+}

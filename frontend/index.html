@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="YieldVault" />
     <title>YieldVault — Institutional RWA Yields on Stellar</title>
     <meta name="description" content="Deposit USDC to earn stable, predictable yield backed by tokenized Sovereign Debt and Real-World Assets on the Stellar network." />
-    <!-- Prevent flash of unstyled content: apply saved theme before first paint -->
+    <!-- Prevent flash of unstyled content: apply saved theme and locale direction before first paint -->
     <script>
       (function () {
         try {
@@ -24,6 +24,13 @@
           }
           document.documentElement.setAttribute('data-theme', resolved);
           document.documentElement.style.colorScheme = resolved;
+        } catch (e) {}
+        try {
+          var locale = localStorage.getItem('yieldvault.locale') || 'en';
+          var rtl = { ar: true, he: true, fa: true, ur: true };
+          var base = String(locale).toLowerCase().split('-')[0];
+          document.documentElement.setAttribute('lang', locale);
+          document.documentElement.setAttribute('dir', rtl[base] ? 'rtl' : 'ltr');
         } catch (e) {}
       })();
     </script>

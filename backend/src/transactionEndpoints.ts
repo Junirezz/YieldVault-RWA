@@ -24,6 +24,7 @@ import { cacheMiddleware } from './middleware/cache';
 import { tenantGuard } from './middleware/tenantGuard';
 import { Permission } from './middleware/rbac';
 import { createTimeoutFor } from './middleware/timeoutMiddleware';
+import { validate, TransactionListQuerySchema } from './middleware/validate';
 
 const router = Router();
 const CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || '30000', 10);
@@ -51,6 +52,7 @@ router.get('/',
     allowAdminBypass: true, 
     adminBypassPermission: Permission.ADMIN_READ 
   }),
+  validate({ query: TransactionListQuerySchema }),
   createTimeoutFor.read(),
   async (req: Request, res: Response) => {
   const traceId = getCurrentTraceId();

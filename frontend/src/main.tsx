@@ -5,6 +5,7 @@ import "./styles/theme.css";
 import "./styles/responsive.css";
 import "./styles/accessibility.css";
 import "./index.css";
+import "./i18n";
 import App from "./App.tsx";
 import { ToastProvider } from "./context/ToastContext.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
