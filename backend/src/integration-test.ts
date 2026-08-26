@@ -51,7 +51,7 @@ async function testLatencyMonitoring() {
   latencyMonitoringService.recordLatency('/api/v1/vault/deposit', 800);
   
   metrics = latencyMonitoringService.getDetailedMetrics();
-  let depositMetric = metrics.find(m => m.endpoint === '/api/v1/vault/deposit');
+  const depositMetric = metrics.find(m => m.endpoint === '/api/v1/vault/deposit');
   
   console.log(`✅ Deposit endpoint P95: ${depositMetric?.currentP95}ms`);
   console.log(`✅ Deposit SLO Threshold: ${depositMetric?.threshold}ms`);
@@ -63,7 +63,7 @@ async function testLatencyMonitoring() {
   latencyMonitoringService.recordLatency('/api/v1/vault/67890', 350);
   
   metrics = latencyMonitoringService.getDetailedMetrics();
-  let dynamicMetric = metrics.find(m => m.endpoint === '/api/v1/vault/:id');
+  const dynamicMetric = metrics.find(m => m.endpoint === '/api/v1/vault/:id');
   
   console.log(`✅ Normalized endpoint: ${dynamicMetric?.endpoint}`);
   console.log(`✅ Dynamic metric P95: ${dynamicMetric?.currentP95}ms`);

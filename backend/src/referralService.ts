@@ -132,7 +132,7 @@ export class ReferralService {
     const prisma = getPrisma();
 
     // Check if code already exists
-    const existing = await prisma.referralCode.findUnique({
+    const existing = await prisma.referralCode.findFirst({
       where: { ownerAddress },
     });
 

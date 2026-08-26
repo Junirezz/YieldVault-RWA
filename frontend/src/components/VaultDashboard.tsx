@@ -16,6 +16,7 @@ import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
 import SharePriceDisplay from "./SharePriceDisplay";
 import VaultPerformanceChart from "./VaultPerformanceChart";
+import VaultDecisionSummary from "./VaultDecisionSummary";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
@@ -435,6 +436,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               </div>
             </div>
           </div>
+
+          <VaultDecisionSummary
+            usdcBalance={walletAddress ? usdcBalance : 0}
+            apy={summary.apy}
+            formattedTvl={formattedTvl}
+            walletConnected={Boolean(walletAddress)}
+            onDepositClick={() => {
+              window.dispatchEvent(new Event("TRIGGER_DEPOSIT"));
+            }}
+          />
 
           <div
             style={{

@@ -40,3 +40,7 @@ contracts/vault/test_snapshots
 *.pfx
 secrets/
 .secrets/
+
+# Local SQLite dev database (generated)
+*.db
+*.db-journal

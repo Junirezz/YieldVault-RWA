@@ -1,16 +1,37 @@
-// TODO: Install swagger-jsdoc and swagger-ui-express when ready
-// import swaggerJsdoc from 'swagger-jsdoc';
-// import swaggerUi from 'swagger-ui-express';
 import type { Express } from 'express';
+import swaggerJsdoc from 'swagger-jsdoc';
+import swaggerUi from 'swagger-ui-express';
 
-/*
+/**
+ * OpenAPI 3.1 definition for the YieldVault Stellar RWA backend.
+ *
+ * This spec is the single source of truth for `openapi.json` (committed and
+ * verified by CI) and is also served as interactive Swagger UI at `/docs`.
+ *
+ * It documents:
+ *  - authentication (JWT bearer + API key)
+ *  - rate limiting behaviour
+ *  - request/response examples for every public + admin endpoint
+ */
+const RATE_LIMIT_NOTE =
+  'Rate limited: global 100 req / 15 min per IP; authenticated APIs 30 req / min per key. ' +
+  '`429` responses follow the standard error envelope with a `retryAfter` detail.';
+
 const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.1.0',
     info: {
       title: 'YieldVault Stellar RWA API',
       version: '1.0.0',
-      description: 'API documentation for the YieldVault Stellar RWA backend.',
+      description:
+        'API documentation for the YieldVault Stellar RWA backend. ' +
+        'The API exposes vault deposits/withdrawals, portfolio reads, referrals, ' +
+        'webhooks, and operational admin endpoints. All responses use the standard ' +
+        'error envelope `{ status, message, error: { code, message, correlationId } }`.\n\n' +
+        '**Rate limiting:** ' +
+        'Global limiter is 100 requests / 15 minutes per IP; authenticated API endpoints ' +
+        'are limited to 30 requests / minute per API key. Exceeding a limit returns `429` ' +
+        'with the standard error envelope and a `retryAfter` detail.',
       license: {
         name: 'MIT',
         url: 'https://spdx.org/licenses/MIT.html',
@@ -21,58 +42,359 @@ const options: swaggerJsdoc.Options = {
       },
     },
     servers: [
-      {
-        url: 'http://localhost:3000',
-        description: 'Development server',
-      },
+      { url: 'http://localhost:3000', description: 'Development server' },
+      { url: 'https://api.yieldvault.finance', description: 'Production' },
     ],
     components: {
       securitySchemes: {
-        IdempotencyKey: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'JWT issued by POST /auth/login or POST /auth/refresh.',
+        },
+        apiKeyAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'Authorization',
+          description: 'Admin API key. Format: `Authorization: <api-key>`.',
+        },
+        idempotencyKey: {
           type: 'apiKey',
           in: 'header',
           name: 'x-idempotency-key',
-          description: 'Required for mutation requests to ensure idempotency.',
+          description: 'Recommended for mutation requests to ensure idempotency.',
+        },
+      },
+      parameters: {
+        correlationId: {
+          name: 'X-Correlation-ID',
+          in: 'header',
+          required: false,
+          description:
+            'Optional client-supplied correlation id. If omitted, the server generates one ' +
+            'and echoes it back in the response header for distributed tracing.',
+          schema: { type: 'string', format: 'uuid' },
         },
       },
       schemas: {
+        ErrorEnvelope: {
+          type: 'object',
+          required: ['status', 'message', 'error'],
+          properties: {
+            status: { type: 'integer', example: 400 },
+            message: {
+              type: 'string',
+              example:
+                'Some of the information you provided is invalid. Please check and try again.',
+            },
+            error: {
+              type: 'object',
+              required: ['code', 'message'],
+              properties: {
+                code: { type: 'string', example: 'VALIDATION_ERROR' },
+                message: { type: 'string', example: 'Validation failed' },
+                correlationId: { type: 'string', format: 'uuid' },
+                details: { type: 'object', nullable: true },
+              },
+            },
+          },
+        },
         PaginationMeta: {
           type: 'object',
           properties: {
             count: { type: 'integer' },
             total: { type: 'integer' },
-            nextCursor: { type: 'string' },
-            prevCursor: { type: 'string' },
+            nextCursor: { type: 'string', nullable: true },
+            prevCursor: { type: 'string', nullable: true },
             currentPage: { type: 'integer' },
             totalPages: { type: 'integer' },
             hasNextPage: { type: 'boolean' },
             hasPrevPage: { type: 'boolean' },
           },
         },
-        Error: {
+        VaultSummary: {
           type: 'object',
           properties: {
-            error: { type: 'string' },
-            status: { type: 'integer' },
-            message: { type: 'string' },
+            totalAssets: { type: 'number', example: 0 },
+            totalShares: { type: 'number', example: 0 },
+            apy: { type: 'number', example: 0 },
+            timestamp: { type: 'string', format: 'date-time' },
+          },
+        },
+        DepositRequest: {
+          type: 'object',
+          required: ['amount', 'asset', 'walletAddress'],
+          properties: {
+            amount: { type: 'string', example: '100.00' },
+            asset: { type: 'string', example: 'USDC' },
+            walletAddress: { type: 'string', example: 'GABC...' },
+          },
+        },
+        DepositResponse: {
+          type: 'object',
+          properties: {
+            txHash: { type: 'string', example: 'a1b2c3...' },
+            shares: { type: 'string', example: '99.5' },
           },
         },
       },
     },
+    tags: [
+      { name: 'System', description: 'Health, readiness, and metrics' },
+      { name: 'Auth', description: 'Wallet authentication' },
+      { name: 'Vault', description: 'Deposits, withdrawals, and strategy' },
+      { name: 'Reads', description: 'Portfolio, transactions, and history' },
+      { name: 'Referrals', description: 'Referral codes and stats' },
+      { name: 'Admin', description: 'Operational/admin endpoints (API key required)' },
+    ],
+    paths: {
+      '/health': {
+        get: {
+          tags: ['System'],
+          summary: 'Liveness probe',
+          description: 'Returns immediately with service health status and dependency checks.',
+          parameters: [{ $ref: '#/components/parameters/correlationId' }],
+          responses: {
+            '200': {
+              description: 'Service healthy',
+              content: {
+                'application/json': {
+                  example: {
+                    status: 'healthy',
+                    timestamp: '2024-01-01T00:00:00.000Z',
+                    uptime: 123.4,
+                    environment: 'production',
+                    checks: { api: 'up', cache: 'up', stellarRpc: 'up' },
+                  },
+                },
+              },
+            },
+            '503': { description: 'One or more dependencies are down' },
+          },
+        },
+      },
+      '/ready': {
+        get: {
+          tags: ['System'],
+          summary: 'Readiness probe',
+          description: 'Returns 200 only when all critical dependencies are available.',
+          parameters: [{ $ref: '#/components/parameters/correlationId' }],
+          responses: {
+            '200': { description: 'Ready for traffic' },
+            '503': { description: 'Not ready' },
+          },
+        },
+      },
+      '/metrics': {
+        get: {
+          tags: ['System'],
+          summary: 'Prometheus metrics',
+          description: 'Exposes Prometheus-scraped metrics (request counts, latency, vault TVL).',
+          responses: {
+            '200': { description: 'Prometheus exposition format' },
+          },
+        },
+      },
+      '/auth/login': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Wallet login',
+          description: 'Issues a 15-min access JWT + 7-day refresh token. ' + RATE_LIMIT_NOTE,
+          parameters: [{ $ref: '#/components/parameters/correlationId' }],
+          responses: {
+            '200': { description: 'Authenticated', content: { 'application/json': { example: { accessToken: 'jwt...', refreshToken: 'jwt...' } } } },
+            '401': { description: 'Authentication failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/auth/refresh': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Rotate refresh token',
+          description: 'Issues a new access JWT; reuse of a revoked refresh token is rejected (401).',
+          responses: {
+            '200': { description: 'Refreshed' },
+            '401': { description: 'Invalid or revoked refresh token', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/api/v1/vault/summary': {
+        get: {
+          tags: ['Vault'],
+          summary: 'Vault summary',
+          description: 'Returns TVL, share price, and APY summary for the vault.',
+          responses: {
+            '200': { description: 'Summary', content: { 'application/json': { schema: { $ref: '#/components/schemas/VaultSummary' } } } },
+          },
+        },
+      },
+      '/api/v1/vault/deposits': {
+        post: {
+          tags: ['Vault'],
+          summary: 'Deposit into the vault',
+          description: 'Creates a deposit. Requires allowlisted wallet. ' + RATE_LIMIT_NOTE,
+          security: [{ idempotencyKey: [] }],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DepositRequest' }, example: { amount: '100.00', asset: 'USDC', walletAddress: 'GABC...' } } },
+          },
+          responses: {
+            '201': { description: 'Deposit submitted', content: { 'application/json': { schema: { $ref: '#/components/schemas/DepositResponse' } } } },
+            '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+            '403': { description: 'Wallet not allowlisted', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/api/v1/vault/withdrawals': {
+        post: {
+          tags: ['Vault'],
+          summary: 'Withdraw from the vault',
+          description: 'Creates a withdrawal of claimable balance. ' + RATE_LIMIT_NOTE,
+          security: [{ idempotencyKey: [] }],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DepositRequest' } } },
+          },
+          responses: {
+            '201': { description: 'Withdrawal submitted' },
+            '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/api/v1/vault/strategy': {
+        get: {
+          tags: ['Vault'],
+          summary: 'Active strategy',
+          description: 'Returns the currently selected vault strategy.',
+          responses: { '200': { description: 'Strategy' } },
+        },
+      },
+      '/api/transactions': {
+        get: {
+          tags: ['Reads'],
+          summary: 'List transactions',
+          description: 'Paginated transaction history. Supports cursor + page pagination.',
+          parameters: [
+            { name: 'cursor', in: 'query', schema: { type: 'string' } },
+            { name: 'page', in: 'query', schema: { type: 'integer' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer' } },
+          ],
+          responses: {
+            '200': { description: 'Transactions', content: { 'application/json': { example: { data: [], meta: { count: 0, total: 0, hasNextPage: false } } } } },
+          },
+        },
+      },
+      '/api/portfolio/holdings': {
+        get: {
+          tags: ['Reads'],
+          summary: 'Portfolio holdings',
+          responses: { '200': { description: 'Holdings' } },
+        },
+      },
+      '/api/vault/history': {
+        get: {
+          tags: ['Reads'],
+          summary: 'Vault history',
+          responses: { '200': { description: 'History' } },
+        },
+      },
+      '/api/vault/apy/history': {
+        get: {
+          tags: ['Reads'],
+          summary: 'APY history',
+          responses: { '200': { description: 'APY history' } },
+        },
+      },
+      '/referrals/:wallet': {
+        get: {
+          tags: ['Referrals'],
+          summary: 'Referral stats for a wallet',
+          parameters: [{ name: 'wallet', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Stats' },
+            '404': { description: 'No referral activity', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/referrals/code/:wallet': {
+        get: {
+          tags: ['Referrals'],
+          summary: 'Referral code for a wallet',
+          parameters: [{ name: 'wallet', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Referral code' } },
+        },
+      },
+      '/admin/allowlist': {
+        get: {
+          tags: ['Admin'],
+          summary: 'List allowlisted wallets',
+          security: [{ apiKeyAuth: [] }],
+          responses: {
+            '200': { description: 'Allowlist' },
+            '403': { description: 'Missing API key', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/admin/webhooks': {
+        get: {
+          tags: ['Admin'],
+          summary: 'List webhook endpoints',
+          security: [{ apiKeyAuth: [] }],
+          responses: { '200': { description: 'Webhooks' } },
+        },
+        post: {
+          tags: ['Admin'],
+          summary: 'Register webhook endpoint',
+          security: [{ apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string' }, eventTypes: { type: 'array', items: { type: 'string' } }, enabled: { type: 'boolean' } } } } },
+          },
+          responses: {
+            '201': { description: 'Registered' },
+            '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
+          },
+        },
+      },
+      '/admin/audit-logs': {
+        get: {
+          tags: ['Admin'],
+          summary: 'List admin audit logs',
+          security: [{ apiKeyAuth: [] }],
+          responses: { '200': { description: 'Audit logs' } },
+        },
+      },
+    },
   },
-  apis: ['./src/index.ts', './src/listEndpoints.ts', './src/swagger.ts'], // Files containing annotations
+  apis: [],
 };
 
 export const specs = swaggerJsdoc(options);
-*/
 
-export const specs = {};
-
-export function setupSwagger(app: Express) {
-  const nodeEnv = process.env.NODE_ENV || 'development';
-
-  if (nodeEnv !== 'production') {
-    /* eslint-disable-next-line no-console */
-    console.log('📝 Swagger documentation available at /docs (when swagger dependencies are installed)');
+/**
+ * Mounts Swagger UI at `/docs` (unless explicitly disabled via
+ * `DISABLE_SWAGGER=true`). The spec is also available as raw JSON at
+ * `/docs/openapi.json` for CI verification and third-party tooling.
+ */
+export function setupSwagger(app: Express): void {
+  if (process.env.DISABLE_SWAGGER === 'true') {
+    return;
   }
+
+  app.get('/docs/openapi.json', (_req, res) => {
+    res.json(specs);
+  });
+
+  app.use(
+    '/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(specs, {
+      customSiteTitle: 'YieldVault API',
+      swaggerOptions: {
+        docExpansion: 'list',
+        persistAuthorization: true,
+      },
+    }),
+  );
 }

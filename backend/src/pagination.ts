@@ -164,7 +164,7 @@ export function paginateWithCursor<T>(
 ): { data: T[]; pagination: PaginationMeta } {
   const limit = query.limit || DEFAULT_PAGINATION_CONFIG.defaultLimit;
   let startIndex = 0;
-  let invalidCursor = false;
+  const invalidCursor = false;
 
   if (query.page && query.page > 0) {
     startIndex = (query.page - 1) * limit;

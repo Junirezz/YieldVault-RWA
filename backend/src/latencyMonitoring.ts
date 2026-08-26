@@ -222,12 +222,12 @@ export class LatencyMonitoringService {
 
   private normalizeEndpoint(endpoint: string): string {
     // Convert dynamic paths like /api/v1/vault/123 to /api/v1/vault/:id
-    if (endpoint.match(/^\/api\/v1\/vault\/[^\/]+$/)) {
+    if (endpoint.match(/^\/api\/v1\/vault\/[^/]+$/)) {
       return '/api/v1/vault/:id';
     }
     
     // Handle other dynamic patterns like /api/v1/resource/123
-    const match = endpoint.match(/^\/api\/v1\/([^\/]+)\/[^\/]+$/);
+    const match = endpoint.match(/^\/api\/v1\/([^/]+)\/[^/]+$/);
     if (match) {
       return `/api/v1/${match[1]}/:id`;
     }

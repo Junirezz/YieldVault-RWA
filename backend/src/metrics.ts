@@ -48,6 +48,22 @@ export const cacheMissCount = new Counter({
   registers: [register],
 });
 
+// --- Error / Alerting Metrics ---
+
+export const httpErrorCount = new Counter({
+  name: 'http_error_count',
+  help: 'Total number of HTTP responses with a 5xx status code (critical errors for alerting)',
+  labelNames: ['method', 'route', 'status_code'],
+  registers: [register],
+});
+
+export const httpClientErrorCount = new Counter({
+  name: 'http_client_error_count',
+  help: 'Total number of HTTP responses with a 4xx status code',
+  labelNames: ['method', 'route', 'status_code'],
+  registers: [register],
+});
+
 // --- Vault Specific Metrics ---
 
 export const vaultTvl = new Gauge({

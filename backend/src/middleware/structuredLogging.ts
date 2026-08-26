@@ -1,5 +1,6 @@
 import type { Response, NextFunction, RequestHandler } from 'express';
 import type { CorrelationIdRequest } from './correlationId';
+import { getCurrentTraceId } from '../tracing';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -8,6 +9,7 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   correlationId?: string;
+  traceId?: string;
   method?: string;
   url?: string;
   durationMs?: number;
@@ -42,6 +44,9 @@ class Logger {
       timestamp: new Date().toISOString(),
       level,
       message,
+      // Attach the active OpenTelemetry trace id automatically so every log line
+      // can be correlated with a distributed trace (observability requirement).
+      traceId: getCurrentTraceId(),
       ...fields,
     };
 

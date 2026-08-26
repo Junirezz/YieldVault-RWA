@@ -18,6 +18,15 @@ import { startApySnapshotScheduler } from './apySnapshot';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import {
+  errorHandler,
+  notFoundHandler,
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  InternalError,
+  RateLimitError,
+} from './errors';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats } from './middleware/cache';
@@ -50,6 +59,8 @@ import {
   httpResponseTime,
   activeConnections,
   updateVaultMetrics,
+  httpErrorCount,
+  httpClientErrorCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { startEventPollingService, stopEventPollingService } from './eventPollingService';
@@ -62,6 +73,7 @@ import {
   getWebhookDeliveryMetrics,
 } from './webhookDelivery';
 import { getJobMetrics, getJobHealthStatus } from './jobGovernance';
+import { setupSwagger } from './swagger';
 
 declare global {
   namespace Express {
@@ -157,14 +169,11 @@ const globalLimiter = rateLimit({
     // Skip rate limiting for health and ready checks
     return req.path === '/health' || req.path === '/ready';
   },
-  handler: (req: Request, res: Response) => {
+  handler: (req: Request, _res: Response) => {
     const retryAfter = req.rateLimit?.resetTime ? Number(req.rateLimit.resetTime) : undefined;
-    res.status(429).json({
-      error: 'Too many requests',
-      status: 429,
-      message: 'Rate limit exceeded. Please try again later.',
-      retryAfter,
-    });
+    throw new RateLimitError('Rate limit exceeded. Please try again later.').withDetails(
+      retryAfter ? { retryAfter } : undefined,
+    );
   },
 });
 
@@ -181,12 +190,9 @@ const apiLimiter = rateLimit({
   },
   handler: (req: Request, res: Response) => {
     const retryAfter = req.rateLimit?.resetTime ? Number(req.rateLimit.resetTime) : undefined;
-    res.status(429).json({
-      error: 'API rate limit exceeded',
-      status: 429,
-      message: 'Too many API requests. Please try again later.',
-      retryAfter,
-    });
+    throw new RateLimitError('Too many API requests. Please try again later.').withDetails(
+      retryAfter ? { retryAfter } : undefined,
+    );
   },
 });
 
@@ -224,6 +230,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+
+    // Track error rates for alerting (5xx = critical, 4xx = client error).
+    if (res.statusCode >= 500) {
+      httpErrorCount.inc(labels);
+    } else if (res.statusCode >= 400) {
+      httpClientErrorCount.inc(labels);
+    }
 
     // Record latency for SLO monitoring (only track successful requests)
     if (res.statusCode < 400) {
@@ -466,8 +479,7 @@ app.get('/admin/cache/stats', validateApiKey, (_req: Request, res: Response) => 
 app.post('/admin/allowlist/add', validateApiKey, (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const added = addAddress(walletAddress);
   res.status(added ? 201 : 200).json({
@@ -486,13 +498,11 @@ app.post('/admin/allowlist/add', validateApiKey, (req: Request, res: Response) =
 app.delete('/admin/allowlist/remove', validateApiKey, (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const removed = removeAddress(walletAddress);
   if (!removed) {
-    res.status(404).json({ error: 'Wallet address not found in allowlist' });
-    return;
+    throw new NotFoundError('Wallet address not found in allowlist');
   }
   res.json({
     message: 'Wallet removed from allowlist',
@@ -532,22 +542,12 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
 
   if (!wallet) {
     req.adminAuditAction = 'admin.impersonate.invalid';
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'wallet path parameter is required',
-    });
-    return;
+    throw new ValidationError('wallet path parameter is required');
   }
 
   if (!hasRequiredApiKeyRole(req, 'super-admin')) {
     req.adminAuditAction = 'admin.impersonate.denied';
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required for impersonation',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required for impersonation');
   }
 
   req.adminAuditAction = 'admin.impersonate';
@@ -561,11 +561,7 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
       ...req.adminAuditMetadata,
       error: error instanceof Error ? error.message : String(error),
     };
-    res.status(500).json({
-      error: 'Internal Server Error',
-      status: 500,
-      message: 'Failed to build impersonated vault state',
-    });
+    throw new InternalError('Failed to build impersonated vault state');
   }
 });
 
@@ -576,18 +572,12 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
 app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Response) => {
   const { key, role: requestedRole } = req.body;
   if (!key) {
-    res.status(400).json({ error: 'Missing key in request body' });
-    return;
+    throw new ValidationError('Missing key in request body');
   }
 
   const role = normalizeApiKeyRole(requestedRole) || 'admin';
   if (role === 'super-admin' && !hasRequiredApiKeyRole(req, 'super-admin')) {
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required to register super-admin API keys',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required to register super-admin API keys');
   }
 
   const hash = registerApiKey(key, { role });
@@ -603,63 +593,37 @@ app.post('/admin/api-keys/register', validateApiKey, (req: Request, res: Respons
  * POST /admin/webhooks - register webhook endpoint for transaction events
  */
 app.post('/admin/webhooks', validateApiKey, (req: Request, res: Response) => {
-  try {
-    const { url, eventTypes, enabled, secret } = req.body;
-    if (!url || typeof url !== 'string') {
-      res.status(400).json({
-        error: 'Bad Request',
-        status: 400,
-        message: 'url is required and must be a string',
-      });
-      return;
-    }
-
-    const endpoint = registerWebhookEndpoint({
-      url,
-      eventTypes,
-      enabled,
-      secret,
-    });
-
-    res.status(201).json({
-      message: 'Webhook endpoint registered',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
-    });
+  const { url, eventTypes, enabled, secret } = req.body;
+  if (!url || typeof url !== 'string') {
+    throw new ValidationError('url is required and must be a string');
   }
+
+  const endpoint = registerWebhookEndpoint({
+    url,
+    eventTypes,
+    enabled,
+    secret,
+  });
+
+  res.status(201).json({
+    message: 'Webhook endpoint registered',
+    endpoint,
+  });
 });
 
 /**
  * PATCH /admin/webhooks/:id - update webhook endpoint
  */
 app.patch('/admin/webhooks/:id', validateApiKey, (req: Request, res: Response) => {
-  try {
-    const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
-    if (!endpoint) {
-      res.status(404).json({
-        error: 'Not Found',
-        status: 404,
-        message: 'Webhook endpoint not found',
-      });
-      return;
-    }
-
-    res.status(200).json({
-      message: 'Webhook endpoint updated',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Failed to update webhook endpoint',
-    });
+  const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
+  if (!endpoint) {
+    throw new NotFoundError('Webhook endpoint not found');
   }
+
+  res.status(200).json({
+    message: 'Webhook endpoint updated',
+    endpoint,
+  });
 });
 
 /**
@@ -945,44 +909,21 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
+// ─── 404 Handler ────────────────────────────────────────────────────────────
+// Registered before the error handler so unmatched routes emit the standard
+// error envelope rather than passing through the catch-all error middleware.
+
+app.use(notFoundHandler);
+
+// ─── API Documentation (Swagger UI) ──────────────────────────────────────────
+// Served at /docs (interactive) and /docs/openapi.json (raw spec, verified by CI).
+setupSwagger(app);
+
 // ─── Error Handler ──────────────────────────────────────────────────────────
-
-const errorHandler: ErrorRequestHandler = (
-  err: any,
-  req: CorrelationIdRequest,
-  res: Response,
-  _next: NextFunction,
-) => {
-  logger.log('error', 'Unhandled error', {
-    correlationId: req.correlationId,
-    traceId: getCurrentTraceId(),
-    error: err.message,
-    stack: nodeEnv === 'development' ? err.stack : undefined,
-  });
-
-  res.status(500).json({
-    error: 'Internal Server Error',
-    status: 500,
-    message:
-      nodeEnv === 'production'
-        ? 'An unexpected error occurred'
-        : err.message,
-    correlationId: req.correlationId,
-  });
-};
+// Centralised, unified error handling (see ./errors). Normalises every thrown
+// value, logs with correlation id + trace id, and returns the standard envelope.
 
 app.use(errorHandler);
-
-// ─── 404 Handler ────────────────────────────────────────────────────────────
-
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Not Found',
-    status: 404,
-    path: req.path,
-    message: `${req.method} ${req.path} not found`,
-  });
-});
 
 // ─── Server Start ───────────────────────────────────────────────────────────
 

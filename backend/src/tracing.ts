@@ -23,6 +23,7 @@ import {
 } from '@opentelemetry/api';
 
 const OTEL_ENABLED = process.env.NODE_ENV !== 'test' && process.env.OTEL_ENABLED !== 'false';
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'yieldvault-backend';
 const OTLP_ENDPOINT =
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
