@@ -29,7 +29,7 @@ export interface UserPreferences {
 const STORAGE_KEY_PREFIX = "yieldvault-preferences";
 
 const DEFAULT_PREFERENCES: UserPreferences = {
-  theme: 'dark',
+  theme: 'system',
   locale: 'en-US',
   currency: 'USD',
   notifications: {

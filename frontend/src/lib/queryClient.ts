@@ -1,30 +1,39 @@
 import { QueryClient } from "@tanstack/react-query";
+import { persistQueryClient } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 
 /**
  * Global QueryClient configuration for React Query caching layer.
- * 
- * Cache Strategy:
- * - Vault data: 30s stale time (relatively stable)
- * - Portfolio holdings: 20s stale time (user-specific, moderate updates)
- * - Transactions: 15s stale time (frequently updated)
- * - Balance data: 10s stale time (real-time critical)
- * 
- * All queries cache for 5 minutes after becoming unused.
+ *
+ * Cache strategy (stale-while-revalidate):
+ * - Fresh data is served from cache until staleTime elapses
+ * - A background refetch runs after staleTime (SWR)
+ * - Unused cache is retained for gcTime and dehydrated for offline reuse
+ *
+ * Domain stale times:
+ * - Vault data: 30s
+ * - Portfolio holdings: 20s
+ * - Transactions: 15s
+ * - Balance data: 10s
  */
+export const QUERY_CACHE_KEY = "yieldvault-query-cache";
+export const QUERY_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Global defaults
-      staleTime: 30000, // 30 seconds - data considered fresh
-      gcTime: 5 * 60 * 1000, // 5 minutes - cache retention after unused
-      retry: 2, // Retry failed requests twice
-      refetchOnWindowFocus: true, // Refetch when user returns to tab
-      refetchOnReconnect: true, // Refetch when network reconnects
-      refetchOnMount: true, // Refetch when component mounts if data is stale
+      staleTime: 30_000,
+      gcTime: QUERY_CACHE_MAX_AGE_MS,
+      retry: 2,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: true,
+      networkMode: "offlineFirst",
+      placeholderData: (previousData: unknown) => previousData,
     },
     mutations: {
-      // Mutations don't retry by default to avoid duplicate operations
       retry: 0,
+      networkMode: "offlineFirst",
     },
   },
 });
@@ -59,3 +68,62 @@ export const queryKeys = {
       [...queryKeys.balance.all, "xlm", walletAddress] as const,
   },
 } as const;
+
+export function invalidateVaultQueries(client: QueryClient = queryClient) {
+  return client.invalidateQueries({ queryKey: queryKeys.vault.all });
+}
+
+export function invalidatePortfolioQueries(
+  client: QueryClient = queryClient,
+  walletAddress?: string | null,
+) {
+  return client.invalidateQueries({
+    queryKey: walletAddress
+      ? queryKeys.portfolio.holdings(walletAddress)
+      : queryKeys.portfolio.all,
+  });
+}
+
+export function invalidateTransactionQueries(
+  client: QueryClient = queryClient,
+  walletAddress?: string | null,
+) {
+  return client.invalidateQueries({
+    queryKey: walletAddress
+      ? queryKeys.transactions.list(walletAddress)
+      : queryKeys.transactions.all,
+  });
+}
+
+export function invalidateBalanceQueries(
+  client: QueryClient = queryClient,
+) {
+  return client.invalidateQueries({
+    queryKey: queryKeys.balance.all,
+  });
+}
+
+export function setupQueryPersistence(client: QueryClient = queryClient): () => void {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+  if (import.meta.env.MODE === "test") {
+    return () => undefined;
+  }
+
+  const persister = createSyncStoragePersister({
+    storage: window.localStorage,
+    key: QUERY_CACHE_KEY,
+  });
+
+  const [unsubscribe] = persistQueryClient({
+    queryClient: client,
+    persister,
+    maxAge: QUERY_CACHE_MAX_AGE_MS,
+    dehydrateOptions: {
+      shouldDehydrateQuery: (query) => query.state.status === "success",
+    },
+  }) as unknown as [() => void];
+
+  return typeof unsubscribe === "function" ? unsubscribe : () => undefined;
+}
