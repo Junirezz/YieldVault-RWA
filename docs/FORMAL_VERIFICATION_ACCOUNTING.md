@@ -66,5 +66,6 @@ $$
 
 ## 3. Formal Verification Tool Integration
 
-- **Property Tests**: Executable invariant assertions in `contracts/vault/src/formal_verification_tests.rs` and `contracts/share-price-math/src/fuzz_invariants.rs`.
+- **Property Tests**: Executable invariant assertions in `contracts/vault/src/formal_verification_tests.rs`, `contracts/vault/src/invariants.rs`, and `contracts/share-price-math/src/fuzz_invariants.rs`.
+- **Contract-level enforcement**: `YieldVault::persist_accounting_state` rejects `VaultState` writes that violate I1–I5 (`docs/VAULT_INVARIANTS.md`). Failures surface as `VaultError::MathOverflow`.
 - **SMT Solver Specification**: Key pre/post conditions specified for Z3 / Certora prover integrations.

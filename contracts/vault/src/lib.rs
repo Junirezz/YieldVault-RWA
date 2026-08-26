@@ -44,7 +44,9 @@
 //! Run all tests with `cargo test`. Key test suites:
 //! - `src/test.rs` — Core vault logic (50+ tests)
 //! - `src/fuzz_math.rs` — Math safety (10,000+ property tests)
-//! - `src/oracle_tests.rs` — Oracle validation (10+ tests)
+//! - `src/oracle_tests.rs` / `src/oracle_failure_tests.rs` — Oracle validation and failure modes
+//! - `src/invariants.rs` / `src/invariant_tests.rs` — Total-supply and share-price invariants
+//! - `src/risk_limits.rs` / `src/risk_limits_tests.rs` — Protocol exposure caps
 //! - `src/event_tests.rs` — Event emission (5+ tests)
 //! - `src/proxy_tests.rs` — Upgrade & storage (4+ tests)
 //!
@@ -85,12 +87,16 @@ pub mod liquidation_safeguards;
 pub mod math;
 pub mod operational_events;
 #[cfg(test)]
+mod oracle_failure_tests;
+#[cfg(test)]
 mod oracle_tests;
 pub mod packed_storage;
 pub mod permissions;
 #[cfg(test)]
 pub mod proxy_tests;
 pub mod recovery_sequence;
+#[cfg(test)]
+mod risk_limits_tests;
 pub mod rounding_consistency;
 pub mod storage_registry;
 pub mod strategy;
@@ -102,12 +108,16 @@ mod timelock_tests;
 pub mod upgrade;
 pub mod withdrawal_queue_safety;
 
+pub mod invariants;
 pub mod oracle;
+pub mod risk_limits;
 pub mod strategy_heartbeat;
 pub mod strategy_registration;
 pub mod telemetry;
 pub mod timelock;
 pub mod whitelist;
+
+pub use risk_limits::ProtocolRiskLimits;
 
 use crate::strategy::StrategyClient;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
@@ -223,6 +233,18 @@ pub struct UserBalanceKey {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RiskExtKey {
+    LastPx,
+    MaxTvl,
+    MaxConc,
+    MaxDep,
+    Stress,
+    StrConc,
+    StrDep,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKeyExt {
     // Treasury claim quota / epoch accounting
     TreasuryClaimEpochDuration,
@@ -250,6 +272,9 @@ pub enum DataKeyExt {
 
     // Issue #1174: gate for the contract telemetry / debugging hook
     DiagnosticsEnabled,
+
+    // Issue #1173 / #1231: nested to stay within DataKeyExt variant limits
+    Risk(RiskExtKey),
 
     // Issue #1243: utilization-based dynamic fee curve (+ its queued change)
     FeeCurve,
@@ -781,10 +806,8 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
-        env.events().publish(
-            (symbol_short!("stratcd"),),
-            (now, cooldown),
-        );
+        env.events()
+            .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"), admin.clone()),
             (previous_strategy, strategy),
@@ -1244,6 +1267,69 @@ impl YieldVault {
                 total_assets: 0,
                 is_paused: false,
             })
+    }
+
+    /// Persist accounting state only when total-supply / share-price invariants hold.
+    fn persist_accounting_state(env: &Env, state: &VaultState) -> Result<(), VaultError> {
+        crate::invariants::assert_vault_state_invariants(state)?;
+        env.storage().instance().set(&DataKey::State, state);
+        Ok(())
+    }
+
+    fn bump_idle_accounting(env: &Env, assets: i128, shares: i128) {
+        let idle = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&DataKey::TotalAssets)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::TotalAssets,
+            &idle.checked_add(assets).expect("overflow"),
+        );
+        let ts = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&DataKey::TotalShares)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &ts.checked_add(shares).expect("overflow"),
+        );
+    }
+
+    fn load_protocol_limits(env: &Env) -> crate::risk_limits::ProtocolRiskLimits {
+        crate::risk_limits::ProtocolRiskLimits {
+            max_vault_tvl: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::MaxTvl))
+                .unwrap_or(0),
+            max_strategy_concentration_bps: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::MaxConc))
+                .unwrap_or(crate::risk_limits::DEFAULT_MAX_CONCENTRATION_BPS),
+            max_deployed_bps: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::MaxDep))
+                .unwrap_or(crate::risk_limits::DEFAULT_MAX_DEPLOYED_BPS),
+            stress_mode: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::Stress))
+                .unwrap_or(false),
+            stress_max_strategy_concentration_bps: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::StrConc))
+                .unwrap_or(crate::risk_limits::DEFAULT_STRESS_CONCENTRATION_BPS),
+            stress_max_deployed_bps: env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::Risk(RiskExtKey::StrDep))
+                .unwrap_or(crate::risk_limits::DEFAULT_STRESS_DEPLOYED_BPS),
+        }
     }
 
     pub fn token(env: Env) -> Address {
@@ -1748,10 +1834,8 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
-        env.events().publish(
-            (symbol_short!("stratcd"),),
-            (now, cooldown),
-        );
+        env.events()
+            .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"),),
             (previous_strategy, proposal.strategy),
@@ -1983,6 +2067,9 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        let limits = Self::load_protocol_limits(&env);
+        crate::risk_limits::check_deposit_tvl(state.total_assets, amount, limits.max_vault_tvl)?;
+
         // Goal 3: enforce minimum deposit
         let min_deposit: i128 = env
             .storage()
@@ -2058,7 +2145,8 @@ impl YieldVault {
             .total_shares
             .checked_add(shares_to_mint)
             .expect("overflow");
-        env.storage().instance().set(&DataKey::State, &state);
+        Self::persist_accounting_state(&env, &state)?;
+        Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
 
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
@@ -2160,6 +2248,9 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        let limits = Self::load_protocol_limits(&env);
+        crate::risk_limits::check_deposit_tvl(state.total_assets, amount, limits.max_vault_tvl)?;
+
         // Enforce minimum deposit
         let min_deposit: i128 = env
             .storage()
@@ -2233,7 +2324,8 @@ impl YieldVault {
             .total_shares
             .checked_add(shares_to_mint)
             .expect("overflow");
-        env.storage().instance().set(&DataKey::State, &state);
+        Self::persist_accounting_state(&env, &state)?;
+        Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
 
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
@@ -2420,7 +2512,7 @@ impl YieldVault {
         }
 
         // Persist the updated vault state once after all entries are processed
-        env.storage().instance().set(&DataKey::State, &state);
+        Self::persist_accounting_state(&env, &state)?;
 
         env.events().publish(
             (symbol_short!("batchdep"), relayer.clone()),
@@ -2456,6 +2548,9 @@ impl YieldVault {
             return Err(VaultError::MinDepositNotMet);
         }
 
+        let limits = Self::load_protocol_limits(env);
+        crate::risk_limits::check_deposit_tvl(state.total_assets, amount, limits.max_vault_tvl)?;
+
         // Compute shares using current in-memory state (updated incrementally)
         let shares_to_mint =
             crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
@@ -2486,6 +2581,7 @@ impl YieldVault {
             .total_shares
             .checked_add(shares_to_mint)
             .expect("overflow");
+        crate::invariants::assert_vault_state_invariants(state)?;
 
         // Update user share balance
         let user_key = DataKey::ShareBalance(user.clone());
@@ -2661,7 +2757,7 @@ impl YieldVault {
             .checked_sub(assets_to_return)
             .expect("underflow");
         state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
-        env.storage().instance().set(&DataKey::State, state);
+        Self::persist_accounting_state(env, state)?;
 
         // Burn precedence rule: proportional cost-basis reduction.
         //
@@ -2776,7 +2872,7 @@ impl YieldVault {
             .total_assets
             .checked_sub(assets_to_return)
             .expect("underflow");
-        env.storage().instance().set(&DataKey::State, state);
+        Self::persist_accounting_state(env, state)?;
 
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
@@ -2909,6 +3005,13 @@ impl YieldVault {
             return Err(VaultError::ExceedsRiskThreshold);
         }
 
+        crate::risk_limits::check_invest_exposure(
+            total_assets,
+            total_invested,
+            amount,
+            &Self::load_protocol_limits(&env),
+        )?;
+
         // Approve and deposit to strategy
         let token_client = token::Client::new(&env, &token_addr);
         token_client.approve(
@@ -3006,6 +3109,15 @@ impl YieldVault {
         let to_client = StrategyClient::new(&env, &to_strategy);
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
+
+        let to_strategy_preview =
+            Self::validate_strategy_response(&env, &to_strategy, &token_addr)?;
+        crate::risk_limits::check_invest_exposure(
+            Self::total_assets(env.clone()),
+            to_strategy_preview,
+            amount,
+            &Self::load_protocol_limits(&env),
+        )?;
 
         // Measure actual token balance before divest
         let vault_bal_before = token_client.balance(&env.current_contract_address());
@@ -3174,7 +3286,7 @@ impl YieldVault {
             );
         }
 
-        env.storage().instance().set(&DataKey::State, &state);
+        Self::persist_accounting_state(&env, &state)?;
         Ok(())
     }
 
@@ -3968,6 +4080,9 @@ impl YieldVault {
         env.storage()
             .instance()
             .remove(&DataKeyExt::PendingPriceOracle);
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
         env.events()
             .publish((symbol_short!("oraclech"),), pending.new_value);
         Ok(())
@@ -4105,6 +4220,102 @@ impl YieldVault {
         Ok(())
     }
 
+    /// Returns the absolute allocation cap for `strategy` (`i128::MAX` if unset).
+    pub fn strategy_cap(env: Env, strategy: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StrategyCap(strategy))
+            .unwrap_or(i128::MAX)
+    }
+
+    /// Returns the per-strategy risk threshold in bps (default 10000).
+    pub fn strategy_risk_threshold(env: Env, strategy: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StrategyRiskThreshold(strategy))
+            .unwrap_or(10_000)
+    }
+
+    /// Set the protocol-wide maximum vault TVL. `0` means unlimited.
+    pub fn set_max_vault_tvl(env: Env, tvl: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if tvl < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::MaxTvl), &tvl);
+        Ok(())
+    }
+
+    /// Set the protocol-wide max single-strategy concentration in bps (0–10000).
+    pub fn set_max_conc_bps(env: Env, bps: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        crate::risk_limits::validate_bps(bps)?;
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::MaxConc), &bps);
+        Ok(())
+    }
+
+    /// Set the protocol-wide max deployed-capital ratio in bps (0–10000).
+    pub fn set_max_deployed_bps(env: Env, bps: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        crate::risk_limits::validate_bps(bps)?;
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::MaxDep), &bps);
+        Ok(())
+    }
+
+    /// Enable or disable stress mode, which applies the tighter stress caps.
+    pub fn set_stress_mode(env: Env, enabled: bool) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::Stress), &enabled);
+        Ok(())
+    }
+
+    /// Configure the stress-mode concentration and deployed caps (bps, 0–10000).
+    pub fn set_stress_limits(
+        env: Env,
+        concentration_bps: i128,
+        deployed_bps: i128,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        crate::risk_limits::validate_bps(concentration_bps)?;
+        crate::risk_limits::validate_bps(deployed_bps)?;
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::StrConc), &concentration_bps);
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::StrDep), &deployed_bps);
+        Ok(())
+    }
+
+    pub fn max_vault_tvl(env: Env) -> i128 {
+        Self::load_protocol_limits(&env).max_vault_tvl
+    }
+
+    pub fn max_conc_bps(env: Env) -> i128 {
+        Self::load_protocol_limits(&env).max_strategy_concentration_bps
+    }
+
+    pub fn max_deploy_bps(env: Env) -> i128 {
+        Self::load_protocol_limits(&env).max_deployed_bps
+    }
+
+    pub fn stress_mode(env: Env) -> bool {
+        Self::load_protocol_limits(&env).stress_mode
+    }
+
     /// Returns the per-strategy high-watermark used for performance-fee accounting.
     pub fn strategy_watermark(env: Env, strategy: Address) -> i128 {
         env.storage()
@@ -4179,7 +4390,7 @@ impl YieldVault {
 
         let mut state = Self::get_state(&env);
         state.total_assets = state.total_assets.checked_add(net_yield).expect("overflow");
-        env.storage().instance().set(&DataKey::State, &state);
+        Self::persist_accounting_state(&env, &state)?;
         Ok(())
     }
 

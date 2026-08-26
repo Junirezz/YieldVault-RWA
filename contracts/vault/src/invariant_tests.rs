@@ -186,11 +186,8 @@ fn assert_vault_invariants(vault: &YieldVaultClient<'_>, users: &[Address]) {
     );
 
     // Share price must match accounting total_assets / total_shares (scaled).
-    const SHARE_PRICE_SCALE: i128 = 1_000_000_000_000_000_000;
-    let expected_price = state_assets
-        .checked_mul(SHARE_PRICE_SCALE)
-        .expect("overflow")
-        / total_shares;
+    let expected_price = crate::invariants::share_price_from_totals(state_assets, total_shares)
+        .expect("share-price invariant");
     assert_eq!(
         vault.share_price(),
         expected_price,
@@ -481,4 +478,52 @@ fn test_invariant_share_price_monotonicity_under_deposits_and_withdrawals() {
     );
 
     assert_vault_invariants(&vault, &users);
+}
+
+// ─── Issue #1166: contract-level total-supply / share-price enforcement ──────
+
+#[test]
+fn test_contract_invariants_hold_across_deposit_yield_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &5_000);
+    usdc_sa.mint(&admin, &1_000);
+
+    vault.deposit(&user, &1_000);
+    assert_eq!(
+        crate::invariants::assert_vault_state_invariants(&crate::VaultState {
+            total_shares: vault.total_shares(),
+            total_assets: vault.calculate_assets(&vault.total_shares()),
+            is_paused: false,
+        }),
+        Ok(())
+    );
+
+    vault.accrue_yield(&250);
+    let shares = vault.total_shares();
+    let assets = vault.calculate_assets(&shares);
+    assert_eq!(
+        vault.share_price(),
+        crate::invariants::share_price_from_totals(assets, shares).unwrap()
+    );
+
+    vault.withdraw(&user, &vault.balance(&user));
+    assert_eq!(vault.total_shares(), 0);
+    assert_eq!(vault.share_price(), 0);
+}
+
+#[test]
+fn test_unbacked_shares_snapshot_is_rejected() {
+    let broken = crate::VaultState {
+        total_shares: 100,
+        total_assets: 0,
+        is_paused: false,
+    };
+    assert_eq!(
+        crate::invariants::assert_vault_state_invariants(&broken),
+        Err(crate::VaultError::MathOverflow)
+    );
 }
