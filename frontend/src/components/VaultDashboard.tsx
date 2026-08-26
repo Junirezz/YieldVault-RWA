@@ -53,6 +53,7 @@ import { saveVaultFormDraft, clearVaultFormDraft } from "../lib/formDraftStorage
 import { buildDepositSummary, buildWithdrawalSummary } from "../lib/transactionConfirmationBuilder";
 import TransactionConflictResolver from "./TransactionConflictResolver";
 import RiskSummaryCard, { type RiskAction } from "./RiskSummaryCard";
+import FeeUtilizationPanel from "./FeeUtilizationPanel";
 import {
   isTransactionConflict,
   type TransactionConflictDetails,
@@ -945,6 +946,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               </div>
             </div>
           </div>
+
+          <FeeUtilizationPanel
+            fees={summaryUnavailable ? undefined : summary.fees}
+            isLoading={delayedLoading}
+          />
 
           <RiskSummaryCard
             items={riskItems}
