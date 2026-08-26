@@ -106,6 +106,63 @@ describe("AccountStatementExport", () => {
     expect(mockGetTransactions).not.toHaveBeenCalled();
   });
 
+  it("filters statement by custom date range", async () => {
+    render(
+      <AccountStatementExport
+        walletAddress={WALLET}
+        holdings={holdings}
+        transactions={[
+          {
+            id: "1",
+            type: "deposit",
+            status: "completed",
+            amount: "100.00",
+            asset: "USDC",
+            timestamp: "2026-01-10T12:00:00Z",
+            transactionHash: "tx-1",
+          },
+          {
+            id: "2",
+            type: "withdraw",
+            status: "completed",
+            amount: "50.00",
+            asset: "USDC",
+            timestamp: "2026-03-20T12:00:00Z",
+            transactionHash: "tx-2",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /export statement/i }));
+
+    const startInput = screen.getByLabelText(/start date/i);
+    const endInput = screen.getByLabelText(/end date/i);
+
+    fireEvent.change(startInput, { target: { value: "2026-03-01" } });
+    fireEvent.change(endInput, { target: { value: "2026-03-31" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /download statement/i }));
+
+    await waitFor(() => {
+      expect(mockDownloadTextFile).toHaveBeenCalledTimes(1);
+    });
+
+    const arg = mockDownloadTextFile.mock.calls[0][0];
+    expect(arg.content).toContain("tx-2");
+    expect(arg.content).not.toContain("tx-1");
+  });
+
+  it("closes modal on cancel click", async () => {
+    render(<AccountStatementExport walletAddress={WALLET} holdings={holdings} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /export statement/i }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("surfaces an error when transaction fetch fails", async () => {
     mockGetTransactions.mockRejectedValue(new Error("Horizon unavailable"));
 
