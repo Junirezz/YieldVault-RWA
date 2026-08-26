@@ -47,6 +47,7 @@ import {
 import NetworkWarningBanner from "./components/NetworkWarningBanner";
 import OfflineBanner from "./components/OfflineBanner";
 import HighLatencyBanner from "./components/HighLatencyBanner";
+import NetworkBanner from "./components/NetworkBanner";
 import { useVault, VaultProvider } from "./context/VaultContext";
 import { usePageViewTracking } from "./hooks/useAnalytics";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -167,6 +168,7 @@ function AppContent() {
         <div className="app-container">
           <NetworkWarningBanner walletAddress={walletAddress} />
           <HighLatencyBanner />
+          <NetworkBanner />
           <Navbar
             walletAddress={walletAddress}
             usdcBalance={usdcBalance}
