@@ -271,8 +271,6 @@ pub enum DataKey {
     Pauser,
     EmergencyApprovers,
     Emergency(EmergencyStorageKey),
-    EmergencyProposalNonce,
-    EmergencyProposal(u32),
     AdminProposalNonce,
     AdminProposal(u32),
 
@@ -322,8 +320,6 @@ pub enum DataKey {
     // FIFO withdrawal queue + admin param guard metadata
     WithdrawalQueueMeta,
     WithdrawalQueueEntry(u64),
-    // Multisig governance configuration (nested to keep DataKey variant count within Soroban limits)
-    Governance(GovernanceStorageKey),
 }
 
 #[contracttype]
@@ -334,15 +330,6 @@ pub enum EmergencyStorageKey {
     ProposalNonce,
     Proposal(u32),
     DisputeWindow,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GovernanceStorageKey {
-    Signers,
-    Threshold,
-    MigrationDeadline,
-    PreviousSigners,
 }
 
 #[contracttype]
