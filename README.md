@@ -9,7 +9,7 @@ This project is structured as a monorepo containing both the Stellar Soroban sma
 - `/contracts/vault/`: Contains the Rust Soroban smart contract for handling the vault logic, fractional share minting (`yvUSDC`), scaling withdrawals, and simulated yield accrual.
 - `/contracts/mock-strategy/`: Contains test mock contracts for the Korean sovereign debt strategy and price oracle.
 - `/frontend/`: Contains the React + Vite frontend application, integrating `@stellar/freighter-api` for seamless user wallet connections and a premium UI to interact with the protocol.
-- `/docs/`: Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams, the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations, and the [Dependency Update Policy](./docs/DEPENDENCY_UPDATE_POLICY.md) for upgrade cadence, testing gates, CVE SLAs, and high-risk library requirements.
+- `/docs/`: Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), [Vault Invariants](./docs/VAULT_INVARIANTS.md), [Protocol Risk Limits](./docs/PROTOCOL_RISK_LIMITS.md), [Oracle Failure Handling](./docs/ORACLE_FAILURE_HANDLING.md), [Performance Regression Thresholds](./docs/PERFORMANCE_REGRESSION.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams, the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations, and the [Dependency Update Policy](./docs/DEPENDENCY_UPDATE_POLICY.md) for upgrade cadence, testing gates, CVE SLAs, and high-risk library requirements.
 
 ## Architecture
 
@@ -26,6 +26,8 @@ For a cross-layer view of ownership boundaries, API flow maps, event propagation
 | **BenjiStrategy**               | Test connector for BENJI fund token strategy                                                                     |
 | **MockKoreanSovereignStrategy** | Test mock for Korean debt strategy with stepped yield curve                                                      |
 | **OracleValidator**             | Standalone oracle price validation library (heartbeat, deviation, decimals)                                      |
+| **AccountingInvariants**        | Contract-level total-supply and share-price consistency checks                                                   |
+| **ProtocolRiskLimits**          | Protocol-wide TVL, concentration, and stress-mode exposure caps                                                  |
 | **MockPriceOracle**             | Test mock oracle with configurable failure modes                                                                 |
 
 ## Technology Stack

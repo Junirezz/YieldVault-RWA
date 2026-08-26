@@ -20,6 +20,7 @@ A shared reference for technical and product terminology used across the YieldVa
 - [Emergency Controls, Pause & Timelocks](#emergency-controls-pause--timelocks)
 - [Real-World Assets (RWA) — Terminology & Provenance](#real-world-assets-rwa--terminology--provenance)
 - [Oracle Price Validation & Heartbeats](#oracle-price-validation--heartbeats)
+- [Protocol Risk Limits & Accounting Invariants](#protocol-risk-limits--accounting-invariants)
 - [Access Controls — Whitelist, RBAC & Admin](#access-controls--whitelist-rbac--admin)
 - [Protocol Fees, Treasury & Basis Points](#protocol-fees-treasury--basis-points)
 - [RWA Shipment Tracking & Asset Provenance](#rwa-shipment-tracking--asset-provenance)
@@ -593,6 +594,9 @@ The error enum from oracle validation: `HeartbeatExceeded`, `PriceZero`, `PriceN
 **No-Fallback Policy**
 Deliberate design choice: the vault NEVER falls back to a cached/stale price if validation fails. Transaction reverts immediately. This prioritizes safety over availability for price-sensitive operations.
 
+**Last Validated Price** (`LastValidatedPrice`)
+Cached `(price, timestamp, decimals)` from the last oracle read that passed validation. Used as the reference for the deviation circuit breaker. Cleared when a new oracle address is executed via `execute_price_oracle_change()`.
+
 **StrategyHeartbeat vs OracleHeartbeat**
 | Dimension | StrategyHeartbeat | OracleHeartbeat |
 |-----------|-------------------|-----------------|
@@ -600,6 +604,27 @@ Deliberate design choice: the vault NEVER falls back to a cached/stale price if 
 | Who writes it | Strategy (periodic `record_heartbeat`) | Oracle service |
 | Default | 1 hour | 1 hour |
 | Failures block | invest / divest | total_assets / invest / divest |
+
+---
+
+## Protocol Risk Limits & Accounting Invariants
+
+See [PROTOCOL_RISK_LIMITS.md](./PROTOCOL_RISK_LIMITS.md) and [VAULT_INVARIANTS.md](./VAULT_INVARIANTS.md) for the full operator specs.
+
+**Protocol Risk Limits**
+Protocol-wide hard caps on vault exposure (Issue #1173), independent of per-strategy caps.
+
+**Max Vault TVL** (`MaxVaultTvl`)
+Hard cap on accounting total assets for new deposits. `0` = unlimited (default).
+
+**Max Strategy Concentration** (`MaxStrategyConcentrationBps`)
+Maximum share of TVL that may sit in a single strategy, in basis points. Default `10000` (100%).
+
+**Stress Mode** (`StressMode`)
+When enabled, concentration and deployed caps use `min(normal, stress)` so limits can only tighten. Disable after volatility subsides to restore the normal caps.
+
+**Accounting Invariants**
+Contract-level checks that `total_shares` / `total_assets` / share-price stay mathematically valid on every state persist.
 
 ---
 

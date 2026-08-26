@@ -217,6 +217,7 @@ Proptest regression files are checked into `contracts/vault/proptest-regressions
 | PR checks (implicit) | Every PR | Frontend unit + integration (`npm run test:run`), Backend tests (`npm test`), Contract tests (`cargo test -p vault`) |
 | `.github/workflows/e2e.yml` | PRs touching `frontend/**`, pushes to `main` | Playwright E2E suite (Chromium) |
 | `.github/workflows/load-tests.yml` | Weekly schedule (Mon 03:00 UTC) + manual dispatch | k6 load tests against staging |
+| `.github/workflows/nightly-benchmarks.yml` | Nightly 02:00 UTC + manual dispatch | Contract CPU/memory for deposit, withdraw, invest, switch strategy; posts GitHub Issue |
 
 All CI workflows upload failure artifacts (screenshots, videos, traces) for post-mortem analysis.
 
@@ -228,7 +229,7 @@ Coverage is enforced at the CI level for backend and tracked for frontend:
 | --- | --- | --- | --- |
 | Backend | Jest (`--coverage`) | 50% branches, functions, lines, statements | `backend/jest.config.js` → `coverageThreshold` |
 | Frontend | Vitest (`@vitest/coverage-v8`) | Tracked, not yet enforced | `cd frontend && npm run test:run -- --coverage` |
-| Contracts | Not yet instrumented | N/A | Future: `cargo-tarpaulin` or `grcov` |
+| Contracts | Not yet instrumented globally | Oracle modules targeted at 90% via `cargo test -p vault oracle` | See `docs/ORACLE_FAILURE_HANDLING.md` |
 
 ## Tools & Frameworks Overview
 
