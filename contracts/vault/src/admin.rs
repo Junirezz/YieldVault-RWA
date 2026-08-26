@@ -45,14 +45,18 @@ mod tests {
     #[test]
     fn test_admin_proposal_nonce_is_monotonic() {
         let env = Env::default();
-        assert_eq!(next_proposal_id(&env), 1);
-        assert_eq!(next_proposal_id(&env), 2);
-        assert_eq!(next_proposal_id(&env), 3);
+        let contract_id = env.register(crate::YieldVault, ());
+        env.as_contract(&contract_id, || {
+            assert_eq!(next_proposal_id(&env), 1);
+            assert_eq!(next_proposal_id(&env), 2);
+            assert_eq!(next_proposal_id(&env), 3);
+        });
     }
 
     #[test]
     fn test_admin_proposal_round_trip() {
         let env = Env::default();
+        let contract_id = env.register(crate::YieldVault, ());
         let proposer = Address::generate(&env);
         let new_admin = Address::generate(&env);
         let proposal = AdminProposal {
@@ -62,8 +66,10 @@ mod tests {
             cancelled: false,
             created_at: 42,
         };
-        write_proposal(&env, 1, &proposal);
-        let loaded = read_proposal(&env, 1).expect("proposal stored");
-        assert_eq!(loaded, proposal);
+        env.as_contract(&contract_id, || {
+            write_proposal(&env, 1, &proposal);
+            let loaded = read_proposal(&env, 1).expect("proposal stored");
+            assert_eq!(loaded, proposal);
+        });
     }
 }
