@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useLayoutEffect } from "react";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
 import {
   usePreferences,
   type UserPreferences,
@@ -16,6 +16,15 @@ import type {
   TransactionViewMode,
   UserPreferenceStoreData,
 } from '../lib/userPreferenceStore';
+import {
+  applyResolvedTheme,
+  dispatchThemeChange,
+  getSystemTheme,
+  persistThemePreference,
+  resolveTheme,
+  subscribeToSystemTheme,
+  type ResolvedTheme,
+} from "../lib/theme";
 
 interface PreferencesContextType {
   preferences: UserPreferences;
@@ -75,20 +84,18 @@ export const PreferencesProvider: React.FC<PreferencesProviderProps> = ({
     resetStore: resetUserPreferenceStore,
   } = useUserPreferenceStore(walletAddress);
 
-  // Resolve 'system' to an actual light/dark value
-  const resolvedTheme = useMemo((): 'light' | 'dark' => {
-    if (preferences.theme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return preferences.theme;
-  }, [preferences.theme]);
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme);
 
-  // Apply resolved theme to document root
+  useEffect(() => subscribeToSystemTheme(setSystemTheme), []);
+
+  const resolvedTheme: ResolvedTheme =
+    preferences.theme === "system" ? systemTheme : preferences.theme;
+
   useLayoutEffect(() => {
-    document.documentElement.setAttribute('data-theme', resolvedTheme);
-    // Persist the raw preference so ThemeContext (ThemeToggle) stays in sync
-    localStorage.setItem('theme', resolvedTheme);
-  }, [resolvedTheme]);
+    persistThemePreference(preferences.theme);
+    applyResolvedTheme(resolveTheme(preferences.theme));
+    dispatchThemeChange(preferences.theme);
+  }, [preferences.theme, resolvedTheme]);
 
   // Apply compact mode class
   useEffect(() => {

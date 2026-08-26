@@ -26,6 +26,8 @@
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.6.1",
     "@tanstack/react-query": "^5.95.2",
+    "@tanstack/react-query-persist-client": "^5.95.2",
+    "@tanstack/query-sync-storage-persister": "^5.95.2",
     "@tanstack/react-virtual": "^3.14.3",
     "canvas-confetti": "^1.9.4",
     "es-toolkit": "^1.33.0",
@@ -34,6 +36,7 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.2",
     "recharts": "^3.8.1",
+    "sonner": "^2.0.7",
     "zod": "^4.3.6"
   },
   "devDependencies": {

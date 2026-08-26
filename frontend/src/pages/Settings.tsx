@@ -258,7 +258,7 @@ const StyledSelect: React.FC<StyledSelectProps> = ({ id, value, onChange, option
       onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-glass)'; }}
     >
       {options.map(o => (
-        <option key={o.value} value={o.value} style={{ background: '#0a0b10' }}>
+        <option key={o.value} value={o.value} style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>
           {o.label}
         </option>
       ))}
@@ -466,7 +466,7 @@ const Settings: React.FC = () => {
 
         <div style={{ height: '1px', background: 'var(--border-glass)', margin: '16px 0' }} />
 
-        <div className="settings-locale-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div className="settings-locale-grid">
           <div>
             <label htmlFor="settings-locale" style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
               {t("settings.language.displayLocale")}

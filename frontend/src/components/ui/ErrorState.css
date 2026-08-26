@@ -37,31 +37,31 @@
 }
 
 .error-state-tone-error .error-state-icon-wrapper {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  background: var(--bg-error);
+  color: var(--text-error);
 }
 
 .error-state-tone-warning .error-state-icon-wrapper {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  background: var(--bg-warning);
+  color: var(--text-warning);
 }
 
 .error-state-tone-info .error-state-icon-wrapper {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  background: var(--bg-info);
+  color: var(--text-info);
 }
 
 .error-state-title {
   font-size: 1.25rem;
   font-weight: 600;
   margin: 0 0 0.5rem 0;
-  color: var(--text-primary, #f8fafc);
+  color: var(--text-primary);
   line-height: 1.3;
 }
 
 .error-state-description {
   font-size: 0.95rem;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary);
   margin: 0 0 1.25rem 0;
   max-width: 480px;
   line-height: 1.5;
@@ -70,7 +70,7 @@
 .error-state-details-toggle {
   background: none;
   border: none;
-  color: var(--color-primary-light, #818cf8);
+  color: var(--color-primary-light);
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
@@ -91,7 +91,7 @@
   padding: 0.75rem 1rem;
   font-family: monospace;
   font-size: 0.825rem;
-  color: var(--text-tertiary, #64748b);
+  color: var(--text-tertiary);
   max-width: 100%;
   overflow-x: auto;
   margin-bottom: 1.25rem;
