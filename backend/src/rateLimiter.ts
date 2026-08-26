@@ -32,6 +32,8 @@ interface RateLimiterConfig {
   deposits: { max: number; windowMs: number };
   summary: { max: number; windowMs: number };
   default: { max: number; windowMs: number };
+  ip: { max: number; windowMs: number };
+  apiKey: { max: number; windowMs: number };
 }
 
 // ─── Config Loader ───────────────────────────────────────────────────────────
@@ -83,6 +85,14 @@ export function loadConfig(): RateLimiterConfig {
     deposits,
     summary,
     default: defaultLimit,
+    ip: {
+      max: parseEnv('RATE_LIMIT_IP_MAX', 120),
+      windowMs: parseEnv('RATE_LIMIT_IP_WINDOW_MS', 60000),
+    },
+    apiKey: {
+      max: parseEnv('RATE_LIMIT_API_KEY_MAX', 60),
+      windowMs: parseEnv('RATE_LIMIT_API_KEY_WINDOW_MS', 60000),
+    },
   };
 }
 
@@ -216,6 +226,66 @@ export function extractRateLimitIpKey(req: Request): string {
   return req.ip || 'unknown';
 }
 
+export function extractRateLimitApiKeyKey(req: Request): string {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return '';
+  return Array.isArray(apiKey) ? apiKey[0] : apiKey;
+}
+
+interface RateLimitTierStats {
+  allowed: number;
+  limited: number;
+}
+
+const rateLimitMonitor: {
+  allowed: number;
+  limited: number;
+  byTier: Record<string, RateLimitTierStats>;
+} = {
+  allowed: 0,
+  limited: 0,
+  byTier: {},
+};
+
+export function recordRateLimitEvent(tier: string, limited: boolean): void {
+  const bucket = rateLimitMonitor.byTier[tier] ?? { allowed: 0, limited: 0 };
+  if (limited) {
+    rateLimitMonitor.limited += 1;
+    bucket.limited += 1;
+  } else {
+    rateLimitMonitor.allowed += 1;
+    bucket.allowed += 1;
+  }
+  rateLimitMonitor.byTier[tier] = bucket;
+}
+
+export function getRateLimitMonitorSnapshot(): {
+  allowed: number;
+  limited: number;
+  byTier: Record<string, RateLimitTierStats>;
+} {
+  return {
+    allowed: rateLimitMonitor.allowed,
+    limited: rateLimitMonitor.limited,
+    byTier: { ...rateLimitMonitor.byTier },
+  };
+}
+
+export function resetRateLimitMonitor(): void {
+  rateLimitMonitor.allowed = 0;
+  rateLimitMonitor.limited = 0;
+  rateLimitMonitor.byTier = {};
+}
+
+function setRateLimitHeaders(res: Response, limit: number, remaining: number, resetSeconds: number): void {
+  res.setHeader('RateLimit-Limit', limit);
+  res.setHeader('RateLimit-Remaining', remaining);
+  res.setHeader('RateLimit-Reset', resetSeconds);
+  res.setHeader('X-RateLimit-Limit', limit);
+  res.setHeader('X-RateLimit-Remaining', remaining);
+  res.setHeader('X-RateLimit-Reset', resetSeconds);
+}
+
 // ─── Redis Key Builder ───────────────────────────────────────────────────────
 
 /**
@@ -235,7 +305,9 @@ interface MemoryRateLimitEntry {
 
 function sendRateLimitResponse(req: Request, res: Response, config: EndpointLimiterConfig): void {
   const key = extractRateLimitKey(req);
-  const resetHeader = res.getHeader('RateLimit-Reset');
+  const tier = config.tier ?? config.routePrefix ?? 'default';
+  recordRateLimitEvent(tier, true);
+  const resetHeader = res.getHeader('RateLimit-Reset') ?? res.getHeader('X-RateLimit-Reset');
   const resetTime =
     typeof resetHeader === 'string' || typeof resetHeader === 'number'
       ? Number(resetHeader)
@@ -316,15 +388,14 @@ function createInMemoryLimiter(
     entries.set(key, entry);
 
     const resetSeconds = Math.ceil(entry.resetAt / 1000);
-    res.setHeader('RateLimit-Limit', effectiveMax);
-    res.setHeader('RateLimit-Remaining', Math.max(0, effectiveMax - entry.count));
-    res.setHeader('RateLimit-Reset', resetSeconds);
+    setRateLimitHeaders(res, effectiveMax, Math.max(0, effectiveMax - entry.count), resetSeconds);
 
     if (entry.count > effectiveMax) {
       sendRateLimitResponse(req, res, effectiveConfig);
       return;
     }
 
+    recordRateLimitEvent(tier, false);
     next();
   };
 }
@@ -359,7 +430,7 @@ export function createLimiter(
     windowMs: config.windowMs,
     max: config.max,
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: true,
     validate: false,
     keyGenerator: (req: Request) => keyExtractor(req),
     skip: (_req: Request) => {
@@ -451,3 +522,44 @@ export const depositsUserLimiter: RequestHandler = createLimiter({
 export const summaryLimiter = readsLimiter;
 export const defaultLimiter = readsLimiter;
 export const apiLimiter = readsLimiter;
+
+export const ipLimiter: RequestHandler = createLimiter(
+  { tier: 'ip', max: config.ip.max, windowMs: config.ip.windowMs },
+  extractRateLimitIpKey,
+);
+
+const apiKeyLimiterInner: RequestHandler = createLimiter(
+  { tier: 'apikey', max: config.apiKey.max, windowMs: config.apiKey.windowMs },
+  extractRateLimitApiKeyKey,
+);
+
+export const apiKeyLimiter: RequestHandler = (req, res, next) => {
+  if (!extractRateLimitApiKeyKey(req)) {
+    next();
+    return;
+  }
+  return apiKeyLimiterInner(req, res, next);
+};
+
+export function composeLimiters(...limiters: RequestHandler[]): RequestHandler {
+  return (req, res, next) => {
+    const run = (index: number): void => {
+      if (index >= limiters.length) {
+        next();
+        return;
+      }
+      if (res.headersSent) return;
+      limiters[index](req, res, (err?: unknown) => {
+        if (err) {
+          next(err as Error);
+          return;
+        }
+        run(index + 1);
+      });
+    };
+    run(0);
+  };
+}
+
+/** Combined IP-based and API-key-based limiting for abuse protection. */
+export const identityRateLimiter: RequestHandler = composeLimiters(ipLimiter, apiKeyLimiter);

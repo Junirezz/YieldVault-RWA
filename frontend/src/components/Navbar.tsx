@@ -52,8 +52,20 @@ const Navbar: FC<NavbarProps> = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isMobileMenuOpen]);
+
   return (
     <nav
+      id="primary-nav"
       aria-label="Primary"
       ref={menuRef}
       style={{
@@ -76,6 +88,7 @@ const Navbar: FC<NavbarProps> = ({
             to="/"
             className="flex items-center gap-sm"
             style={{ textDecoration: "none" }}
+            aria-label="YieldVault home"
             onClick={() => setIsMobileMenuOpen(false)}
           >
             <div
@@ -129,7 +142,13 @@ const Navbar: FC<NavbarProps> = ({
             >
               {t("nav.transactions")}
               {pendingCount > 0 && (
-                <Badge variant="pill" color="warning" size="compact" style={{ marginLeft: "6px" }}>
+                <Badge
+                  variant="pill"
+                  color="warning"
+                  size="compact"
+                  style={{ marginLeft: "6px" }}
+                  aria-label={`${pendingCount} pending transactions`}
+                >
                   {pendingCount}
                 </Badge>
               )}
@@ -201,7 +220,7 @@ const Navbar: FC<NavbarProps> = ({
 
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
-        <div className="nav-mobile-menu is-open">
+        <div id="mobile-slide-menu" className="nav-mobile-menu is-open" role="navigation" aria-label="Mobile">
           <NavLink to="/" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/")}>
             {t("nav.vaults")}
           </NavLink>

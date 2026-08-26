@@ -78,6 +78,13 @@ export const cacheMissCount = new Counter({
   registers: [register],
 });
 
+export const rateLimitEvents = new Counter({
+  name: 'rate_limit_events_total',
+  help: 'Rate-limit allow and reject outcomes by enforcement tier',
+  labelNames: ['tier', 'outcome'],
+  registers: [register],
+});
+
 export const cacheEvictionCount = new Counter({
   name: 'cache_eviction_count',
   help: 'Number of cache evictions due to size limit',

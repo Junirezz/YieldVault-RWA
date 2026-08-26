@@ -52,8 +52,14 @@ URL versioning was chosen because:
 - Proxies, CDNs, and caches route on the path without special configuration.
 - Testing in a browser or with `curl` requires no extra headers.
 
-**Header-based versioning** (`Accept: application/vnd.yieldvault.v2+json`) is not
-currently supported. Custom `X-API-Version` request headers are also ignored.
+**Header-based versioning** is also supported for negotiation. Clients may send
+`X-API-Version`, `Accept-Version`, or `Accept: application/json;version=1.0.0`.
+The path prefix remains the canonical routing mechanism; headers pin the
+contract within a prefix and reject unknown versions with `406 Not Acceptable`.
+
+Version routing middleware (`backend/src/middleware/versionRouting.ts`) reads
+`/api/v1` and `/api/v2` prefixes, sets `req.apiVersion`, and advertises
+`X-API-Version-Path`. Discovery is available at `GET /api/versions`.
 
 ---
 
@@ -480,4 +486,5 @@ for the contract upgrade process.
 
 | Date | Change |
 |------|--------|
+| 2026-08-26 | Documented path routing middleware, `/api/versions` discovery, and header negotiation (#1284) |
 | 2026-06-27 | Initial versioning and deprecation policy for Issue #610 |

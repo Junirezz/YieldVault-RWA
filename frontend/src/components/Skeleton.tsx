@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { skeletonPulse } from '../motion/variants';
 
 export interface SkeletonProps {
   className?: string;
@@ -17,6 +19,7 @@ export const SkeletonBlock: React.FC<SkeletonProps> = ({
   circle,
   style,
 }) => {
+  const prefersReducedMotion = useReducedMotion();
   const baseStyle: React.CSSProperties = {
     width: width,
     height: height,
@@ -25,10 +28,12 @@ export const SkeletonBlock: React.FC<SkeletonProps> = ({
   };
 
   return (
-    <div
+    <motion.div
       className={`skeleton ${className}`}
       style={baseStyle}
       aria-hidden="true"
+      variants={prefersReducedMotion ? undefined : skeletonPulse}
+      animate={prefersReducedMotion ? undefined : 'animate'}
     />
   );
 };

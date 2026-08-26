@@ -3,6 +3,7 @@ import { usePreferencesContext } from '../context/PreferencesContext';
 import type { Theme, Locale, Currency, NotificationPreferences } from '../hooks/usePreferences';
 import { useTranslation } from '../i18n';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import { usePageHeadingFocus } from '../hooks/usePageHeadingFocus';
 
 // ─── tiny icon helpers (SVG inline) ───────────────────────────────────────────
 
@@ -314,6 +315,7 @@ const Settings: React.FC = () => {
     resetUserPreferenceStore,
   } = usePreferencesContext();
   const { t } = useTranslation();
+  const headingRef = usePageHeadingFocus<HTMLHeadingElement>();
 
   const [resetConfirm, setResetConfirm] = useState(false);
 
@@ -353,7 +355,12 @@ const Settings: React.FC = () => {
             </svg>
           </div>
           <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              data-page-heading="true"
+              style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}
+            >
               {t("settings.title")}
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: '2px' }}>

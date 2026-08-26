@@ -1,7 +1,9 @@
 import React from "react";
+import { motion, useReducedMotion, type HTMLMotionProps } from "framer-motion";
+import { formFieldFocus } from "../../motion/variants";
 import "./Input.css";
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface InputProps extends Omit<HTMLMotionProps<"input">, "children"> {
   label?: string;
   error?: string;
   helperText?: string;
@@ -22,7 +24,13 @@ export const Input: React.FC<InputProps> = ({
   disabled,
   ...props
 }) => {
+  const prefersReducedMotion = useReducedMotion();
   const inputId = id || `input-${label?.toLowerCase().replace(/\s+/g, "-")}`;
+  const errorId = `${inputId}-error`;
+  const helperId = `${inputId}-helper`;
+  const describedBy = [error ? errorId : undefined, helperText ? helperId : undefined]
+    .filter(Boolean)
+    .join(" ") || undefined;
 
   return (
     <div className={`input-group ${fullWidth ? "full-width" : ""} ${className}`}>
@@ -36,17 +44,24 @@ export const Input: React.FC<InputProps> = ({
           leftIcon ? "has-left-icon" : ""
         } ${rightIcon ? "has-right-icon" : ""}`}
       >
-        {leftIcon && <span className="input-icon-left">{leftIcon}</span>}
-        <input
+        {leftIcon && <span className="input-icon-left" aria-hidden="true">{leftIcon}</span>}
+        <motion.input
           id={inputId}
           className="input-field"
           disabled={disabled}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          whileFocus={prefersReducedMotion || disabled ? undefined : formFieldFocus}
           {...props}
         />
-        {rightIcon && <span className="input-icon-right">{rightIcon}</span>}
+        {rightIcon && <span className="input-icon-right" aria-hidden="true">{rightIcon}</span>}
       </div>
       {(error || helperText) && (
-        <span className={`input-message ${error ? "is-error" : ""}`}>
+        <span
+          id={error ? errorId : helperId}
+          className={`input-message ${error ? "is-error" : ""}`}
+          role={error ? "alert" : undefined}
+        >
           {error || helperText}
         </span>
       )}

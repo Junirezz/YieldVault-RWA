@@ -12,6 +12,7 @@ export interface BadgeProps {
   icon?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
+  'aria-label'?: string;
 }
 
 /**
@@ -65,6 +66,7 @@ const Badge: React.FC<BadgeProps> = ({
   icon,
   className = '',
   style,
+  'aria-label': ariaLabel,
 }) => {
   const colors = colorStyles[color];
   const isCompact = size === 'compact';
@@ -113,6 +115,7 @@ const Badge: React.FC<BadgeProps> = ({
   return (
     <span
       className={className}
+      aria-label={ariaLabel}
       style={{
         ...baseStyles,
         ...variantStyles[variant],
