@@ -233,6 +233,40 @@ export const PortfolioCardSkeleton: React.FC = () => (
   </div>
 );
 
+export const StrategyCardSkeleton: React.FC = () => (
+  <div
+    className="glass-panel"
+    style={{
+      textAlign: "left",
+      padding: "18px",
+      borderRadius: "16px",
+      border: "1px solid var(--border-glass)",
+      background: "rgba(255, 255, 255, 0.03)",
+      display: "flex",
+      flexDirection: "column",
+      gap: "12px",
+      minHeight: "220px",
+    }}
+    aria-hidden="true"
+  >
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+      <div style={{ flex: 1 }}>
+        <SkeletonText width="80px" lineHeight="0.75rem" style={{ marginBottom: "6px" }} />
+        <SkeletonText width="70%" lineHeight="1.05rem" />
+      </div>
+      <SkeletonCircle width={28} height={28} />
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <SkeletonText width="60%" lineHeight="0.85rem" />
+      <SkeletonText width="55%" lineHeight="0.85rem" />
+      <SkeletonText width="65%" lineHeight="0.85rem" />
+    </div>
+    <div style={{ marginTop: "auto" }}>
+      <SkeletonText lines={2} lineHeight="0.85rem" />
+    </div>
+  </div>
+);
+
 export const AnalyticsWidgetSkeleton: React.FC = () => (
   <div className="glass-panel" style={{ padding: "20px" }} aria-hidden="true">
     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
