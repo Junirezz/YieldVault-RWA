@@ -72,6 +72,7 @@ mod event_tests;
 pub mod external_calls;
 #[cfg(test)]
 mod feature_tests;
+pub mod fee_curve;
 pub mod fee_math;
 mod formal_verification_tests;
 #[cfg(test)]
@@ -249,6 +250,10 @@ pub enum DataKeyExt {
 
     // Issue #1174: gate for the contract telemetry / debugging hook
     DiagnosticsEnabled,
+
+    // Issue #1243: utilization-based dynamic fee curve (+ its queued change)
+    FeeCurve,
+    PendingFeeCurve,
 }
 
 #[contracttype]
@@ -3351,6 +3356,152 @@ impl YieldVault {
         env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
     }
 
+    // ── Utilization-based dynamic fee curve (Issue #1243) ────────────────────
+
+    /// Returns the configured dynamic fee curve.
+    ///
+    /// Vaults that have never configured one read back
+    /// [`fee_curve::default_curve`], which is disabled — so the vault keeps
+    /// charging the flat [`Self::fee_bps`] until governance opts in.
+    pub fn fee_curve(env: Env) -> fee_curve::FeeCurve {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::FeeCurve)
+            .unwrap_or_else(fee_curve::default_curve)
+    }
+
+    /// Returns the vault's current utilization in basis points: the share of
+    /// total assets that is working inside the strategy rather than sitting
+    /// idle. A vault with no strategy, or no assets, reads as 0.
+    ///
+    /// Like [`Self::total_assets`], this reads through to the strategy (and
+    /// validates the oracle when one is enabled), so it can fail for the same
+    /// reasons that call can.
+    pub fn utilization_bps(env: Env) -> i128 {
+        let idle = Self::get_state(&env).total_assets;
+        let total = Self::total_assets(env.clone());
+        fee_curve::utilization_bps(total.saturating_sub(idle), total)
+    }
+
+    /// Returns the protocol fee (bps) the vault would charge on yield reported
+    /// right now.
+    ///
+    /// While the curve is disabled — the default — this is exactly
+    /// [`Self::fee_bps`] and performs no strategy or oracle call. Once enabled,
+    /// it is the curve's fee at the current [`Self::utilization_bps`].
+    pub fn effective_fee_bps(env: Env) -> i128 {
+        let curve = Self::fee_curve(env.clone());
+        let static_fee_bps = Self::fee_bps(env.clone());
+        if !curve.enabled {
+            return static_fee_bps;
+        }
+        fee_curve::fee_bps_at(&curve, Self::utilization_bps(env))
+    }
+
+    /// Queue a new dynamic fee curve. Takes effect once
+    /// `execute_fee_curve_change` is called after the configured timelock delay
+    /// elapses. Emits `fcurveq` with the queued legs and its eta.
+    ///
+    /// The curve is queued behind the same timelock as [`Self::fee_bps`] on
+    /// purpose: it moves the fee depositors actually pay, so letting it apply
+    /// instantly would be a way around that protection.
+    ///
+    /// ### Errors
+    /// * [`VaultError::InvalidFeeBps`] - the curve is not monotonically
+    ///   non-decreasing, a leg is outside 0–10000 bps, or the kink is not
+    ///   strictly between 0% and 100% utilization.
+    /// * [`VaultError::AdminParamChangeTooSoon`] - the admin parameter-change
+    ///   interval has not elapsed.
+    pub fn queue_fee_curve_change(env: Env, curve: fee_curve::FeeCurve) -> Result<u64, VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        Self::assert_admin_param_interval(&env)?;
+        fee_curve::validate(&curve)?;
+        let eta = Self::queue_eta(&env);
+        env.storage().instance().set(
+            &DataKeyExt::PendingFeeCurve,
+            &fee_curve::PendingFeeCurveChange {
+                new_value: curve.clone(),
+                eta,
+            },
+        );
+        Self::record_admin_param_change(&env);
+        env.events().publish(
+            (symbol_short!("fcurveq"),),
+            (
+                curve.enabled,
+                curve.base_fee_bps,
+                curve.optimal_fee_bps,
+                curve.max_fee_bps,
+                curve.optimal_utilization_bps,
+                eta,
+            ),
+        );
+        Ok(eta)
+    }
+
+    /// Returns the currently queued fee-curve change, if any.
+    pub fn pending_fee_curve_change(env: Env) -> Option<fee_curve::PendingFeeCurveChange> {
+        env.storage().instance().get(&DataKeyExt::PendingFeeCurve)
+    }
+
+    /// Execute a previously queued fee-curve change once its timelock has
+    /// elapsed. Emits `fcurve` with the newly active legs.
+    ///
+    /// ### Errors
+    /// * [`VaultError::NoPendingWithdrawal`] - nothing is queued.
+    /// * [`VaultError::TimelockNotExpired`] - the eta has not been reached.
+    pub fn execute_fee_curve_change(env: Env) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        let pending: fee_curve::PendingFeeCurveChange = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PendingFeeCurve)
+            .ok_or(VaultError::NoPendingWithdrawal)?;
+        Self::assert_timelock_ready(&env, pending.eta)?;
+        // Re-validate: the bounds this curve was accepted under are what the
+        // fee math relies on, and the queue may have outlived a code change.
+        fee_curve::validate(&pending.new_value)?;
+        let previous = Self::fee_curve(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::FeeCurve, &pending.new_value);
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::PendingFeeCurve);
+        env.events().publish(
+            (symbol_short!("fcurve"),),
+            (
+                previous.enabled,
+                pending.new_value.enabled,
+                pending.new_value.base_fee_bps,
+                pending.new_value.optimal_fee_bps,
+                pending.new_value.max_fee_bps,
+                pending.new_value.optimal_utilization_bps,
+            ),
+        );
+        Ok(())
+    }
+
+    /// Cancel a previously queued fee-curve change before it executes.
+    ///
+    /// ### Errors
+    /// * [`VaultError::NoPendingWithdrawal`] - nothing is queued.
+    pub fn cancel_fee_curve_change(env: Env) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if !env.storage().instance().has(&DataKeyExt::PendingFeeCurve) {
+            return Err(VaultError::NoPendingWithdrawal);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::PendingFeeCurve);
+        env.events()
+            .publish((symbol_short!("fcurvecn"), admin.clone()), ());
+        Ok(())
+    }
+
     /// Queue a new treasury address where fees accumulate. Takes effect once
     /// `execute_treasury_change` is called after the configured timelock delay
     /// elapses.
@@ -3962,6 +4113,14 @@ impl YieldVault {
             .unwrap_or(0)
     }
 
+    /// Reports harvested yield from the Benji strategy, taking the protocol fee
+    /// and crediting the remainder to depositors.
+    ///
+    /// The fee rate is [`Self::effective_fee_bps`]: the flat [`Self::fee_bps`]
+    /// by default, or the dynamic curve's rate at the current utilization once
+    /// governance enables one. When the curve is active the applied rate is
+    /// published as `dynfee` alongside the utilization it was derived from, so
+    /// every fee actually charged is auditable from the event stream.
     pub fn report_benji_yield(env: Env, strategy: Address, amount: i128) -> Result<(), VaultError> {
         if amount <= 0 {
             return Err(VaultError::InvalidYieldAmount);
@@ -3979,11 +4138,28 @@ impl YieldVault {
         }
         strategy.require_auth();
 
+        // Resolve the fee rate *before* the transfer: utilization is then read
+        // from the position that actually earned the yield, not from the
+        // half-settled state between the transfer and the accounting below.
+        let curve = Self::fee_curve(env.clone());
+        let static_fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        let (fee_bps, utilization) = if curve.enabled {
+            let utilization = Self::utilization_bps(env.clone());
+            (fee_curve::fee_bps_at(&curve, utilization), utilization)
+        } else {
+            (static_fee_bps, 0)
+        };
+
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&strategy, &env.current_contract_address(), &amount);
 
-        let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        if curve.enabled {
+            env.events().publish(
+                (symbol_short!("dynfee"), strategy.clone()),
+                (utilization, fee_bps, static_fee_bps),
+            );
+        }
         let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps);
         if fee_amount > 0 {
             let treasury_bal: i128 = env

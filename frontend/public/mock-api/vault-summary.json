@@ -9,6 +9,18 @@
   "exchangeRate": 1.084,
   "networkFeeEstimate": "~0.00001 XLM",
   "updatedAt": "2026-03-25T10:00:00.000Z",
+  "fees": {
+    "staticFeeBps": 25,
+    "effectiveFeeBps": 71,
+    "utilizationBps": 5000,
+    "dynamicEnabled": true,
+    "curve": {
+      "baseFeeBps": 25,
+      "optimalFeeBps": 100,
+      "maxFeeBps": 500,
+      "optimalUtilizationBps": 8000
+    }
+  },
   "strategy": {
     "id": "stellar-benji",
     "name": "Franklin BENJI Connector",

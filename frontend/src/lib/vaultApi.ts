@@ -4,6 +4,7 @@ import { apiClient } from "./apiClient";
 import { validate, VaultHistoryQuerySchema, DepositRequestSchema, WithdrawalRequestSchema } from "./api";
 import { isApiError } from "./api/error";
 import { parseTransactionConflict } from "./transactionConflict";
+import type { VaultFeeInfo } from "./feeCurve";
 
 // ─── Share Price Error ────────────────────────────────────────────────────────
 
@@ -110,6 +111,15 @@ export interface VaultSummary {
   updatedAt: string;
   contractPaused: boolean;
   strategy: StrategyMetadata;
+  /**
+   * Protocol fee and strategy-utilization state, mirroring the vault
+   * contract's `fee_bps` / `utilization_bps` / `fee_curve` views.
+   *
+   * Optional: deployments whose API predates the dynamic fee curve omit it,
+   * and consumers must treat its absence as "not reported" rather than as
+   * zero fees.
+   */
+  fees?: VaultFeeInfo;
 }
 
 export interface VaultHistoryPoint {
