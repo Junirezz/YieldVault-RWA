@@ -16,7 +16,13 @@ const SubmitButton: React.FC<SubmitButtonProps> = ({
   const isDisabled = disabled || loading;
 
   return (
-    <button className="btn btn-primary" type="submit" disabled={isDisabled}>
+    <button
+      className="btn btn-primary"
+      type="submit"
+      disabled={isDisabled}
+      aria-busy={loading}
+      aria-disabled={isDisabled}
+    >
       {loading ? loadingLabel : label}
     </button>
   );

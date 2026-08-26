@@ -69,6 +69,7 @@ const Navbar: FC<NavbarProps> = ({
 
   return (
     <nav
+      id="primary-nav"
       aria-label="Primary"
       ref={menuRef}
       style={{
@@ -91,6 +92,7 @@ const Navbar: FC<NavbarProps> = ({
             to="/"
             className="flex items-center gap-sm"
             style={{ textDecoration: "none" }}
+            aria-label="YieldVault home"
             onClick={() => setIsMobileMenuOpen(false)}
           >
             <div
@@ -144,7 +146,13 @@ const Navbar: FC<NavbarProps> = ({
             >
               {t("nav.transactions")}
               {pendingCount > 0 && (
-                <Badge variant="pill" color="warning" size="compact" style={{ marginLeft: "6px" }}>
+                <Badge
+                  variant="pill"
+                  color="warning"
+                  size="compact"
+                  style={{ marginLeft: "6px" }}
+                  aria-label={`${pendingCount} pending transactions`}
+                >
                   {pendingCount}
                 </Badge>
               )}

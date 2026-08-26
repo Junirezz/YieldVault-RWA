@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -31,79 +32,11 @@ export const Modal: React.FC<ModalProps> = ({
   'aria-labelledby': ariaLabelledBy,
   'aria-describedby': ariaDescribedBy,
 }) => {
-  const modalRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (!isOpen) return;
-
-      if (e.key === 'Escape' && closeOnEscape) {
-        onClose();
-        return;
-      }
-
-      // Focus trap
-      if (e.key === 'Tab' && modalRef.current) {
-        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        
-        if (focusableElements.length === 0) {
-          e.preventDefault();
-          return;
-        }
-
-        const firstElement = focusableElements[0];
-        const lastElement = focusableElements[focusableElements.length - 1];
-
-        if (e.shiftKey) {
-          if (document.activeElement === firstElement || document.activeElement === modalRef.current) {
-            lastElement.focus();
-            e.preventDefault();
-          }
-        } else {
-          if (document.activeElement === lastElement) {
-            firstElement.focus();
-            e.preventDefault();
-          }
-        }
-      }
-    },
-    [isOpen, onClose, closeOnEscape]
-  );
-
-  useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement as HTMLElement;
-      document.addEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'hidden';
-
-      // Focus the first focusable element inside the modal, or fallback to the modal container
-      if (modalRef.current) {
-        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-
-        if (focusableElements.length > 0) {
-          focusableElements[0].focus();
-        } else {
-          modalRef.current.focus();
-        }
-      }
-    } else {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-      if (previousFocusRef.current) {
-        previousFocusRef.current.focus();
-      }
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-    };
-  }, [isOpen, handleKeyDown]);
+  const modalRef = useFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: onClose,
+    closeOnEscape,
+  });
 
   if (!isOpen) return null;
 
@@ -216,7 +149,7 @@ export const Modal: React.FC<ModalProps> = ({
                   borderRadius: '4px',
                 }}
               >
-                <X size={20} />
+                <X size={20} aria-hidden="true" />
               </button>
             )}
           </div>

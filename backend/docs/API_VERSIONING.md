@@ -11,6 +11,10 @@ YieldVault uses a header-based API versioning strategy. All API responses carry 
 | Version | Status  |
 |---------|---------|
 | `1.0.0` | Current |
+| `2.0.0-preview` | Preview |
+
+Canonical routes are served under `/api/v1/`. The v2 preview prefix is `/api/v2/`.
+See `GET /api/versions` for the live discovery document.
 
 ### How to request a version
 
@@ -109,6 +113,10 @@ X-API-Version-Supported: 1.0.0
 ## Middleware reference
 
 **File:** [`backend/src/middleware/versionNegotiation.ts`](../src/middleware/versionNegotiation.ts)
+
+**Version routing:** [`backend/src/middleware/versionRouting.ts`](../src/middleware/versionRouting.ts)
+
+**Discovery route:** [`backend/src/routes/apiVersions.ts`](../src/routes/apiVersions.ts)
 
 **Exported symbols:**
 

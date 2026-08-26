@@ -18,6 +18,9 @@ import {
   writesLimiter,
   readsLimiter,
   adminLimiter,
+  identityRateLimiter,
+  getRateLimitMonitorSnapshot,
+  loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
 import { idempotencyStore } from './idempotency';
 import { createAdminAuditMiddleware, getAuditLogs, getAuditLogMetrics } from './auditLog';
@@ -85,6 +88,8 @@ import {
 } from './middleware/allowlist';
 import { adminRbacMiddleware, assertWebhookParameterUpdate } from './middleware/rbac';
 import { apiVersionMiddleware } from './middleware/versionNegotiation';
+import { versionRoutingMiddleware } from './middleware/versionRouting';
+import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
@@ -108,6 +113,7 @@ import {
   activeConnections,
   updateVaultMetrics,
   syncJobGovernanceMetrics,
+  rateLimitEvents,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -640,7 +646,8 @@ app.use(apiErrorContractMiddleware);
 // Structured logging with correlation IDs
 app.use(structuredLoggingMiddleware);
 
-// API version negotiation & deprecation headers
+// API version routing, negotiation & deprecation headers
+app.use(versionRoutingMiddleware);
 app.use(apiVersionMiddleware);
 
 // Global timeout middleware (30 seconds default)
@@ -667,6 +674,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+    if (res.statusCode === 429) {
+      rateLimitEvents.inc({ tier: req.apiVersion ?? 'global', outcome: 'limited' });
+    }
 
     // Record latency for SLO monitoring (only track successful requests)
     if (res.statusCode < 400) {
@@ -680,7 +690,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Apply the Redis-backed default limiter (reads tier) globally (skip health/ready probes).
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/health' || req.path === '/ready') return next();
-  return readsLimiter(req, res, next);
+  return identityRateLimiter(req, res, (err?: unknown) => {
+    if (err) return next(err as Error);
+    if (res.headersSent) return;
+    return readsLimiter(req, res, next);
+  });
 });
 app.use(adaptiveThrottleMiddleware);
 
@@ -737,6 +751,28 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
   res.json({
     endpoints: listEndpointSlaRegistry(),
     generatedAt: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/rate-limits
+ * Rate-limit monitoring snapshot: allowed vs limited counts by tier.
+ */
+app.get('/admin/rate-limits', validateApiKey, (_req: Request, res: Response) => {
+  const cfg = loadRateLimiterConfig();
+  res.json({
+    snapshot: getRateLimitMonitorSnapshot(),
+    tiers: {
+      auth: cfg.auth,
+      writes: cfg.writes,
+      reads: cfg.reads,
+      admin: cfg.admin,
+      deposits: cfg.deposits,
+      ip: cfg.ip,
+      apiKey: cfg.apiKey,
+    },
+    headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -841,6 +877,7 @@ setupSwagger(app);
 // â”€â”€â”€ Versioned API v1 Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const apiV1 = express.Router();
 app.use('/api/v1', apiV1);
+app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);

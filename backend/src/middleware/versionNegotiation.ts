@@ -130,7 +130,10 @@ export function apiVersionMiddleware(req: Request, res: Response, next: NextFunc
 
   // /api/* is legacy unless it is already a canonical versioned route.
   const isLegacyApi =
-    path.startsWith('/api/') && !path.startsWith('/api/v1/') && !path.startsWith('/api/v2/');
+    path.startsWith('/api/') &&
+    path !== '/api/versions' &&
+    !path.startsWith('/api/v1/') &&
+    !path.startsWith('/api/v2/');
 
   if (isLegacyUnversioned || isLegacyApi) {
     let successorPath: string;
