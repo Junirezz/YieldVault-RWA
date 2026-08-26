@@ -144,4 +144,12 @@ pub enum VaultError {
     /// missing or non-distinct approver pair and [`VaultError::InvalidAmount`]
     /// for a non-positive amount rather than defining dedicated codes.
     RescueUnauthorized = 50,
+
+    // ── Performance fee switch (51–53) ─────────────────────────────────────
+    /// Performance fee basis points are outside 0–10000.
+    InvalidPerformanceFeeBps = 51,
+    /// Performance incentive pool address is not configured.
+    PerformanceIncentivePoolNotConfigured = 52,
+    /// Performance fee switch is in an invalid state for the requested operation.
+    InvalidPerformanceFeeSwitchState = 53,
 }
