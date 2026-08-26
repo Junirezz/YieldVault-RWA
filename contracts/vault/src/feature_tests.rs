@@ -326,7 +326,7 @@ fn test_role_restricted_pausability_controls() {
     vault.initialize(&admin, &usdc);
 
     let pauser = Address::generate(&env);
-    let unauthorized = Address::generate(&env);
+    let _unauthorized = Address::generate(&env);
 
     // Initial pauser is None
     assert_eq!(vault.pauser(), None);
@@ -337,9 +337,6 @@ fn test_role_restricted_pausability_controls() {
 
     // Designated pauser can pause with role
     vault.pause_with_role(&pauser, &PauseReason::SecurityIncident);
-    vault
-        .pause_with_role(&pauser, &PauseReason::SecurityIncident)
-        .unwrap();
     assert!(vault.is_paused());
     assert_eq!(vault.pause_reason(), Some(PauseReason::SecurityIncident));
 
@@ -350,9 +347,6 @@ fn test_role_restricted_pausability_controls() {
 
     // Admin can also pause and unpause with role
     vault.pause_with_role(&admin, &PauseReason::Maintenance);
-    vault
-        .pause_with_role(&admin, &PauseReason::Maintenance)
-        .unwrap();
     assert!(vault.is_paused());
 
     vault.unpause_with_role(&admin);

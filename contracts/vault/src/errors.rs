@@ -93,7 +93,13 @@ pub enum VaultError {
     ProposalRejected = 36,
 
     // ── Oracle / treasury / strategy health (27–29, 37) ──────────────────────
-    /// Oracle validation failed (stale or manipulated price).
+    /// Oracle validation failed: expired heartbeat, invalid price data (zero,
+    /// negative, future timestamp, unsafe decimals/overflow), excessive
+    /// deviation from the last validated price, or an out-of-range
+    /// `set_oracle_heartbeat` configuration. See [`crate::oracle`] for the
+    /// full stale-data policy. Reused across all of `oracle::OracleError`'s
+    /// variants rather than spending a dedicated code per variant under the
+    /// 50-case cap.
     OracleValidationFailed = 27,
     /// Treasury claim quota exceeded for the current epoch.
     ClaimQuotaExceeded = 28,
