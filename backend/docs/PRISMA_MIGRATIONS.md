@@ -26,6 +26,7 @@ Run from `backend/`:
 | Script | Purpose |
 | --- | --- |
 | `npm run prisma:generate` | Regenerate the Prisma client |
+| `npm run prisma:schema-check` | Validate the schema and fail if committed migrations do not produce it |
 | `npm run prisma:migrate -- --name add_foo` | Create a migration from `schema.prisma` (dev) |
 | `npm run prisma:deploy` | Apply pending migrations (CI / prod) |
 | `npm run prisma:status` | Show applied vs pending |
@@ -40,6 +41,15 @@ Create a change:
 4. Add a matching file in `prisma/rollbacks/<migration_folder>.sql` if the
    change is reversible.
 5. Commit schema, migration, and rollback together.
+
+The backend governance workflow runs `prisma:schema-check` on every pull
+request that changes the backend or migration workflow. The check validates
+`schema.prisma`, then compares the final state represented by
+`prisma/migrations` with the schema datamodel. A non-zero result means the
+schema was changed without a matching migration, a migration was edited after
+being applied, or a migration folder is incomplete. Do not bypass this check
+by editing generated or deployed database state; create and commit the proper
+forward migration instead.
 
 Existing schema is already captured by `0_init` plus follow-up migrations.
 New environments run `prisma:deploy` (SQLite/dev) or `db:migrate` (Postgres).
@@ -73,3 +83,30 @@ Prisma does not generate automatic down migrations. Rollback is explicit:
 
 Never `DROP` or `TRUNCATE` in a canary window. Follow
 `docs/CANARY_MIGRATION_STRATEGY.md`.
+
+## Drift recovery
+
+When CI reports schema drift:
+
+1. Run `npm run prisma:schema-check` from `backend/` and inspect the diff.
+2. If `schema.prisma` is ahead, create a named migration with
+  `npm run prisma:migrate -- --name <description>` and commit its
+  `migration.sql`.
+3. If a committed migration was edited after deployment, restore its original
+  SQL and create a new corrective migration. Never rewrite an applied
+  migration to make the check pass.
+4. Check the target with `npm run prisma:status`. For a failed deployment,
+  resolve the migration only after confirming whether any SQL was applied.
+5. Use the documented rollback SQL or restore a verified backup for destructive
+  changes, then deploy the corrective forward migration and rerun the checks.
+
+For an unapplied migration, use:
+
+```bash
+npx prisma migrate resolve --schema prisma/schema.prisma --rolled-back <name>
+```
+
+For an applied migration with a rollback file, use
+`npm run prisma:rollback -- --name <name>` and follow the script output. Take a
+backup and coordinate production recovery before running destructive rollback
+SQL.

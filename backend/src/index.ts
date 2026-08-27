@@ -111,6 +111,7 @@ import {
   register,
   httpRequestCount,
   httpResponseTime,
+  httpRequestErrorCount,
   activeConnections,
   updateVaultMetrics,
   syncJobGovernanceMetrics,
@@ -675,6 +676,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+    if (res.statusCode >= 400) {
+      httpRequestErrorCount.inc({
+        ...labels,
+        status_class: `${Math.floor(res.statusCode / 100)}xx`,
+      });
+    }
     if (res.statusCode === 429) {
       rateLimitEvents.inc({ tier: req.apiVersion ?? 'global', outcome: 'limited' });
     }
