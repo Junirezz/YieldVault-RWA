@@ -1,0 +1,116 @@
+{
+  "title": "YieldVault Backend",
+  "uid": "yieldvault-backend",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "route",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_request_count, route)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_count[5m])) by (route)",
+          "legendFormat": "{{ route }}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error Rate (5xx critical)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_error_count[5m])) by (route)",
+          "legendFormat": "{{ route }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineColor": "red" } }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Client Error Rate (4xx)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_client_error_count[5m])) by (route)",
+          "legendFormat": "{{ route }}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Request Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_response_time_seconds_bucket[5m])) by (route, le))",
+          "legendFormat": "p50 {{ route }}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_response_time_seconds_bucket[5m])) by (route, le))",
+          "legendFormat": "p95 {{ route }}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_response_time_seconds_bucket[5m])) by (route, le))",
+          "legendFormat": "p99 {{ route }}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Cache Hit Ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(cache_hit_count[5m])) / clamp_min(sum(rate(cache_hit_count[5m])) + sum(rate(cache_miss_count[5m])), 1e-9)",
+          "legendFormat": "hit ratio"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Vault TVL (USD)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "targets": [{ "expr": "vault_tvl_usd", "legendFormat": "TVL" }]
+    },
+    {
+      "id": 7,
+      "title": "Vault Share Price (USD)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [{ "expr": "vault_share_price_usd", "legendFormat": "Share Price" }]
+    },
+    {
+      "id": 8,
+      "title": "Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [{ "expr": "http_active_connections", "legendFormat": "active" }]
+    }
+  ]
+}

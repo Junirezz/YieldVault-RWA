@@ -1,0 +1,42 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+  # Local backend instance for the observability stack. Copy/adjust to your env.
+  backend:
+    build:
+      context: ../backend
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge

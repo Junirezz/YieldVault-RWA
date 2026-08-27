@@ -222,7 +222,6 @@ export class LatencyMonitoringService {
     if (endpoint.match(/^\/api\/v1\/vault\/[^/]+$/)) {
       return '/api/v1/vault/:id';
     }
-
     return endpoint;
   }
 

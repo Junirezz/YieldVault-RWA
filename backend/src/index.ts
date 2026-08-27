@@ -46,6 +46,15 @@ import { setupSwagger } from './swagger';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import {
+  errorHandler,
+  notFoundHandler,
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  InternalError,
+  RateLimitError,
+} from './errors';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
@@ -114,6 +123,8 @@ import {
   updateVaultMetrics,
   syncJobGovernanceMetrics,
   rateLimitEvents,
+  httpErrorCount,
+  httpClientErrorCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -676,6 +687,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     httpResponseTime.observe(labels, durationSeconds);
     if (res.statusCode === 429) {
       rateLimitEvents.inc({ tier: req.apiVersion ?? 'global', outcome: 'limited' });
+    }
+
+    // Track error rates for alerting (5xx = critical, 4xx = client error).
+    if (res.statusCode >= 500) {
+      httpErrorCount.inc(labels);
+    } else if (res.statusCode >= 400) {
+      httpClientErrorCount.inc(labels);
     }
 
     // Record latency for SLO monitoring (only track successful requests)
@@ -2018,8 +2036,7 @@ app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: R
 app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const added = addAddress(walletAddress);
   const actor = resolveActingAdminAddress(req);
@@ -2058,13 +2075,11 @@ app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalle
 app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const removed = removeAddress(walletAddress);
   if (!removed) {
-    res.status(404).json({ error: 'Wallet address not found in allowlist' });
-    return;
+    throw new NotFoundError('Wallet address not found in allowlist');
   }
 
   const actor = resolveActingAdminAddress(req);
@@ -2380,22 +2395,12 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
 
   if (!wallet) {
     req.adminAuditAction = 'admin.impersonate.invalid';
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'wallet path parameter is required',
-    });
-    return;
+    throw new ValidationError('wallet path parameter is required');
   }
 
   if (!hasRequiredApiKeyRole(req, 'super-admin')) {
     req.adminAuditAction = 'admin.impersonate.denied';
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required for impersonation',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required for impersonation');
   }
 
   if (!sessionId && process.env.IMPERSONATION_SESSION_STORAGE) {
@@ -2468,11 +2473,7 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
         ...req.adminAuditMetadata,
         error: error instanceof Error ? error.message : String(error),
       };
-      res.status(500).json({
-        error: 'Internal Server Error',
-        status: 500,
-        message: 'Failed to build impersonated vault state',
-      });
+      throw new InternalError('Failed to build impersonated vault state');
   }
 });
 
@@ -2560,18 +2561,12 @@ app.get('/admin/receipts/:id/verify', validateApiKey, async (req: Request, res: 
 app.post('/admin/api-keys/register', validateApiKey, validate({ body: ApiKeyRegisterSchema }), async (req: Request, res: Response) => {
   const { key, role: requestedRole } = req.body;
   if (!key || typeof key !== 'string' || !key.trim()) {
-    res.status(400).json({ error: 'Missing key in request body' });
-    return;
+    throw new ValidationError('Missing key in request body');
   }
 
   const role = normalizeApiKeyRole(requestedRole) || 'admin';
   if (role === 'super-admin' && !hasRequiredApiKeyRole(req, 'super-admin')) {
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required to register super-admin API keys',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required to register super-admin API keys');
   }
 
   const normalizedKey = key.trim();
@@ -2798,27 +2793,19 @@ app.get('/admin/api-keys/audit-events', validateApiKey, async (req: Request, res
  * POST /admin/webhooks - register webhook endpoint for transaction events
  */
 app.post('/admin/webhooks', validateApiKey, validate({ body: WebhookRegisterSchema }), (req: Request, res: Response) => {
-  try {
-    const { url, eventTypes, enabled, secret } = req.body;
+  const { url, eventTypes, enabled, secret } = req.body;
 
-    const endpoint = registerWebhookEndpoint({
-      url,
-      eventTypes,
-      enabled: enabled ?? true,
-      secret,
-    });
+  const endpoint = registerWebhookEndpoint({
+    url,
+    eventTypes,
+    enabled: enabled ?? true,
+    secret,
+  });
 
-    res.status(201).json({
-      message: 'Webhook endpoint registered',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
-    });
-  }
+  res.status(201).json({
+    message: 'Webhook endpoint registered',
+    endpoint,
+  });
 });
 
 /**
@@ -2866,28 +2853,15 @@ app.patch('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSchem
     return;
   }
 
-  try {
-    const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
-    if (!endpoint) {
-      res.status(404).json({
-        error: 'Not Found',
-        status: 404,
-        message: 'Webhook endpoint not found',
-      });
-      return;
-    }
-
-    res.status(200).json({
-      message: 'Webhook endpoint updated',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Failed to update webhook endpoint',
-    });
+  const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
+  if (!endpoint) {
+    throw new NotFoundError('Webhook endpoint not found');
   }
+
+  res.status(200).json({
+    message: 'Webhook endpoint updated',
+    endpoint,
+  });
 });
 
 /**
@@ -4841,7 +4815,7 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
-// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 healthProbeService.register('database', async () => {
   const health = await getDatabaseHealth();
   return health.primary === 'up' ? 'up' : 'down';
@@ -4879,7 +4853,6 @@ app.get('/health/probes', async (_req: Request, res: Response) => {
 });
 
 // â”€â”€â”€ Write-Ahead Audit Log Endpoints (Issue #707) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 /**
  * GET /admin/wal/entries
  * Lists write-ahead audit log entries with optional filters.

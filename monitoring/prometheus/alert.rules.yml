@@ -1,0 +1,65 @@
+groups:
+  - name: yieldvault-backend-alerts
+    rules:
+      # Critical: sustained server errors on the API surface.
+      - alert: HighCriticalErrorRate
+        expr: |
+          sum(rate(http_error_count[5m])) by (route)
+          /
+          clamp_min(sum(rate(http_request_count[5m])) by (route), 1e-9)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.route }}"
+          description: >
+            The 5xx error rate for route {{ $labels.route }} has exceeded 5% over the last
+            5 minutes (current value: {{ $value | humanizePercentage }}). This usually indicates
+            an unhandled exception in a request handler. Correlate with the `yieldvault_backend_errors`
+            Grafana panel and the `X-Correlation-ID` / trace id logged on each failing request.
+
+      # Warning: elevated client error rate (4xx) may indicate auth, validation, or
+      # breaking API changes for integrators.
+      - alert: ElevatedClientErrorRate
+        expr: |
+          sum(rate(http_client_error_count[5m])) by (route)
+          /
+          clamp_min(sum(rate(http_request_count[5m])) by (route), 1e-9)
+          > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "Elevated 4xx error rate on {{ $labels.route }}"
+          description: >
+            The 4xx error rate for route {{ $labels.route }} has exceeded 25% over the last
+            10 minutes. Check authentication requirements and request validation.
+
+      # Warning: p95 latency SLO breach for successful requests.
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_response_time_seconds_bucket[5m])) by (route, le))
+          > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "p95 latency above 1s on {{ $labels.route }}"
+          description: >
+            The 95th percentile response time for {{ $labels.route }} is above 1 second
+            (current value: {{ $value | humanizeDuration }}).
+
+      # Critical: backend process is not exposing metrics (scrape is down).
+      - alert: BackendDown
+        expr: up{job="yieldvault-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault backend target is down"
+          description: "Prometheus cannot scrape the YieldVault backend /metrics endpoint."

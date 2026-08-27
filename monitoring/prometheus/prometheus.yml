@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alert.rules.yml
+
+scrape_configs:
+  - job_name: yieldvault-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - backend:3000
+        labels:
+          service: yieldvault-backend
