@@ -1,4 +1,5 @@
 import { logger } from './middleware/structuredLogging';
+import { observeExternalDependency } from './metrics';
 
 export interface DependencyProbeState {
   status: 'up' | 'down' | 'degraded';
@@ -52,6 +53,7 @@ class HealthProbeService {
     try {
       const result = await registration.probe();
       const latencyMs = Date.now() - startMs;
+      observeExternalDependency(name, 'health_probe', latencyMs, result === 'up' ? 'success' : 'failure');
 
       state.status = result;
       state.latencyMs = latencyMs;
@@ -66,6 +68,7 @@ class HealthProbeService {
       }
     } catch (error) {
       const latencyMs = Date.now() - startMs;
+      observeExternalDependency(name, 'health_probe', latencyMs, 'failure');
       state.status = 'down';
       state.latencyMs = latencyMs;
       state.lastCheckedAt = new Date().toISOString();

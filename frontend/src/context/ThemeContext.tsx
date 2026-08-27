@@ -1,42 +1,80 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  applyResolvedTheme,
+  dispatchThemeChange,
+  loadThemePreference,
+  persistThemePreference,
+  resolveTheme,
+  subscribeToSystemTheme,
+  subscribeToThemeChange,
+  type ResolvedTheme,
+  type ThemePreference,
+} from "../lib/theme";
 
-type Theme = 'light' | 'dark';
+type Theme = ThemePreference;
 
 interface ThemeContextType {
-    theme: Theme;
-    toggleTheme: () => void;
+  theme: Theme;
+  resolvedTheme: ResolvedTheme;
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+function applyPreference(preference: ThemePreference) {
+  persistThemePreference(preference);
+  applyResolvedTheme(resolveTheme(preference));
+  dispatchThemeChange(preference);
+}
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [theme, setTheme] = useState<Theme>(() => {
-        const saved = localStorage.getItem('theme');
-        if (saved === 'light' || saved === 'dark') return saved;
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  const [theme, setThemeState] = useState<Theme>(() => loadThemePreference());
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => resolveTheme("system"));
+
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
+
+  useEffect(() => {
+    applyResolvedTheme(resolvedTheme);
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    persistThemePreference(theme);
+  }, [theme]);
+
+  useEffect(() => subscribeToSystemTheme(setSystemTheme), []);
+
+  useEffect(() => {
+    return subscribeToThemeChange((next) => {
+      setThemeState((current) => (current === next ? current : next));
     });
+  }, []);
 
-    useEffect(() => {
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-    }, [theme]);
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+    applyPreference(next);
+  }, []);
 
-    const toggleTheme = () => {
-        setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
-    };
+  const toggleTheme = useCallback(() => {
+    setTheme(resolvedTheme === "light" ? "dark" : "light");
+  }, [resolvedTheme, setTheme]);
 
-    return (
-        <ThemeContext.Provider value={{ theme, toggleTheme }}>
-            {children}
-        </ThemeContext.Provider>
-    );
+  const value = useMemo(
+    () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
+    [theme, resolvedTheme, setTheme, toggleTheme],
+  );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const useTheme = () => {
-    const context = useContext(ThemeContext);
-    if (!context) {
-        throw new Error('useTheme must be used within a ThemeProvider');
-    }
-    return context;
+  const context = useContext(ThemeContext);
+  if (!context) {
+    throw new Error("useTheme must be used within a ThemeProvider");
+  }
+  return context;
 };
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const useOptionalTheme = () => useContext(ThemeContext);

@@ -14,7 +14,9 @@
 //! ### 1. Data Freshness (Heartbeat)
 //!
 //! - **Default Heartbeat**: 3600 seconds (1 hour)
-//! - Configurable via `set_oracle_heartbeat()`
+//! - Configurable via `set_oracle_heartbeat()`, capped at `MAX_ORACLE_HEARTBEAT`
+//!   (86400 seconds / 24 hours) so an admin cannot effectively disable
+//!   staleness protection by setting an unbounded heartbeat.
 //! - **Behavior**: REVERT on stale data
 //!   - If `current_time - price.timestamp > heartbeat` → `OracleError::HeartbeatExceeded`
 //!
@@ -146,6 +148,15 @@ pub enum OracleError {
 
 pub const DEFAULT_HEARTBEAT_SECONDS: u64 = 3600;
 pub const MAX_PRICE_DEVIATION_BPS: i128 = 5000;
+
+/// Upper bound on the admin-configurable oracle heartbeat (`set_oracle_heartbeat`).
+///
+/// Without a ceiling, an admin (or a compromised admin key) could configure an
+/// arbitrarily large heartbeat and effectively disable staleness protection
+/// while `is_oracle_enabled()` still reports `true`. 24 hours is generous
+/// enough for any legitimate low-frequency feed while still bounding the
+/// worst-case staleness window.
+pub const MAX_ORACLE_HEARTBEAT: u64 = 86_400;
 
 pub struct OracleValidator;
 
@@ -378,6 +389,12 @@ mod tests {
     #[test]
     fn test_max_price_deviation_bps() {
         assert_eq!(MAX_PRICE_DEVIATION_BPS, 5000);
+    }
+
+    #[test]
+    fn test_max_oracle_heartbeat() {
+        assert_eq!(MAX_ORACLE_HEARTBEAT, 86_400);
+        assert!(DEFAULT_HEARTBEAT_SECONDS <= MAX_ORACLE_HEARTBEAT);
     }
 
     #[test]

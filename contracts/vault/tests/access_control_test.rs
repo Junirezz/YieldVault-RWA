@@ -164,7 +164,7 @@ mod access_control {
         );
 
         // Advance past dispute window
-        let env_ref = client.env();
+        let env_ref = client.env;
         env_ref
             .ledger()
             .set_timestamp(env_ref.ledger().timestamp() + 3_601);
@@ -194,7 +194,7 @@ mod access_control {
         );
 
         // Advance past dispute window; try to confirm as primary (same as initiator)
-        let env_ref = client.env();
+        let env_ref = client.env;
         env_ref
             .ledger()
             .set_timestamp(env_ref.ledger().timestamp() + 3_601);
@@ -213,7 +213,7 @@ mod access_control {
     #[test]
     fn test_accrue_yield_requires_admin() {
         let (_env, client, admin, token) = setup();
-        let env = client.env();
+        let env = client.env;
         mint(env, &token, &admin, 1_000);
         // Succeeds for admin
         client.accrue_yield(&1_000i128);

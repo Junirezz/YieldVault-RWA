@@ -3,6 +3,7 @@ import { usePreferencesContext } from '../context/PreferencesContext';
 import type { Theme, Locale, Currency, NotificationPreferences } from '../hooks/usePreferences';
 import { useTranslation } from '../i18n';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import { usePageHeadingFocus } from '../hooks/usePageHeadingFocus';
 
 // ─── tiny icon helpers (SVG inline) ───────────────────────────────────────────
 
@@ -258,7 +259,7 @@ const StyledSelect: React.FC<StyledSelectProps> = ({ id, value, onChange, option
       onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-glass)'; }}
     >
       {options.map(o => (
-        <option key={o.value} value={o.value} style={{ background: '#0a0b10' }}>
+        <option key={o.value} value={o.value} style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>
           {o.label}
         </option>
       ))}
@@ -314,6 +315,7 @@ const Settings: React.FC = () => {
     resetUserPreferenceStore,
   } = usePreferencesContext();
   const { t } = useTranslation();
+  const headingRef = usePageHeadingFocus<HTMLHeadingElement>();
 
   const [resetConfirm, setResetConfirm] = useState(false);
 
@@ -353,7 +355,12 @@ const Settings: React.FC = () => {
             </svg>
           </div>
           <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              data-page-heading="true"
+              style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}
+            >
               {t("settings.title")}
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: '2px' }}>
@@ -466,7 +473,7 @@ const Settings: React.FC = () => {
 
         <div style={{ height: '1px', background: 'var(--border-glass)', margin: '16px 0' }} />
 
-        <div className="settings-locale-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div className="settings-locale-grid">
           <div>
             <label htmlFor="settings-locale" style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
               {t("settings.language.displayLocale")}

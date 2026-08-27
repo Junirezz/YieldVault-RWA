@@ -2,6 +2,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 import Navbar from "./components/Navbar";
+import SkipLinks from "./components/SkipLinks";
+import RouteAnnouncer from "./components/RouteAnnouncer";
+import MotionProvider from "./motion/MotionProvider";
+import PageTransition from "./motion/PageTransition";
 import SessionExpiredModal from "./components/SessionExpiredModal";
 import SessionExpiryWarning from "./components/SessionExpiryWarning";
 import WalletDisconnectRecoveryModal from "./components/WalletDisconnectRecoveryModal";
@@ -47,6 +51,7 @@ import {
 import NetworkWarningBanner from "./components/NetworkWarningBanner";
 import OfflineBanner from "./components/OfflineBanner";
 import HighLatencyBanner from "./components/HighLatencyBanner";
+import NetworkBanner from "./components/NetworkBanner";
 import { useVault, VaultProvider } from "./context/VaultContext";
 import { usePageViewTracking } from "./hooks/useAnalytics";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -162,13 +167,14 @@ function AppContent() {
   return (
     <PreferencesProvider walletAddress={walletAddress}>
       <KeyboardShortcutProvider walletAddress={walletAddress}>
-        <a className="skip-link" href="#main-content">
-          Skip to main content
-        </a>
+        <MotionProvider>
+        <SkipLinks />
+        <RouteAnnouncer />
         <OfflineBanner lastKnownTvl={tvl} lastKnownBalance={usdcBalance} />
         <div className="app-container">
           <NetworkWarningBanner walletAddress={walletAddress} />
           <HighLatencyBanner />
+          <NetworkBanner />
           <Navbar
             walletAddress={walletAddress}
             usdcBalance={usdcBalance}
@@ -176,7 +182,8 @@ function AppContent() {
             onDisconnect={handleDisconnect}
             role={role}
           />
-          <main id="main-content" className="container app-main" style={{ marginTop: "100px", paddingBottom: "60px" }}>
+          <main id="main-content" className="container app-main" tabIndex={-1} style={{ marginTop: "100px", paddingBottom: "60px" }}>
+            <PageTransition>
             <Suspense fallback={<RouteLoadingFallback />}>
               <SentryRoutes>
                 <Route
@@ -304,6 +311,7 @@ function AppContent() {
                 <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
               </SentryRoutes>
             </Suspense>
+            </PageTransition>
           </main>
           <OnboardingWalkthrough />
           <ShortcutHelpModal />
@@ -326,6 +334,7 @@ function AppContent() {
           )}
           <ToastCenter />
         </div>
+        </MotionProvider>
       </KeyboardShortcutProvider>
     </PreferencesProvider>
   );

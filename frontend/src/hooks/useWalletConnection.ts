@@ -256,9 +256,10 @@ export function useWalletConnection({
     } catch (e: unknown) {
       const error = classifyWalletConnectionError(e);
       dispatch({ type: "CONNECT_FAILED", error });
+      const errorCopy = walletErrorI18nKeys(error.code);
       toast.error({
-        title: t("toast.walletConnectionFailed.title"),
-        description: t("toast.walletConnectionFailed.description"),
+        title: t(errorCopy.title),
+        description: t(errorCopy.description),
       });
     }
   }, [onConnect, toast, t]);

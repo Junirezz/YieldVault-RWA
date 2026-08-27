@@ -1,0 +1,61 @@
+name: Dependency Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 4 * * *' # Daily at 4:00 AM UTC
+
+jobs:
+  npm-audit:
+    name: NPM Audit (Frontend & Backend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit Frontend Dependencies
+        working-directory: ./frontend
+        run: |
+          npm audit --audit-level=high || echo "High/Critical vulnerabilities detected in frontend dependencies!"
+
+      - name: Audit Backend Dependencies
+        working-directory: ./backend
+        run: |
+          npm audit --audit-level=high || echo "High/Critical vulnerabilities detected in backend dependencies!"
+
+  cargo-audit:
+    name: Cargo Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run Cargo Audit
+        run: cargo audit --deny warnings || echo "Cargo audit completed with findings."
+
+  dependency-review:
+    name: GitHub Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

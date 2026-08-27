@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import EmptyState from "../components/ui/EmptyState";
+import { usePageHeadingFocus } from "../hooks/usePageHeadingFocus";
 
 const HORIZON_BASE = "https://horizon-testnet.stellar.org";
 const EXPLORER_BASE = "https://stellar.expert/explorer/testnet/tx";
@@ -43,6 +44,7 @@ interface HorizonOp {
 
 export default function TransactionReceipt() {
   const { txHash } = useParams<{ txHash: string }>();
+  const headingRef = usePageHeadingFocus<HTMLHeadingElement>();
   const [tx, setTx] = useState<TxDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -173,7 +175,14 @@ export default function TransactionReceipt() {
     <div className="receipt-page">
       <div className="receipt-card" role="main" aria-label="Transaction Receipt">
         <header className="receipt-header">
-          <h1 className="receipt-title">Transaction Receipt</h1>
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            data-page-heading="true"
+            className="receipt-title"
+          >
+            Transaction Receipt
+          </h1>
           <p className="receipt-subtitle">YieldVault · Stellar Network</p>
           <div className="receipt-status">
             <span className={`receipt-status-badge receipt-status-badge--${tx.status}`}>

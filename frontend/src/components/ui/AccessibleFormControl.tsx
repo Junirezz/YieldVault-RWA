@@ -40,7 +40,7 @@ const AccessibleFormControl: React.FC<AccessibleFormControlProps> = ({
         style={{
           fontSize: "0.9rem",
           fontWeight: 600,
-          color: error ? "#ef4444" : "var(--text-primary)",
+          color: error ? "var(--text-error)" : "var(--text-primary)",
           whiteSpace: direction === "row" ? "nowrap" : undefined,
         }}
       >
@@ -48,7 +48,7 @@ const AccessibleFormControl: React.FC<AccessibleFormControlProps> = ({
         {required && (
           <span
             aria-hidden="true"
-            style={{ color: "#ef4444", marginLeft: "4px" }}
+            style={{ color: "var(--text-error)", marginLeft: "4px" }}
           >
             *
           </span>
