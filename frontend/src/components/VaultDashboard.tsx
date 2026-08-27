@@ -14,12 +14,13 @@ import { useDelayedLoading } from "../hooks/useDelayedLoading";
 import { useVault } from "../context/VaultContext";
 import ApiStatusBanner from "./ApiStatusBanner";
 import SharePriceDisplay from "./SharePriceDisplay";
+import VaultPositionBalance from "./VaultPositionBalance";
 import VaultPerformanceChart from "./VaultPerformanceChart";
 import VaultDecisionSummary from "./VaultDecisionSummary";
 import { useToast } from "../context/ToastContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./Tabs";
 import { FormField } from "../forms";
-import { isApiError, isValidationError } from "../lib/api";
+import { isValidationError } from "../lib/api";
 import { useForm } from "../forms/useForm";
 import { validate, type ValidationSchema } from "../forms/validate";
 import { useDepositMutation, useWithdrawMutation } from "../hooks/useVaultMutations";
@@ -27,7 +28,7 @@ import { useTokenAllowance } from "../hooks/useTokenAllowance";
 import { usePortfolioHoldings } from "../hooks/usePortfolioData";
 import { createDepositFormSchema, MIN_DEPOSIT_AMOUNT, MAX_DEPOSIT_AMOUNT, USDC_DISPLAY_DECIMALS } from "../forms/schemas/depositFormSchema";
 import { createWithdrawFormSchema } from "../forms/schemas/withdrawFormSchema";
-import { mapServerError } from "../lib/errorMappers";
+import { mapServerError, mapTransactionError } from "../lib/errorMappers";
 import confetti from "canvas-confetti";
 import CopyButton from "./CopyButton";
 import { Button } from "./ui/Button";
@@ -227,7 +228,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   });
   const { isStale: statsIsStale, ageText: statsAgeText } = useStaleIndicator(lastUpdate);
 
-  const { data: portfolioHoldings } = usePortfolioHoldings(walletAddress);
+  const { data: portfolioHoldings, isLoading: isPortfolioLoading } = usePortfolioHoldings(walletAddress);
 
   // Deposit balance comes from the connected wallet's USDC balance; withdraw
   // balance is the user's current vault position (sum of holdings value).
@@ -245,6 +246,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     txHash?: string;
     retryable?: boolean;
     actionType?: TransactionTab;
+    technicalCode?: string;
+    supportReference?: string;
   } | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
@@ -705,20 +708,20 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         dashboardUrl.setStep("amount");
       }
 
-      let errorMessage = t("vaultDashboard.toast.genericError");
+      const transactionError = mapTransactionError(err);
+      const errorMessage = t(`vaultDashboard.toast.transactionErrors.${transactionError.kind}`);
 
-      if (isValidationError(err)) {
-        errorMessage = err.details?.[0]?.message || errorMessage;
-      } else if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (mappedError.generalError) {
-        errorMessage = mappedError.generalError;
-      }
+      console.error("Vault transaction failed", {
+        action: actionType,
+        error: err,
+        technicalCode: transactionError.technicalCode,
+        supportReference: transactionError.supportReference,
+      });
 
       // Field-level validation failures need corrected input, not a blind resubmit.
       // Everything else (network hiccups, RPC timeouts, transient 5xx) is worth retrying.
       const retryable =
-        !hasFieldErrors && !isValidationError(err) && (isApiError(err) ? err.retryable : true);
+        !hasFieldErrors && !isValidationError(err) && transactionError.retryable;
 
       if (options.isRetry) {
         setRetryCount((count) => count + 1);
@@ -729,6 +732,8 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         message: errorMessage,
         retryable,
         actionType,
+        technicalCode: transactionError.technicalCode,
+        supportReference: transactionError.supportReference,
       });
 
       toast.error({
@@ -875,6 +880,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
               margin: "24px 0",
             }}
           />
+
+          {walletAddress && (
+            <VaultPositionBalance
+              holding={(portfolioHoldings ?? []).find((holding) => holding.symbol === "yvUSDC")}
+              isLoading={isPortfolioLoading}
+            />
+          )}
 
           {/* Per-widget refresh control + stale indicator for stats panel */}
           <div style={{ marginBottom: "16px" }}>
@@ -1796,6 +1808,11 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                             <p style={{ color: "var(--text-secondary)", marginBottom: "8px", maxWidth: "300px" }}>
                               {transactionResult?.message}
                             </p>
+                            {transactionResult?.supportReference && (
+                              <p style={{ color: "var(--text-tertiary)", marginBottom: "8px", fontSize: "0.75rem" }}>
+                                Reference: {transactionResult.supportReference}
+                              </p>
+                            )}
 
                             {!transactionResult?.success && retryCount >= MAX_TRANSACTION_RETRY_ATTEMPTS && (
                               <p

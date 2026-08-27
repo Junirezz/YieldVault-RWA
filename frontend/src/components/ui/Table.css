@@ -3,7 +3,7 @@
   overflow-x: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-glass);
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--bg-control);
 }
 
 .ui-table {
@@ -21,7 +21,7 @@
   letter-spacing: 0.05em;
   font-size: var(--text-xs);
   border-bottom: 1px solid var(--border-glass);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-muted);
 }
 
 .ui-td {
@@ -36,7 +36,7 @@
 }
 
 .ui-tr:hover .ui-td {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-surface-hover);
 }
 
 .ui-th.align-center, .ui-td.align-center { text-align: center; }
@@ -57,5 +57,5 @@
 }
 
 .table-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--border-subtle);
 }

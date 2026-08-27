@@ -35,6 +35,7 @@ const FormField: React.FC<FormFieldProps> = ({
           className="input-field"
           disabled={disabled}
           aria-invalid={error ? "true" : undefined}
+          aria-errormessage={error ? errorId : undefined}
           aria-describedby={
             [error ? errorId : undefined, helperText ? helperId : undefined]
               .filter(Boolean)

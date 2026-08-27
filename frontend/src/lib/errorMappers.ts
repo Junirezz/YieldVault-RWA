@@ -37,6 +37,63 @@ export interface MappedServerError {
   generalError: string | null;
 }
 
+export type TransactionErrorKind =
+  | "walletRejected"
+  | "walletPermission"
+  | "network"
+  | "insufficientFunds"
+  | "contractState"
+  | "validation"
+  | "unknown";
+
+export interface MappedTransactionError {
+  kind: TransactionErrorKind;
+  retryable: boolean;
+  technicalCode?: string;
+  supportReference?: string;
+}
+
+/** Classify wallet/RPC/contract failures without exposing raw provider text. */
+export function mapTransactionError(error: unknown): MappedTransactionError {
+  const apiError = error && typeof error === "object"
+    ? error as { code?: string; serverCode?: string; serverError?: string; message?: string; retryable?: boolean; correlationId?: string; traceId?: string }
+    : undefined;
+  const raw = [apiError?.serverCode, apiError?.serverError, apiError?.message]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const technicalCode = apiError?.serverCode || apiError?.code;
+  const supportReference = apiError?.correlationId || apiError?.traceId;
+  const result = (kind: TransactionErrorKind, retryable: boolean): MappedTransactionError => ({
+    kind,
+    retryable,
+    technicalCode,
+    supportReference,
+  });
+
+  if (/reject|denied|cancel|declin/.test(raw)) return result("walletRejected", true);
+  if (/permission|unauthori[sz]|not allowed|wallet.*(locked|disconnected)/.test(raw)) {
+    return result("walletPermission", true);
+  }
+  if (/insufficient|not enough|balance|funds|liquidity/.test(raw)) {
+    return result("insufficientFunds", false);
+  }
+  if (/network|timeout|rpc|service unavailable|fetch failed|gateway/.test(raw)) {
+    return result("network", true);
+  }
+  if (/validation|invalid input|invalid amount/.test(raw)) {
+    return result("validation", false);
+  }
+  if (/validation|invalid|paused|cap|timelock|cooldown|simulation|contract|restore/.test(raw)) {
+    return result("contractState", false);
+  }
+  if (apiError?.code === "AUTH_ERROR" || apiError?.code === "ABORTED") {
+    return result("walletPermission", false);
+  }
+  if (apiError?.retryable === true) return result("network", true);
+  return result("unknown", false);
+}
+
 /**
  * Map a server error response to form field errors.
  * 

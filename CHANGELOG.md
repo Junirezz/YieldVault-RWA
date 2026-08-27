@@ -9,6 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Features
+- Implement network mismatch detector and guided fix flow with instant Freighter recheck and accessible step-by-step guidance (#979)
+- Add downloadable account statement export flow with custom date range filtering, holdings summary, and CSV/JSON serialization (#983)
 - Add advanced filter and sort to the transaction history table: multi-column sort (up to three keys) with shift-click tiebreakers, a keyboard-reachable sort panel, URL-shareable ordering with legacy single-column links still honoured, relative date presets, removable active-filter chips, and inline reporting of contradictory ranges (#1035)
 - Harden the transfer orchestration service to be idempotent and retry-safe: wallet-scoped idempotency keys, request validation and canonicalisation, submission-boundary failure classification that never blindly resubmits a transfer whose outcome is unknown, stored terminal rejections, circuit-breaker fail-fast, a submission timeout, and an operator reconciliation queue with metrics (#1043)
 - Harden the vault comparison screen for multi-strategy selection: numeric strategy catalog with locale-aware formatting, URL-synced shareable selection and column ordering, best-in-class marking with non-colour cues, and screen-reader announcements for selection and sort changes (#1036)
@@ -27,6 +29,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Vault performance dynamic date filter
 
 ### Documentation
+- Create release checklist for testnet and mainnet deployment covering preflight, deployment, validation, and multi-tier sign-off (#1146)
+- Add runbook for incident response and rollback operations with failure scenarios, activation triggers, and operational owner matrix (#1149)
 - Add incident postmortem templates, publication playbook, and CI validation workflow (#769)
 - Add release notes playbook and changelog curation guidelines (#618)
 - Add API versioning and deprecation policy with sunset windows, migration guide, and breaking-change classification (#610)

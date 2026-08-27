@@ -273,6 +273,10 @@ pub enum DataKeyExt {
     // Issue #1174: gate for the contract telemetry / debugging hook
     DiagnosticsEnabled,
 
+    // Issue #1230: Performance fee switch for strategy performance incentives
+    PerformanceFeeBps,
+    PerformanceIncentivePool,
+    PerformanceFeeEnabled,
     // Issue #1173 / #1231: nested to stay within DataKeyExt variant limits
     Risk(RiskExtKey),
 
@@ -1538,14 +1542,58 @@ impl YieldVault {
             return Err(VaultError::InvalidYieldAmount);
         }
 
+        // Issue #1230: Performance fee — redirect portion of yield above watermark
+        let perf_enabled: bool = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false);
+        let mut perf_fee_amount: i128 = 0;
+        if perf_enabled && harvested > 0 {
+            let current_watermark = Self::strategy_watermark(env.clone(), strategy.clone());
+            let yield_above_hwm = harvested
+                .checked_sub(current_watermark)
+                .unwrap_or(0);
+            if yield_above_hwm > 0 {
+                let perf_fee_bps: i128 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKeyExt::PerformanceFeeBps)
+                    .unwrap_or(0);
+                if perf_fee_bps > 0 {
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    perf_fee_amount = pf;
+                    if perf_fee_amount > 0 {
+                        if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
+                            let token_addr = Self::token(env.clone());
+                            let token_client = token::Client::new(&env, &token_addr);
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &pool,
+                                &perf_fee_amount,
+                            );
+                            env.events().publish(
+                                (symbol_short!("pperffee"), strategy.clone()),
+                                (perf_fee_amount, yield_above_hwm),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let net_harvested = harvested
+            .checked_sub(perf_fee_amount)
+            .unwrap_or(0);
+
         let mut state = Self::get_state(&env);
         let pre_total_assets = state.total_assets;
-        let new_total_assets = pre_total_assets.checked_add(harvested).expect("overflow");
+        let new_total_assets = pre_total_assets.checked_add(net_harvested).expect("overflow");
         state.total_assets = new_total_assets;
         env.storage().instance().set(&DataKey::State, &state);
 
         env.events()
-            .publish((symbol_short!("k_yield"),), (harvested, new_total_assets));
+            .publish((symbol_short!("k_yield"),), (net_harvested, new_total_assets));
 
         Ok(harvested)
     }
@@ -3468,6 +3516,100 @@ impl YieldVault {
         env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
     }
 
+    // ── Issue #1230: Performance fee switch for strategy incentives ─────────
+
+    /// Set the performance fee in basis points (0–10000).
+    ///
+    /// When the performance fee switch is enabled, this percentage of
+    /// strategy yield above the high-water mark is redirected to the
+    /// performance incentive pool instead of accruing to depositors.
+    ///
+    /// Only the Admin can call this. Takes effect immediately.
+    pub fn set_performance_fee_bps(env: Env, bps: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if !(0..=10_000).contains(&bps) {
+            return Err(VaultError::InvalidPerformanceFeeBps);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceFeeBps, &bps);
+        env.events()
+            .publish((symbol_short!("pperfchg"),), (bps,));
+        Ok(())
+    }
+
+    /// Returns the configured performance fee in basis points (default 0).
+    pub fn performance_fee_bps(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeBps)
+            .unwrap_or(0)
+    }
+
+    /// Set the performance incentive pool address.
+    ///
+    /// When the performance fee switch is enabled, accumulated performance
+    /// fees are transferred to this address on each yield report.
+    ///
+    /// Only the Admin can call this.
+    pub fn set_performance_incentive_pool(
+        env: Env,
+        pool: Address,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceIncentivePool, &pool);
+        env.events()
+            .publish((symbol_short!("pperfpool"),), (pool,));
+        Ok(())
+    }
+
+    /// Returns the configured performance incentive pool address, if any.
+    pub fn performance_incentive_pool(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceIncentivePool)
+    }
+
+    /// Enable or disable the performance fee switch.
+    ///
+    /// When enabled, a portion of strategy yield above the high-water mark
+    /// is redirected to the performance incentive pool. The pool address
+    /// must be configured before enabling.
+    ///
+    /// Only the Admin can call this.
+    pub fn set_performance_fee_enabled(
+        env: Env,
+        enabled: bool,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if enabled {
+            let pool: Option<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::PerformanceIncentivePool);
+            if pool.is_none() {
+                return Err(VaultError::PerformanceIncentivePoolNotConfigured);
+            }
+        }
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceFeeEnabled, &enabled);
+        env.events()
+            .publish((symbol_short!("pperftog"),), (enabled,));
+        Ok(())
+    }
+
+    /// Returns whether the performance fee switch is currently enabled.
+    pub fn is_performance_fee_enabled(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false)
     // ── Utilization-based dynamic fee curve (Issue #1243) ────────────────────
 
     /// Returns the configured dynamic fee curve.
@@ -4382,6 +4524,46 @@ impl YieldVault {
                 &DataKey::TreasuryBalance,
                 &treasury_bal.checked_add(fee_amount).expect("overflow"),
             );
+        }
+
+        // Issue #1230: Performance fee — redirect portion of yield above watermark
+        let perf_enabled: bool = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false);
+        let mut perf_fee_amount: i128 = 0;
+        if perf_enabled && net_yield > 0 {
+            let current_watermark = Self::strategy_watermark(env.clone(), strategy.clone());
+            let yield_above_hwm = net_yield
+                .checked_sub(current_watermark)
+                .unwrap_or(0);
+            if yield_above_hwm > 0 {
+                let perf_fee_bps: i128 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKeyExt::PerformanceFeeBps)
+                    .unwrap_or(0);
+                if perf_fee_bps > 0 {
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    perf_fee_amount = pf;
+                    if perf_fee_amount > 0 {
+                        if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
+                            let token_addr = Self::token(env.clone());
+                            let token_client = token::Client::new(&env, &token_addr);
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &pool,
+                                &perf_fee_amount,
+                            );
+                            env.events().publish(
+                                (symbol_short!("pperffee"), strategy.clone()),
+                                (perf_fee_amount, yield_above_hwm),
+                            );
+                        }
+                    }
+                }
+            }
         }
         let next_watermark = Self::strategy_watermark(env.clone(), strategy.clone())
             .checked_add(amount)
