@@ -104,7 +104,8 @@ export default function TransactionReceipt() {
   }, [txHash, pollCount]);
 
   useEffect(() => {
-    void fetchTx();
+    const initialId = window.setTimeout(() => void fetchTx(), 0);
+    return () => window.clearTimeout(initialId);
   }, [fetchTx]);
 
   // Poll while transaction is not yet found (pending confirmation)

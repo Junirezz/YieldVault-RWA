@@ -1,5 +1,5 @@
 import React, { type ReactNode } from "react";
-import ErrorState from "./ui/ErrorState";
+import ErrorState, { type ErrorStateAction } from "./ui/ErrorState";
 
 export interface ViewStateProps {
   title: string;
@@ -26,7 +26,7 @@ export default function ViewState({
           React.isValidElement(action)
             ? undefined
             : typeof action === "object" && action !== null && "label" in action
-              ? (action as unknown as any)
+              ? (action as unknown as ErrorStateAction)
               : undefined
         }
         className={`view-state view-state-error ${className}`.trim()}
