@@ -23,7 +23,8 @@ import {
   loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
 import { idempotencyStore } from './idempotency';
-import { createAdminAuditMiddleware, getAuditLogs, getAuditLogMetrics } from './auditLog';
+import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
+import { AuditLogQuerySchema } from './middleware/validate';
 import { recordAdminAuditLog } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
@@ -3101,17 +3102,21 @@ app.post('/api/v1/webhooks/verify', validate({ body: WebhookVerifyBodySchema }),
 /**
  * GET /admin/audit/logs - list admin activity logs
  */
-app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/audit/logs', validateApiKey, validate({ query: AuditLogQuerySchema }), (req: Request, res: Response) => {
   const statusCode = req.query.statusCode ? parseInt(String(req.query.statusCode), 10) : undefined;
   const limit = parseLimited(req.query.limit, 100, 1, 500);
-
-  const logs = getAuditLogs({
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const filters = {
     actor: req.query.actor ? String(req.query.actor) : undefined,
     action: req.query.action ? String(req.query.action) : undefined,
     path: req.query.path ? String(req.query.path) : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: req.query.from ? String(req.query.from) : undefined,
+    to: req.query.to ? String(req.query.to) : undefined,
+  };
+
+  const logs = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(logs, limit);
 
   sendStandardListEnvelope(res, {
@@ -3120,6 +3125,8 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
     hasNextPage,
     extras: {
       logs: data,
+      page,
+      total: countAuditLogs(filters),
       metrics: getAuditLogMetrics(),
     },
   });
@@ -3128,18 +3135,26 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
 /**
  * GET /admin/audit-logs - list admin audit entries (Issue #253)
  */
-app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySchema }), async (req: Request, res: Response) => {
   const limit = parseLimited(req.query.limit, 50, 1, 200);
-  const statusCode = req.query.statusCode
-    ? parseLimited(req.query.statusCode, 0, 100, 599)
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const statusValue = req.query.statusCode ?? req.query.status;
+  const statusCode = statusValue
+    ? parseLimited(statusValue, 0, 100, 599)
     : undefined;
-
-  const rows = getAuditLogs({
-    action: typeof req.query.action === 'string' ? req.query.action : undefined,
+  const filters = {
+    action: typeof req.query.action === 'string'
+      ? req.query.action
+      : typeof req.query.type === 'string' ? req.query.type : undefined,
     actor: typeof req.query.actor === 'string' ? req.query.actor : undefined,
+    path: typeof req.query.path === 'string' ? req.query.path : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: typeof req.query.from === 'string' ? req.query.from : undefined,
+    to: typeof req.query.to === 'string' ? req.query.to : undefined,
+  };
+
+  const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
   void recordAdminAuditLog(req, 'audit-logs.read', 200, {
@@ -3154,6 +3169,8 @@ app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response)
     extras: {
       meta: {
         count: data.length,
+        total: countAuditLogs(filters),
+        page,
         limit,
         timestamp: new Date().toISOString(),
       },

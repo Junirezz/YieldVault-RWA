@@ -539,6 +539,19 @@ export interface WebhookSignedEnvelope {
   deliveryId: string;
 }
 
+export type IncomingWebhookVerificationResult =
+  | { verified: true; envelope: WebhookSignedEnvelope }
+  | {
+      verified: false;
+      reason:
+        | 'unknown-endpoint'
+        | 'missing-secret'
+        | 'invalid-envelope'
+        | 'invalid-signature'
+        | 'stale-event'
+        | 'replayed-event';
+    };
+
 function createReplayCacheKey(endpointId: string, deliveryId: string): string {
   return `${endpointId}:${deliveryId}`;
 }
@@ -599,6 +612,59 @@ export function verifyWebhookSignature(
   }
 
   return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+export function verifyIncomingWebhookPayload(
+  endpointId: string,
+  envelope: unknown,
+  signature: unknown,
+): IncomingWebhookVerificationResult {
+  const endpoint = endpoints.get(endpointId);
+  if (!endpoint || endpoint.deletedAt) {
+    return { verified: false, reason: 'unknown-endpoint' };
+  }
+  if (!endpoint.secret) {
+    return { verified: false, reason: 'missing-secret' };
+  }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    return { verified: false, reason: 'invalid-envelope' };
+  }
+
+  const candidate = envelope as Partial<WebhookSignedEnvelope>;
+  if (
+    candidate.schemaVersion !== WEBHOOK_SCHEMA_VERSION ||
+    typeof candidate.eventType !== 'string' ||
+    !WEBHOOK_EVENT_TYPES.includes(candidate.eventType as WebhookEventType) ||
+    typeof candidate.sentAt !== 'string' ||
+    typeof candidate.deliveryId !== 'string' ||
+    candidate.deliveryId.length === 0 ||
+    !candidate.payload ||
+    typeof candidate.payload !== 'object' ||
+    Array.isArray(candidate.payload)
+  ) {
+    return { verified: false, reason: 'invalid-envelope' };
+  }
+
+  if (
+    typeof signature !== 'string' ||
+    !verifyWebhookSignature(endpoint.secret, envelope, signature)
+  ) {
+    return { verified: false, reason: 'invalid-signature' };
+  }
+
+  const sentAtMs = Date.parse(candidate.sentAt);
+  if (
+    Number.isNaN(sentAtMs) ||
+    Math.abs(Date.now() - sentAtMs) > webhookSignatureMaxSkewMs
+  ) {
+    return { verified: false, reason: 'stale-event' };
+  }
+
+  if (!markWebhookDeliverySeen(endpointId, candidate.deliveryId, candidate.sentAt)) {
+    return { verified: false, reason: 'replayed-event' };
+  }
+
+  return { verified: true, envelope: candidate as WebhookSignedEnvelope };
 }
 
 function encodeDeliveryCursor(delivery: WebhookDeliveryRecord): string {
