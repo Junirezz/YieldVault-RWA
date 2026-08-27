@@ -63,6 +63,8 @@ const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 const TransactionReceipt = lazy(() => import("./pages/TransactionReceipt"));
 const StrategyDetail = lazy(() => import("./pages/StrategyDetail"));
 const Admin = lazy(() => import("./pages/Admin"));
+const VaultHealthDashboard = lazy(() => import("./pages/VaultHealthDashboard"));
+const AuditLog = lazy(() => import("./pages/AuditLog"));
 
 // Removed simple fallback in favor of components/ErrorFallback
 
@@ -187,38 +189,31 @@ function AppContent() {
                 <Route
                   path="/"
                   element={
-                    <ErrorBoundary>
                     <RouteErrorBoundary routeName="home">
                       <LazyHome
                         walletAddress={walletAddress}
                         usdcBalance={usdcBalance}
                         xlmBalance={xlmBalance}
                       />
-                    </ErrorBoundary>
                     </RouteErrorBoundary>
                   }
                 />
                 <Route
                   path="/portfolio"
                   element={
-                    <ErrorBoundary>
-                      <LazyPortfolio walletAddress={walletAddress} />
-                    </ErrorBoundary>
                     <RouteErrorBoundary routeName="portfolio">
-                      <LazyPortfolio
-                        walletAddress={walletAddress}
-                      />
+                      <LazyPortfolio walletAddress={walletAddress} />
                     </RouteErrorBoundary>
                   }
                 />
                 <Route
                   path="/analytics"
                   element={
-                    <ErrorBoundary>
+                    <RouteErrorBoundary routeName="analytics">
                       <FeatureGate flag="ANALYTICS_PAGE">
                         <LazyAnalytics />
                       </FeatureGate>
-                    </ErrorBoundary>
+                    </RouteErrorBoundary>
                   }
                 />
                 <Route path="/transactions" element={<ErrorBoundary><LazyTransactionHistory walletAddress={walletAddress} /></ErrorBoundary>} />
@@ -226,20 +221,17 @@ function AppContent() {
                 <Route path="/strategies/:strategyId" element={<ErrorBoundary><StrategyDetail walletAddress={walletAddress} /></ErrorBoundary>} />
                 <Route path="/receipt/:txHash" element={<ErrorBoundary><TransactionReceipt /></ErrorBoundary>} />
                 <Route path="/settings" element={<ErrorBoundary><LazySettings /></ErrorBoundary>} />
+                <Route path="/vault-health" element={<ErrorBoundary><VaultHealthDashboard /></ErrorBoundary>} />
+                <Route path="/audit-log" element={<ErrorBoundary><AuditLog /></ErrorBoundary>} />
                 <Route path="/ui-kit" element={<ErrorBoundary><LazyUIPreview /></ErrorBoundary>} />
                 <Route
                   path="/admin"
                   element={
-                    <ErrorBoundary>
-                      <ProtectedRoute role={role} allow={["admin"]}>
+                    <ProtectedRoute role={role} allow={["admin"]}>
+                      <RouteErrorBoundary routeName="admin">
                         <Admin walletAddress={walletAddress} />
-                      </ProtectedRoute>
-                    </ErrorBoundary>
-                    <FeatureGate flag="ANALYTICS_PAGE">
-                      <RouteErrorBoundary routeName="analytics">
-                        <LazyAnalytics />
                       </RouteErrorBoundary>
-                    </FeatureGate>
+                    </ProtectedRoute>
                   }
                 />
                 <Route
@@ -279,6 +271,22 @@ function AppContent() {
                   element={
                     <RouteErrorBoundary routeName="settings">
                       <LazySettings />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/vault-health"
+                  element={
+                    <RouteErrorBoundary routeName="vault-health">
+                      <VaultHealthDashboard />
+                    </RouteErrorBoundary>
+                  }
+                />
+                <Route
+                  path="/audit-log"
+                  element={
+                    <RouteErrorBoundary routeName="audit-log">
+                      <AuditLog />
                     </RouteErrorBoundary>
                   }
                 />

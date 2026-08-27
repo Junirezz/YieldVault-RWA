@@ -55,6 +55,7 @@
 //! See `DEPLOYMENT.md` for step-by-step deployment to Stellar testnet/mainnet.
 
 pub mod admin;
+pub mod audit_events;
 /// Test-only reference strategy implementation. Excluded from production
 /// builds: bundling a second `#[contract]` type into the vault's wasm binary
 /// would collide with `YieldVault`'s own exported method names (e.g. `deposit`).
@@ -814,8 +815,17 @@ impl YieldVault {
             .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"), admin.clone()),
-            (previous_strategy, strategy),
+            (previous_strategy.clone(), strategy.clone()),
         );
+
+        crate::audit_events::emit_strategy_switch(
+            &env,
+            &admin,
+            &previous_strategy,
+            &strategy,
+            env.ledger().timestamp(),
+        );
+
         Ok(())
     }
 
@@ -2213,6 +2223,15 @@ impl YieldVault {
             (symbol_short!("deposit"), user.clone()),
             (amount, shares_to_mint),
         );
+
+        crate::audit_events::emit_deposit(
+            &env,
+            &user,
+            amount,
+            shares_to_mint,
+            env.ledger().timestamp(),
+        );
+
         Ok(shares_to_mint)
     }
 
@@ -2844,9 +2863,18 @@ impl YieldVault {
         env.storage().instance().set(&deposit_key, &new_deposit);
 
         env.events().publish(
-            (symbol_short!("withdraw"), user),
+            (symbol_short!("withdraw"), user.clone()),
             (assets_to_return, shares),
         );
+
+        crate::audit_events::emit_withdrawal(
+            &env,
+            &user,
+            shares,
+            assets_to_return,
+            env.ledger().timestamp(),
+        );
+
         Ok(assets_to_return)
     }
 

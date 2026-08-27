@@ -117,38 +117,48 @@ const TransactionStatusModal: React.FC<TransactionStatusModalProps> = ({
         return false;
       }
       throw new Error(`Horizon API returned status ${response.status}`);
-    } catch (err: any) {
+    } catch (err) {
       // Don't fail immediately on network flakes, let polling retry unless we hit max attempts
-      console.warn("Horizon poll attempt failed:", err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn("Horizon poll attempt failed:", message);
       return false;
     }
   }, []);
 
-  // Update state based on external props
-  useEffect(() => {
+  // Update state based on external props (render-time adjustment; mirrors the
+  // previous effects' dependency set so mount-time props still win)
+  const [prevSyncKey, setPrevSyncKey] = useState<{ txHash: string | null; externalError: string | null | undefined; state: TransactionStatusState } | null>(null);
+  if (
+    prevSyncKey === null ||
+    prevSyncKey.txHash !== txHash ||
+    prevSyncKey.externalError !== externalError ||
+    prevSyncKey.state !== state
+  ) {
+    setPrevSyncKey({ txHash, externalError, state });
     if (externalError) {
       setState("failure");
     } else if (txHash && state === "submitting") {
       setState("confirming");
       setPollCount(0);
     }
-  }, [txHash, externalError, state]);
+  }
 
-  // Reset modal state on reopen
-  useEffect(() => {
+  // Reset modal state on reopen (render-time adjustment)
+  const [prevOpenKey, setPrevOpenKey] = useState<{ isOpen: boolean; txHash: string | null } | null>(null);
+  if (prevOpenKey === null || prevOpenKey.isOpen !== isOpen || prevOpenKey.txHash !== txHash) {
+    setPrevOpenKey({ isOpen, txHash });
     if (isOpen) {
       setState(txHash ? "confirming" : "submitting");
       setInternalError(null);
       setPollCount(0);
       setCopied(false);
     }
-  }, [isOpen, txHash]);
+  }
 
   // Polling logic
   useEffect(() => {
     if (!isOpen || state !== "confirming" || !txHash) return;
 
-    let timer: NodeJS.Timeout;
     const maxPolls = 15; // 30 seconds total at 2s interval
 
     const poll = async () => {
@@ -190,7 +200,7 @@ const TransactionStatusModal: React.FC<TransactionStatusModalProps> = ({
       }
     };
 
-    timer = setInterval(poll, 2000);
+    const timer = setInterval(poll, 2000);
 
     return () => {
       clearInterval(timer);

@@ -77,6 +77,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
         const config = stateConfig[tx.state];
         const stale = isStale(tx.id);
         const retryCount = getRetryCount(tx.id);
+        // eslint-disable-next-line react-hooks/purity -- elapsed-time label is intentionally evaluated per render
         const timeAgo = Math.floor((Date.now() - tx.submittedAt) / 1000);
         const minutes = Math.floor(timeAgo / 60);
         const seconds = timeAgo % 60;

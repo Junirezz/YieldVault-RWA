@@ -143,9 +143,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
-    void fetchCooldown();
-    const interval = setInterval(fetchCooldown, 10000);
-    return () => clearInterval(interval);
+    const initialId = window.setTimeout(() => void fetchCooldown(), 0);
+    const interval = setInterval(() => void fetchCooldown(), 10000);
+    return () => {
+      window.clearTimeout(initialId);
+      clearInterval(interval);
+    };
   }, [fetchCooldown]);
 
   const refresh = async () => {
