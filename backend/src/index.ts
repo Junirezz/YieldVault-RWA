@@ -100,6 +100,7 @@ import {
 import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
 import listRouter from './listEndpoints';
 import referralRouter from './referralEndpoints';
+import auditLogRouter from './auditLogEndpoints';
 import { referralService } from './referralService';
 import {
   register,
@@ -847,6 +848,7 @@ apiV1.use('/vault', vaultRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
+apiV1.use('/audit-logs', auditLogRouter);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks

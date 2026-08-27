@@ -1,5 +1,12 @@
 import { useState, useCallback } from "react";
-import { Contract, rpc, TransactionBuilder, BASE_FEE, Address } from "@stellar/stellar-sdk";
+import {
+  Contract,
+  rpc,
+  TransactionBuilder,
+  BASE_FEE,
+  Address,
+  nativeToScVal,
+} from "@stellar/stellar-sdk";
 import { networkConfig } from "../config/network";
 
 export type GaslessDepositStatus = "idle" | "signing" | "submitting" | "confirmed" | "error";
@@ -52,7 +59,13 @@ export function useGaslessDeposit() {
           fee: BASE_FEE,
           networkPassphrase: networkConfig.networkPassphrase,
         })
-          .addOperation(contract.call("deposit", new Address(userAddress), BigInt(amount)))
+          .addOperation(
+            contract.call(
+              "deposit",
+              new Address(userAddress).toScVal(),
+              nativeToScVal(BigInt(amount), { type: "i128" }),
+            ),
+          )
           .setTimeout(300)
           .build();
 

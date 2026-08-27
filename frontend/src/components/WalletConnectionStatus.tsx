@@ -121,7 +121,7 @@ const WalletConnectionStatus: React.FC<WalletConnectionStatusProps> = ({
         className={`wallet-status-badge wallet-status-badge--error ${className}`}
         role="alert"
         aria-live="assertive"
-        style={{ ...containerStyles("error"), ...style }}
+        style={{ ...containerStyles(), ...style }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: errorDescription ? "4px" : 0 }}>
           <AlertCircle size={16} aria-hidden="true" />
@@ -164,7 +164,6 @@ const WalletConnectionStatus: React.FC<WalletConnectionStatusProps> = ({
 // ---- Style helpers -----------------------------------------------------------
 
 type BadgeTone = "neutral" | "info" | "warning";
-type ContainerTone = "error";
 
 function badgeStyles(tone: BadgeTone): React.CSSProperties {
   const toneMap: Record<BadgeTone, { bg: string; border: string; color: string }> = {
@@ -201,7 +200,7 @@ function badgeStyles(tone: BadgeTone): React.CSSProperties {
   };
 }
 
-function containerStyles(_tone: ContainerTone): React.CSSProperties {
+function containerStyles(): React.CSSProperties {
   return {
     marginTop: "8px",
     padding: "10px 12px",

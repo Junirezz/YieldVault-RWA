@@ -1,15 +1,11 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { AlertTriangle, Wifi, ExternalLink } from "./icons";
 import { useWalletNetwork } from "../hooks/useWalletNetwork";
-import { useTranslation } from "../i18n";
 
 interface NetworkSwitchNotificationProps {
   walletAddress: string | null;
   onSwitchNetwork?: (network: "testnet" | "mainnet") => Promise<void>;
 }
-
-const STELLAR_TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
-const STELLAR_MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 
 function detectExpectedNetwork(): "testnet" | "mainnet" {
   const passphrase = import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE ?? "";
@@ -27,18 +23,19 @@ const NetworkSwitchNotification: React.FC<NetworkSwitchNotificationProps> = ({
     isChecking,
     checkNow,
   } = useWalletNetwork(walletAddress);
-  const { t } = useTranslation();
   const [isDismissed, setIsDismissed] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [showSteps, setShowSteps] = useState(false);
 
-  // Reset dismissed state when mismatch changes
-  useEffect(() => {
+  // Reset dismissed/steps state when the mismatch clears (render-time adjustment)
+  const [prevMismatch, setPrevMismatch] = useState(isMismatch);
+  if (prevMismatch !== isMismatch) {
+    setPrevMismatch(isMismatch);
     if (!isMismatch) {
       setIsDismissed(false);
       setShowSteps(false);
     }
-  }, [isMismatch]);
+  }
 
   const handleSwitch = useCallback(async () => {
     if (!onSwitchNetwork) return;

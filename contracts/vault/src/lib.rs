@@ -54,6 +54,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod admin;
+pub mod audit_events;
 pub mod benji_strategy;
 pub mod errors;
 pub use errors::VaultError;
@@ -756,14 +757,21 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
-        env.events().publish(
-            (symbol_short!("stratcd"),),
-            (now, cooldown),
-        );
+        env.events()
+            .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"), admin.clone()),
-            (previous_strategy, strategy),
+            (previous_strategy.clone(), strategy.clone()),
         );
+
+        crate::audit_events::emit_strategy_switch(
+            &env,
+            &admin,
+            &previous_strategy,
+            &strategy,
+            env.ledger().timestamp(),
+        );
+
         Ok(())
     }
 
@@ -1700,10 +1708,8 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
-        env.events().publish(
-            (symbol_short!("stratcd"),),
-            (now, cooldown),
-        );
+        env.events()
+            .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"),),
             (previous_strategy, proposal.strategy),
@@ -2029,6 +2035,15 @@ impl YieldVault {
             (symbol_short!("deposit"), user.clone()),
             (amount, shares_to_mint),
         );
+
+        crate::audit_events::emit_deposit(
+            &env,
+            &user,
+            amount,
+            shares_to_mint,
+            env.ledger().timestamp(),
+        );
+
         Ok(shares_to_mint)
     }
 
@@ -2691,9 +2706,18 @@ impl YieldVault {
         env.storage().instance().set(&deposit_key, &new_deposit);
 
         env.events().publish(
-            (symbol_short!("withdraw"), user),
+            (symbol_short!("withdraw"), user.clone()),
             (assets_to_return, shares),
         );
+
+        crate::audit_events::emit_withdrawal(
+            &env,
+            &user,
+            shares,
+            assets_to_return,
+            env.ledger().timestamp(),
+        );
+
         Ok(assets_to_return)
     }
 
