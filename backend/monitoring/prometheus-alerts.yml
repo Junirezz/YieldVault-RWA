@@ -1,0 +1,67 @@
+groups:
+  - name: yieldvault-backend-slos
+    interval: 30s
+    rules:
+      - alert: YieldVaultHealthLatencyHigh
+        expr: histogram_quantile(0.95, sum by (route, method, le) (rate(http_response_time_seconds_bucket{route="/health"}[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault health endpoint latency budget exceeded"
+          description: "The /health P95 latency is above its 50ms budget."
+
+      - alert: YieldVaultReadinessLatencyHigh
+        expr: histogram_quantile(0.95, sum by (route, method, le) (rate(http_response_time_seconds_bucket{route="/ready"}[5m]))) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault readiness latency budget exceeded"
+          description: "The /ready P95 latency is above its 100ms budget."
+
+      - alert: YieldVaultCriticalReadLatencyHigh
+        expr: histogram_quantile(0.95, sum by (route, method, le) (rate(http_response_time_seconds_bucket{route="/api/v1/vault/summary"}[5m]))) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault summary latency budget exceeded"
+          description: "The vault summary P95 latency is above its 200ms budget."
+
+      - alert: YieldVaultCriticalWriteLatencyHigh
+        expr: histogram_quantile(0.95, sum by (route, method, le) (rate(http_response_time_seconds_bucket{route=~"/api/v1/vault/(deposit|withdraw)"}[5m]))) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault write latency budget exceeded"
+          description: "A critical vault write endpoint has P95 latency above its 500ms budget."
+
+      - alert: YieldVaultCriticalEndpointErrorBudgetBurn
+        expr: |
+          sum by (route) (rate(http_request_error_total{status_class="5xx",route=~"/health|/ready|/api/v1/vault/(summary|deposit|withdraw)"}[5m]))
+          /
+          sum by (route) (rate(http_request_count{route=~"/health|/ready|/api/v1/vault/(summary|deposit|withdraw)"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault critical endpoint error budget is burning"
+          description: "5xx responses exceed 1% of traffic for {{ $labels.route }} over the last 5 minutes."
+
+      - alert: YieldVaultExternalDependencyLatencyHigh
+        expr: histogram_quantile(0.95, sum by (dependency, operation, le) (rate(external_dependency_latency_seconds_bucket{outcome="success"}[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault external dependency is slow"
+          description: "P95 {{ $labels.dependency }} {{ $labels.operation }} latency is above 2 seconds."

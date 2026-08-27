@@ -21,6 +21,7 @@
     "db:check-drift": "node scripts/check-postgres-drift.js",
     "adrs:check": "node scripts/check-adrs.js",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:schema-check": "prisma validate --schema prisma/schema.prisma && prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --exit-code",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:status": "prisma migrate status --schema prisma/schema.prisma",
