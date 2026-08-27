@@ -14,12 +14,14 @@
   --bg-elevated: rgba(24, 26, 36, 0.92);
   --bg-overlay: rgba(10, 11, 16, 0.8);
   --bg-muted: rgba(0, 0, 0, 0.2);
+  --bg-control: rgba(0, 0, 0, 0.24);
   --bg-gradient-1: rgba(112, 0, 255, 0.08);
   --bg-gradient-2: rgba(0, 240, 255, 0.05);
 
   --border-glass: rgba(255, 255, 255, 0.08);
   --border-glass-glow: rgba(0, 240, 255, 0.3);
   --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-control: rgba(255, 255, 255, 0.18);
 
   --accent-cyan: #00f0ff;
   --accent-cyan-dim: rgba(0, 240, 255, 0.2);
@@ -35,6 +37,7 @@
   --text-primary: #ffffff;
   --text-secondary: #a8b8cc;
   --text-tertiary: #8494a7;
+  --text-placeholder: #9aaabd;
   --text-inverse: #0f172a;
   --text-warning: #f59e0b;
   --text-success: #22c55e;
@@ -66,12 +69,14 @@
   --bg-elevated: #ffffff;
   --bg-overlay: rgba(255, 255, 255, 0.8);
   --bg-muted: rgba(15, 23, 42, 0.05);
+  --bg-control: rgba(255, 255, 255, 0.92);
   --bg-gradient-1: rgba(126, 34, 206, 0.04);
   --bg-gradient-2: rgba(2, 132, 199, 0.03);
 
   --border-glass: rgba(0, 0, 0, 0.08);
   --border-glass-glow: rgba(0, 136, 204, 0.2);
   --border-subtle: rgba(15, 23, 42, 0.12);
+  --border-control: rgba(15, 23, 42, 0.2);
 
   --accent-cyan: #0284c7;
   --accent-cyan-dim: rgba(2, 132, 199, 0.1);
@@ -87,6 +92,7 @@
   --text-primary: #0f172a;
   --text-secondary: #40505f;
   --text-tertiary: #5a6a7d;
+  --text-placeholder: #526273;
   --text-inverse: #ffffff;
   --text-warning: #b45309;
   --text-success: #15803d;
@@ -128,6 +134,26 @@ body {
   min-height: 100vh;
   background-color: var(--bg-main);
   color: var(--text-primary);
+}
+
+button,
+input,
+select,
+textarea {
+  color: var(--text-primary);
+}
+
+input,
+select,
+textarea {
+  background-color: var(--bg-control);
+  border-color: var(--border-control);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
 }
 
 [data-sonner-toaster] {

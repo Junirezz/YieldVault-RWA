@@ -175,8 +175,10 @@ export function applyOptimisticVaultPatch(
   const walletDelta = action === "deposit" ? -amount : amount;
   const vaultDelta = action === "deposit" ? amount : -amount;
 
-  queryClient.setQueryData<number>(keys.balanceKey, (current = 0) =>
-    Math.max(current + walletDelta, 0),
+  queryClient.setQueryData<number | undefined>(keys.balanceKey, (current) =>
+    typeof current === "number"
+      ? Math.max(current + walletDelta, 0)
+      : current,
   );
   queryClient.setQueryData<PortfolioHolding[] | undefined>(
     keys.holdingsKey,
