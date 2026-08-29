@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from "react";
+import React, { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Line,
@@ -12,6 +12,7 @@ import {
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import PageHeader from "../components/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
+import SkeletonChart from "../components/ui/SkeletonChart";
 import {
   Activity,
   ChevronRight,
@@ -367,9 +368,7 @@ const StrategyDetail: React.FC<StrategyDetailProps> = ({ walletAddress }) => {
         </p>
 
         {historyIsLoading ? (
-          <p role="status" style={{ color: "var(--text-secondary)" }}>
-            {t("app.loading.title")}
-          </p>
+          <SkeletonChart height={220} />
         ) : !stats ? (
           <EmptyState
             kind="no-data"

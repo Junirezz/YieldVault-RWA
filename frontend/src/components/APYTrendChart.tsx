@@ -274,7 +274,7 @@ const APYTrendChart: React.FC<APYTrendChartProps> = ({ data = ALL_HISTORY }) => 
                 cursor: "pointer",
                 transition: "all 0.2s ease",
                 background: activeRange === range ? "var(--accent-cyan)" : "transparent",
-                color: activeRange === range ? "#000" : "var(--text-secondary)",
+                color: activeRange === range ? "var(--text-inverse)" : "var(--text-secondary)",
                 border: "none",
               }}
             >

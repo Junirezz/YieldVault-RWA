@@ -53,6 +53,16 @@ export default defineConfig(({ mode }) => {
       // Fork isolation prevents vi.mock leakage between Portfolio / VaultDashboard suites.
       pool: "forks",
       isolate: true,
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "json", "html", "lcov", "json-summary"],
+        thresholds: {
+          lines: 70,
+          functions: 70,
+          branches: 70,
+          statements: 70,
+        },
+      },
     },
   };
 });

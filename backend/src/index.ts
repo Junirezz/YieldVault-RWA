@@ -18,9 +18,13 @@ import {
   writesLimiter,
   readsLimiter,
   adminLimiter,
+  identityRateLimiter,
+  getRateLimitMonitorSnapshot,
+  loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
 import { idempotencyStore } from './idempotency';
-import { createAdminAuditMiddleware, getAuditLogs, getAuditLogMetrics } from './auditLog';
+import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
+import { AuditLogQuerySchema } from './middleware/validate';
 import { recordAdminAuditLog } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
@@ -43,6 +47,15 @@ import { setupSwagger } from './swagger';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import {
+  errorHandler,
+  notFoundHandler,
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  InternalError,
+  RateLimitError,
+} from './errors';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
@@ -85,6 +98,8 @@ import {
 } from './middleware/allowlist';
 import { adminRbacMiddleware, assertWebhookParameterUpdate } from './middleware/rbac';
 import { apiVersionMiddleware } from './middleware/versionNegotiation';
+import { versionRoutingMiddleware } from './middleware/versionRouting';
+import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
@@ -100,14 +115,19 @@ import {
 import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
 import listRouter from './listEndpoints';
 import referralRouter from './referralEndpoints';
+import auditLogRouter from './auditLogEndpoints';
 import { referralService } from './referralService';
 import {
   register,
   httpRequestCount,
   httpResponseTime,
+  httpRequestErrorCount,
   activeConnections,
   updateVaultMetrics,
   syncJobGovernanceMetrics,
+  rateLimitEvents,
+  httpErrorCount,
+  httpClientErrorCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -640,7 +660,8 @@ app.use(apiErrorContractMiddleware);
 // Structured logging with correlation IDs
 app.use(structuredLoggingMiddleware);
 
-// API version negotiation & deprecation headers
+// API version routing, negotiation & deprecation headers
+app.use(versionRoutingMiddleware);
 app.use(apiVersionMiddleware);
 
 // Global timeout middleware (30 seconds default)
@@ -667,6 +688,22 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+    if (res.statusCode >= 400) {
+      httpRequestErrorCount.inc({
+        ...labels,
+        status_class: `${Math.floor(res.statusCode / 100)}xx`,
+      });
+    }
+    if (res.statusCode === 429) {
+      rateLimitEvents.inc({ tier: req.apiVersion ?? 'global', outcome: 'limited' });
+    }
+
+    // Track error rates for alerting (5xx = critical, 4xx = client error).
+    if (res.statusCode >= 500) {
+      httpErrorCount.inc(labels);
+    } else if (res.statusCode >= 400) {
+      httpClientErrorCount.inc(labels);
+    }
 
     // Record latency for SLO monitoring (only track successful requests)
     if (res.statusCode < 400) {
@@ -680,7 +717,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Apply the Redis-backed default limiter (reads tier) globally (skip health/ready probes).
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/health' || req.path === '/ready') return next();
-  return readsLimiter(req, res, next);
+  return identityRateLimiter(req, res, (err?: unknown) => {
+    if (err) return next(err as Error);
+    if (res.headersSent) return;
+    return readsLimiter(req, res, next);
+  });
 });
 app.use(adaptiveThrottleMiddleware);
 
@@ -737,6 +778,28 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
   res.json({
     endpoints: listEndpointSlaRegistry(),
     generatedAt: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/rate-limits
+ * Rate-limit monitoring snapshot: allowed vs limited counts by tier.
+ */
+app.get('/admin/rate-limits', validateApiKey, (_req: Request, res: Response) => {
+  const cfg = loadRateLimiterConfig();
+  res.json({
+    snapshot: getRateLimitMonitorSnapshot(),
+    tiers: {
+      auth: cfg.auth,
+      writes: cfg.writes,
+      reads: cfg.reads,
+      admin: cfg.admin,
+      deposits: cfg.deposits,
+      ip: cfg.ip,
+      apiKey: cfg.apiKey,
+    },
+    headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -841,12 +904,14 @@ setupSwagger(app);
 // â”€â”€â”€ Versioned API v1 Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const apiV1 = express.Router();
 app.use('/api/v1', apiV1);
+app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
+apiV1.use('/audit-logs', auditLogRouter);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks
@@ -1981,8 +2046,7 @@ app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: R
 app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const added = addAddress(walletAddress);
   const actor = resolveActingAdminAddress(req);
@@ -2021,13 +2085,11 @@ app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalle
 app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const removed = removeAddress(walletAddress);
   if (!removed) {
-    res.status(404).json({ error: 'Wallet address not found in allowlist' });
-    return;
+    throw new NotFoundError('Wallet address not found in allowlist');
   }
 
   const actor = resolveActingAdminAddress(req);
@@ -2343,22 +2405,12 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
 
   if (!wallet) {
     req.adminAuditAction = 'admin.impersonate.invalid';
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'wallet path parameter is required',
-    });
-    return;
+    throw new ValidationError('wallet path parameter is required');
   }
 
   if (!hasRequiredApiKeyRole(req, 'super-admin')) {
     req.adminAuditAction = 'admin.impersonate.denied';
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required for impersonation',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required for impersonation');
   }
 
   if (!sessionId && process.env.IMPERSONATION_SESSION_STORAGE) {
@@ -2431,11 +2483,7 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
         ...req.adminAuditMetadata,
         error: error instanceof Error ? error.message : String(error),
       };
-      res.status(500).json({
-        error: 'Internal Server Error',
-        status: 500,
-        message: 'Failed to build impersonated vault state',
-      });
+      throw new InternalError('Failed to build impersonated vault state');
   }
 });
 
@@ -2523,18 +2571,12 @@ app.get('/admin/receipts/:id/verify', validateApiKey, async (req: Request, res: 
 app.post('/admin/api-keys/register', validateApiKey, validate({ body: ApiKeyRegisterSchema }), async (req: Request, res: Response) => {
   const { key, role: requestedRole } = req.body;
   if (!key || typeof key !== 'string' || !key.trim()) {
-    res.status(400).json({ error: 'Missing key in request body' });
-    return;
+    throw new ValidationError('Missing key in request body');
   }
 
   const role = normalizeApiKeyRole(requestedRole) || 'admin';
   if (role === 'super-admin' && !hasRequiredApiKeyRole(req, 'super-admin')) {
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required to register super-admin API keys',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required to register super-admin API keys');
   }
 
   const normalizedKey = key.trim();
@@ -2761,27 +2803,19 @@ app.get('/admin/api-keys/audit-events', validateApiKey, async (req: Request, res
  * POST /admin/webhooks - register webhook endpoint for transaction events
  */
 app.post('/admin/webhooks', validateApiKey, validate({ body: WebhookRegisterSchema }), (req: Request, res: Response) => {
-  try {
-    const { url, eventTypes, enabled, secret } = req.body;
+  const { url, eventTypes, enabled, secret } = req.body;
 
-    const endpoint = registerWebhookEndpoint({
-      url,
-      eventTypes,
-      enabled: enabled ?? true,
-      secret,
-    });
+  const endpoint = registerWebhookEndpoint({
+    url,
+    eventTypes,
+    enabled: enabled ?? true,
+    secret,
+  });
 
-    res.status(201).json({
-      message: 'Webhook endpoint registered',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
-    });
-  }
+  res.status(201).json({
+    message: 'Webhook endpoint registered',
+    endpoint,
+  });
 });
 
 /**
@@ -2829,28 +2863,15 @@ app.patch('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSchem
     return;
   }
 
-  try {
-    const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
-    if (!endpoint) {
-      res.status(404).json({
-        error: 'Not Found',
-        status: 404,
-        message: 'Webhook endpoint not found',
-      });
-      return;
-    }
-
-    res.status(200).json({
-      message: 'Webhook endpoint updated',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Failed to update webhook endpoint',
-    });
+  const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
+  if (!endpoint) {
+    throw new NotFoundError('Webhook endpoint not found');
   }
+
+  res.status(200).json({
+    message: 'Webhook endpoint updated',
+    endpoint,
+  });
 });
 
 /**
@@ -3064,17 +3085,21 @@ app.post('/api/v1/webhooks/verify', validate({ body: WebhookVerifyBodySchema }),
 /**
  * GET /admin/audit/logs - list admin activity logs
  */
-app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/audit/logs', validateApiKey, validate({ query: AuditLogQuerySchema }), (req: Request, res: Response) => {
   const statusCode = req.query.statusCode ? parseInt(String(req.query.statusCode), 10) : undefined;
   const limit = parseLimited(req.query.limit, 100, 1, 500);
-
-  const logs = getAuditLogs({
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const filters = {
     actor: req.query.actor ? String(req.query.actor) : undefined,
     action: req.query.action ? String(req.query.action) : undefined,
     path: req.query.path ? String(req.query.path) : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: req.query.from ? String(req.query.from) : undefined,
+    to: req.query.to ? String(req.query.to) : undefined,
+  };
+
+  const logs = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(logs, limit);
 
   sendStandardListEnvelope(res, {
@@ -3083,6 +3108,8 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
     hasNextPage,
     extras: {
       logs: data,
+      page,
+      total: countAuditLogs(filters),
       metrics: getAuditLogMetrics(),
     },
   });
@@ -3091,18 +3118,26 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
 /**
  * GET /admin/audit-logs - list admin audit entries (Issue #253)
  */
-app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySchema }), async (req: Request, res: Response) => {
   const limit = parseLimited(req.query.limit, 50, 1, 200);
-  const statusCode = req.query.statusCode
-    ? parseLimited(req.query.statusCode, 0, 100, 599)
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const statusValue = req.query.statusCode ?? req.query.status;
+  const statusCode = statusValue
+    ? parseLimited(statusValue, 0, 100, 599)
     : undefined;
-
-  const rows = getAuditLogs({
-    action: typeof req.query.action === 'string' ? req.query.action : undefined,
+  const filters = {
+    action: typeof req.query.action === 'string'
+      ? req.query.action
+      : typeof req.query.type === 'string' ? req.query.type : undefined,
     actor: typeof req.query.actor === 'string' ? req.query.actor : undefined,
+    path: typeof req.query.path === 'string' ? req.query.path : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: typeof req.query.from === 'string' ? req.query.from : undefined,
+    to: typeof req.query.to === 'string' ? req.query.to : undefined,
+  };
+
+  const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
   void recordAdminAuditLog(req, 'audit-logs.read', 200, {
@@ -3117,6 +3152,8 @@ app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response)
     extras: {
       meta: {
         count: data.length,
+        total: countAuditLogs(filters),
+        page,
         limit,
         timestamp: new Date().toISOString(),
       },
@@ -4804,7 +4841,7 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
-// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 healthProbeService.register('database', async () => {
   const health = await getDatabaseHealth();
   return health.primary === 'up' ? 'up' : 'down';
@@ -4842,7 +4879,6 @@ app.get('/health/probes', async (_req: Request, res: Response) => {
 });
 
 // â”€â”€â”€ Write-Ahead Audit Log Endpoints (Issue #707) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 /**
  * GET /admin/wal/entries
  * Lists write-ahead audit log entries with optional filters.

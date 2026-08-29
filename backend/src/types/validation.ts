@@ -41,6 +41,17 @@ export const TransactionListQuerySchema = PaginationQuerySchema.extend({
   to: z.string().optional(),
 }).passthrough();
 
+export const AuditLogQuerySchema = PaginationQuerySchema.extend({
+  actor: z.string().optional(),
+  action: z.string().optional(),
+  type: z.string().optional(),
+  path: z.string().optional(),
+  status: z.string().regex(/^\d+$/, 'status must be an HTTP status code').optional(),
+  statusCode: z.string().regex(/^\d+$/, 'statusCode must be an HTTP status code').optional(),
+  from: z.string().min(1).optional(),
+  to: z.string().min(1).optional(),
+}).passthrough();
+
 export const WebhookListQuerySchema = PaginationQuerySchema.extend({
   includeDeleted: z.enum(['true', 'false']).optional(),
   endpointId: z.string().optional(),

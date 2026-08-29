@@ -51,6 +51,9 @@ jobs:
       - name: Compile and run vault oracle regression tests
         run: cargo test -p vault oracle --locked --quiet
 
+      - name: Compile and run mock oracle failure-mode tests
+        run: cargo test -p mock-strategy --locked --quiet
+
       - name: Run share-price math unit tests
         run: cargo test -p share-price-math --locked --quiet
         working-directory: ./contracts

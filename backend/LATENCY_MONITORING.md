@@ -13,6 +13,8 @@ The latency monitoring system tracks P95 latency for all API endpoints and sends
 - **SLO breach detection** with automatic alerting
 - **Multiple alert integrations** (Slack, PagerDuty)
 - **Configurable thresholds** via environment variables
+- **Prometheus request error metrics** for error-budget burn alerts
+- **External dependency latency and failure metrics** from health probes
 - **Endpoint normalization** for dynamic routes
 - **Admin endpoints** for monitoring status
 
@@ -99,6 +101,21 @@ Service: YieldVault Backend
 - **Class:** latency-slo
 
 ## Monitoring Endpoints
+
+Prometheus alert rules are versioned in
+`backend/monitoring/prometheus-alerts.yml`. Load this file from the Prometheus
+configuration used by the deployment. It alerts when critical endpoint P95
+latency exceeds the endpoint registry budget, when 5xx traffic burns more than
+1% of the critical endpoint error budget over five minutes, or when an external
+dependency probe has a P95 latency above two seconds.
+
+The `/metrics` endpoint exposes:
+
+- `http_request_error_total`, labeled by method, normalized route, status code,
+  and status class.
+- `external_dependency_latency_seconds`, labeled by dependency, operation, and
+  success or failure outcome.
+- `external_dependency_error_total`, labeled by dependency and operation.
 
 ### Admin Endpoints (API Key Required)
 

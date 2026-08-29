@@ -46,7 +46,7 @@ describe("ToastProvider", () => {
   });
 
   it("shows and auto-dismisses toasts", () => {
-    render(
+    const { container } = render(
       <ToastProvider>
         <ToastHarness />
       </ToastProvider>,
@@ -54,13 +54,14 @@ describe("ToastProvider", () => {
 
     fireEvent.click(screen.getByText(/Show success/i));
 
-    expect(screen.getByRole("status")).toHaveTextContent("Saved");
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(container.querySelector("[data-sonner-toaster]")).toBeTruthy();
 
     act(() => {
       vi.advanceTimersByTime(1500);
     });
 
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 
   it("supports manual dismissal", () => {
@@ -71,8 +72,11 @@ describe("ToastProvider", () => {
     );
 
     fireEvent.click(screen.getByText(/Show error/i));
-    fireEvent.click(screen.getByRole("button", { name: /Dismiss Failed/i }));
+    expect(screen.getByText("Failed")).toBeInTheDocument();
 
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const dismiss = screen.getByRole("button", { name: /close|dismiss/i });
+    fireEvent.click(dismiss);
+
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
   });
 });

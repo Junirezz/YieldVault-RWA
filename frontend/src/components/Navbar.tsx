@@ -41,7 +41,6 @@ const Navbar: FC<NavbarProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -53,8 +52,24 @@ const Navbar: FC<NavbarProps> = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.body.classList.add("nav-locked");
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.classList.remove("nav-locked");
+    };
+  }, [isMobileMenuOpen]);
+
   return (
     <nav
+      id="primary-nav"
       aria-label="Primary"
       ref={menuRef}
       style={{
@@ -77,6 +92,7 @@ const Navbar: FC<NavbarProps> = ({
             to="/"
             className="flex items-center gap-sm"
             style={{ textDecoration: "none" }}
+            aria-label="YieldVault home"
             onClick={() => setIsMobileMenuOpen(false)}
           >
             <div
@@ -130,7 +146,13 @@ const Navbar: FC<NavbarProps> = ({
             >
               {t("nav.transactions")}
               {pendingCount > 0 && (
-                <Badge variant="pill" color="warning" size="compact" style={{ marginLeft: "6px" }}>
+                <Badge
+                  variant="pill"
+                  color="warning"
+                  size="compact"
+                  style={{ marginLeft: "6px" }}
+                  aria-label={`${pendingCount} pending transactions`}
+                >
                   {pendingCount}
                 </Badge>
               )}
@@ -190,6 +212,7 @@ const Navbar: FC<NavbarProps> = ({
 
           {/* Mobile toggle */}
           <button
+            type="button"
             className="nav-mobile-toggle"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
@@ -201,42 +224,57 @@ const Navbar: FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Mobile Menu */}
       {isMobileMenuOpen && (
-        <div className="nav-mobile-menu is-open">
-          <NavLink to="/" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/")}>
-            {t("nav.vaults")}
-          </NavLink>
-          <NavLink to="/portfolio" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/portfolio")}>
-            {t("nav.portfolio")}
-          </NavLink>
-          <NavLink to="/compare" onClick={() => setIsMobileMenuOpen(false)}>
-            {t("nav.compare")}
-          </NavLink>
-          <NavLink to="/analytics" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/analytics")}>
-            {t("nav.analytics")}
-          </NavLink>
-          <NavLink to="/transactions" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/transactions")}>
-            {t("nav.transactions")}
-            {pendingCount > 0 && (
-              <Badge variant="pill" color="warning" size="compact" style={{ marginLeft: "6px" }}>
-                {pendingCount}
-              </Badge>
-            )}
-          </NavLink>
-          {role === "admin" && (
-            <NavLink to="/admin" onClick={() => setIsMobileMenuOpen(false)}>
-              {t("nav.admin")}
-            </NavLink>
+        <button
+          type="button"
+          className="nav-mobile-overlay"
+          aria-label="Close navigation menu"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Menu */}
+      <div
+        id="mobile-slide-menu"
+        className={`nav-mobile-menu${isMobileMenuOpen ? " is-open" : ""}`}
+        aria-hidden={!isMobileMenuOpen}
+      >
+        <NavLink to="/" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/")}>
+          {t("nav.vaults")}
+        </NavLink>
+        <NavLink to="/portfolio" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/portfolio")}>
+          {t("nav.portfolio")}
+        </NavLink>
+        <NavLink to="/compare" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)}>
+          {t("nav.compare")}
+        </NavLink>
+        <NavLink to="/analytics" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/analytics")}>
+          {t("nav.analytics")}
+        </NavLink>
+        <NavLink to="/transactions" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/transactions")}>
+          {t("nav.transactions")}
+          {pendingCount > 0 && (
+            <Badge variant="pill" color="warning" size="compact" style={{ marginLeft: "6px" }}>
+              {pendingCount}
+            </Badge>
           )}
+        </NavLink>
+        {role === "admin" && (
+          <NavLink to="/admin" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)}>
+            {t("nav.admin")}
+          </NavLink>
+        )}
 
           <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
             <ThemeToggle />
             <LanguageSwitcher compact />
             {walletAddress && <span>{networkLabel}</span>}
           </div>
+        <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
+          <ThemeToggle />
+          {walletAddress && <span>{networkLabel}</span>}
         </div>
-      )}
+      </div>
 
       {/* Dropdown fallback menu */}
       {menuOpen && (

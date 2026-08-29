@@ -23,17 +23,17 @@ const stateConfig: Record<
   },
   pending: {
     label: "Pending",
-    color: "#f59e0b",
+    color: "var(--text-warning)",
     icon: <Clock size={14} />,
   },
   success: {
     label: "Confirmed",
-    color: "#22c55e",
+    color: "var(--text-success)",
     icon: <Check size={14} />,
   },
   failed: {
     label: "Failed",
-    color: "#ef4444",
+    color: "var(--text-error)",
     icon: <AlertCircle size={14} />,
   },
   cancelled: {
@@ -77,6 +77,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
         const config = stateConfig[tx.state];
         const stale = isStale(tx.id);
         const retryCount = getRetryCount(tx.id);
+        // eslint-disable-next-line react-hooks/purity -- elapsed-time label is intentionally evaluated per render
         const timeAgo = Math.floor((Date.now() - tx.submittedAt) / 1000);
         const minutes = Math.floor(timeAgo / 60);
         const seconds = timeAgo % 60;
@@ -140,7 +141,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
                   borderRadius: "var(--radius-sm)",
                   padding: "6px 8px",
                   fontSize: "0.8rem",
-                  color: "#f59e0b",
+                  color: "var(--text-warning)",
                   marginBottom: "8px",
                 }}
               >
@@ -156,7 +157,7 @@ const TransactionRetryPanel: React.FC<TransactionRetryPanelProps> = ({
                   borderRadius: "var(--radius-sm)",
                   padding: "6px 8px",
                   fontSize: "0.8rem",
-                  color: "#ef4444",
+                  color: "var(--text-error)",
                   marginBottom: "8px",
                 }}
               >

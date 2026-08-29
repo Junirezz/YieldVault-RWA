@@ -32,6 +32,8 @@ YieldVault-RWA is a decentralized vault protocol built on Stellar's Soroban smar
 | **StrategyTrait** | `contracts/vault/src/strategy.rs` | Interface trait for strategy connectors |
 | **BenjiStrategy** | `contracts/vault/src/benji_strategy.rs` | Test-only BENJI fund token strategy connector |
 | **OracleValidator** | `contracts/vault/src/oracle.rs` | Standalone oracle price validation library (heartbeat, deviation, decimals) |
+| **AccountingInvariants** | `contracts/vault/src/invariants.rs` | Contract-level total-supply / share-price checks persisted with vault state |
+| **ProtocolRiskLimits** | `contracts/vault/src/risk_limits.rs` | Protocol-wide TVL, concentration, and stress-mode exposure caps |
 | **MockKoreanSovereignStrategy** | `contracts/mock-strategy/src/lib.rs` | Test mock for Korean debt strategy with stepped yield curve |
 | **MockPriceOracle** | `contracts/mock-strategy/src/mock_oracle.rs` | Test mock oracle with configurable failure modes |
 
@@ -114,6 +116,16 @@ YieldVault-RWA is a decentralized vault protocol built on Stellar's Soroban smar
 - `is_oracle_enabled() -> bool` — Check if oracle is enabled
 - `set_oracle_heartbeat(seconds)` — Set oracle staleness threshold
 - `oracle_heartbeat() -> u64` — Get oracle heartbeat
+
+**Protocol risk limits (Issue #1173):**
+- `set_max_vault_tvl(tvl)` — Hard cap on vault TVL (`0` = unlimited)
+- `set_max_conc_bps(bps)` — Max single-strategy share of TVL
+- `set_max_deployed_bps(bps)` — Max deployed-capital share of TVL
+- `set_stress_mode(enabled)` — Apply tighter stress caps
+- `set_stress_limits(concentration_bps, deployed_bps)` — Configure stress caps
+- `max_vault_tvl` / `max_conc_bps` / `max_deploy_bps` / `stress_mode` — Read current protocol caps
+- `set_strategy_cap(strategy, cap)` / `strategy_cap(strategy)` — Per-strategy absolute cap
+- `set_strategy_risk_threshold(strategy, bps)` / `strategy_risk_threshold(strategy)` — Per-strategy BPS cap
 
 **Pause/Unpause:**
 - `pause()` — Pause vault (blocks deposits/withdrawals)

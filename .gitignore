@@ -31,6 +31,7 @@ GEMINI.md
 skills-lock.json
 issue.md
 contracts/vault/test_snapshots
+contracts/mock-strategy/test_snapshots
 
 # Secrets scanning
 /.secrets.baseline
@@ -42,3 +43,7 @@ contracts/vault/test_snapshots
 *.pfx
 secrets/
 .secrets/
+
+# Local SQLite dev database (generated)
+*.db
+*.db-journal

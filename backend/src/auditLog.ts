@@ -31,7 +31,10 @@ interface AuditLogFilters {
   action?: string;
   path?: string;
   statusCode?: number;
+  from?: string;
+  to?: string;
   limit?: number;
+  offset?: number;
 }
 
 const entries: AuditLogEntry[] = [];
@@ -71,6 +74,23 @@ export function createAdminAuditMiddleware() {
 }
 
 export function getAuditLogs(filters: AuditLogFilters = {}): AuditLogEntry[] {
+  const normalizedLimit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+  const normalizedOffset = Math.max(0, filters.offset ?? 0);
+  return filterAuditLogs(filters)
+    .sort((left, right) => {
+      const timestampOrder = right.timestamp.localeCompare(left.timestamp);
+      return timestampOrder !== 0
+        ? timestampOrder
+        : right.id.localeCompare(left.id);
+    })
+    .slice(normalizedOffset, normalizedOffset + normalizedLimit);
+}
+
+export function countAuditLogs(filters: AuditLogFilters = {}): number {
+  return filterAuditLogs(filters).length;
+}
+
+function filterAuditLogs(filters: AuditLogFilters): AuditLogEntry[] {
   const statusFilter =
     typeof filters.statusCode === 'number' && Number.isFinite(filters.statusCode)
       ? filters.statusCode
@@ -93,11 +113,27 @@ export function getAuditLogs(filters: AuditLogFilters = {}): AuditLogEntry[] {
       return false;
     }
 
+    if (filters.from && entry.timestamp < normalizeAuditDate(filters.from, false)) {
+      return false;
+    }
+
+    if (filters.to && entry.timestamp > normalizeAuditDate(filters.to, true)) {
+      return false;
+    }
+
     return true;
   });
 
-  const normalizedLimit = Math.max(1, Math.min(filters.limit ?? 100, 500));
-  return filtered.slice(0, normalizedLimit);
+  return filtered;
+}
+
+function normalizeAuditDate(value: string, endOfDay: boolean): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString();
 }
 
 export function getAuditLogMetrics() {

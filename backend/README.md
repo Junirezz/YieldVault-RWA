@@ -290,6 +290,28 @@ export or re-register the live mappings before deploying/restarting; otherwise
 the persistent tables will start empty and only new registrations will be
 preserved.
 
+## Webhook Failure Behavior
+
+Incoming webhook deliveries must identify a configured endpoint and contain a
+valid schema version, event type, delivery ID, and ISO-8601 `sentAt` timestamp.
+The HMAC-SHA256 signature is checked before replay state is recorded. Invalid
+signatures, malformed envelopes, unknown endpoints, missing secrets, stale
+timestamps, and repeated delivery IDs are rejected without application
+processing.
+
+Outbound delivery attempts use exponential backoff with jitter. After
+`WEBHOOK_MAX_ATTEMPTS` failures, the delivery is marked failed and copied to
+the webhook dead-letter queue. Operators can inspect it through
+`GET /admin/webhooks/dead-letter` and explicitly retry it with
+`POST /admin/webhooks/dead-letter/:id/retry`. A retry creates a new delivery
+attempt while retaining the original failure record for auditability.
+
+The replay timestamp window is controlled by
+`WEBHOOK_SIGNATURE_MAX_SKEW_MS` (default: 300000 ms). Consumers should return
+a non-2xx response for invalid webhook requests; the sender treats non-2xx and
+network/time-out failures as retryable until the dead-letter threshold is
+reached.
+
 ## Issues Addressed
 
 ### Issue #145: Rate Limiting

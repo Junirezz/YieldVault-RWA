@@ -159,8 +159,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               marginBottom: "16px",
             }}
           >
-            <AlertTriangle size={18} style={{ color: "#ef4444", flexShrink: 0 }} />
-            <span style={{ color: "#ef4444", fontSize: "0.85rem", fontWeight: 600 }}>
+            <AlertTriangle size={18} style={{ color: "var(--text-error)", flexShrink: 0 }} />
+            <span style={{ color: "var(--text-error)", fontSize: "0.85rem", fontWeight: 600 }}>
               Large transaction amount detected
             </span>
           </div>

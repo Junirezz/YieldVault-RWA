@@ -175,7 +175,7 @@ describe("VaultComparison", () => {
   it("navigates to the deposit tab when allocating to selected strategies", () => {
     renderComparison();
 
-    fireEvent.click(screen.getByRole("button", { name: /Allocate to selected/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /Allocate to selected/i })[0]);
 
     expect(screen.getByTestId("location-probe")).toHaveTextContent("/?tab=deposit");
   });

@@ -1,0 +1,73 @@
+name: Nightly contract benchmarks
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bench:
+    name: Vault operation benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-nightly-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nightly-bench-
+
+      - name: Run benchmarks and compare to baseline
+        id: bench
+        run: bash contracts/vault/scripts/benchmark.sh
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [ -f benchmark-report.md ]; then
+            cat benchmark-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Benchmark report was not produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post report to GitHub Issues
+        if: always() && hash gh 2>/dev/null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f benchmark-report.md ]; then
+            echo "No report to post"
+            exit 0
+          fi
+          TITLE="Nightly contract benchmarks $(date -u +%Y-%m-%d)"
+          BODY_FILE="$(mktemp)"
+          {
+            echo "Automated report from \`.github/workflows/nightly-benchmarks.yml\`."
+            echo
+            echo "Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo
+            cat benchmark-report.md
+          } > "$BODY_FILE"
+          ISSUE_NUMBER="$(gh issue list --label nightly-benchmark --state open --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$BODY_FILE"
+          else
+            gh issue create --title "$TITLE" --label "nightly-benchmark" --body-file "$BODY_FILE" || \
+              gh issue create --title "$TITLE" --body-file "$BODY_FILE"
+          fi

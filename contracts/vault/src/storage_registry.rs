@@ -111,6 +111,11 @@ pub fn registered_vault_keys(env: &soroban_sdk::Env) -> soroban_sdk::Vec<Storage
     keys.push_back(scalar(StorageNamespace::Fee, "Treasury"));
     keys.push_back(scalar(StorageNamespace::Fee, "TreasuryBalance"));
 
+    // Issue #1230: Performance fee switch keys
+    keys.push_back(scalar(StorageNamespace::Fee, "PerfFeeBps"));
+    keys.push_back(scalar(StorageNamespace::Fee, "PerfIncentivePool"));
+    keys.push_back(scalar(StorageNamespace::Fee, "PerfFeeEnabled"));
+
     keys.push_back(scalar(
         StorageNamespace::Withdrawal,
         "LargeWithdrawalThreshold",

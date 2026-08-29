@@ -252,7 +252,7 @@
                           "u32": 4
                         },
                         "val": {
-                          "u32": 2
+                          "u32": 3
                         }
                       },
                       {
@@ -377,51 +377,6 @@
                             "hi": 0,
                             "lo": 0
                           }
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "WithdrawalQueueMeta"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "admin_last_change_ts"
-                              },
-                              "val": {
-                                "u64": 0
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "admin_min_interval_secs"
-                              },
-                              "val": {
-                                "u64": 3600
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "head"
-                              },
-                              "val": {
-                                "u64": 1
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "tail"
-                              },
-                              "val": {
-                                "u64": 1
-                              }
-                            }
-                          ]
                         }
                       }
                     ]

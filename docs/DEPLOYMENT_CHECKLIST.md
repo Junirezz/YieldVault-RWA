@@ -1,8 +1,8 @@
 # 🚀 YieldVault-RWA: Deployment Checklist (Testnet & Mainnet)
 
-**Issue:** [#1060](https://github.com/Junirezz/YieldVault-RWA/issues/1060)  
-**Purpose:** A comprehensive, step-by-step deployment checklist covering both **Testnet** and **Mainnet** environments for the YieldVault-RWA stack (smart contracts, backend, frontend, and infrastructure).  
-**Last Updated:** July 28, 2026
+**Issues:** [#1146](https://github.com/kingksjo/YieldVault-RWA/issues/1146), [#1060](https://github.com/Junirezz/YieldVault-RWA/issues/1060)  
+**Purpose:** A comprehensive, step-by-step deployment checklist covering both **Testnet** and **Mainnet** environments for the YieldVault-RWA stack (smart contracts, backend, frontend, and infrastructure). See also [Release Checklist](./RELEASE_CHECKLIST.md).  
+**Last Updated:** August 2026
 
 ---
 
