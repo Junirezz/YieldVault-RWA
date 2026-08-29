@@ -48,7 +48,7 @@ export function useVaultAnalytics() {
   }, []);
 
   const trackError = useCallback((error: Error, context?: string) => {
-    emitAnalytics("error", { message: error.message, context });
+    emitAnalytics("error", { message: error.message, context: context ?? null });
   }, []);
 
   return { trackDeposit, trackWithdrawal, trackError };

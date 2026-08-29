@@ -1,95 +1,137 @@
-import { useSyncExternalStore } from "react";
+import i18n from "i18next";
+import { initReactI18next, useTranslation as useI18nextTranslation } from "react-i18next";
+import { useMemo } from "react";
 import { en } from "./locales/en";
 import { es } from "./locales/es";
 
 export type LocaleCode = "en" | "es";
 
-/** Nested message object: leaves are translated strings (structure mirrors locale files). */
-type MessageTree = { readonly [key: string]: string | MessageTree };
+export const SUPPORTED_LOCALES: readonly LocaleCode[] = ["en", "es"];
 
-const catalogs: Record<LocaleCode, MessageTree> = {
-  en: en as MessageTree,
-  es: es as MessageTree,
-};
+/** Locales that should render with `dir="rtl"` once catalogs are added. */
+export const RTL_LOCALES = new Set<string>(["ar", "he", "fa", "ur"]);
 
-let activeLocale: LocaleCode = "en";
+export const LOCALE_STORAGE_KEY = "yieldvault.locale";
 
-const localeListeners = new Set<() => void>();
+const catalogs = {
+  en: { translation: en },
+  es: { translation: es },
+} as const;
 
-function notifyLocaleListeners(): void {
-  localeListeners.forEach((listener) => listener());
+export function isRtlLocale(locale: string): boolean {
+  const base = locale.toLowerCase().split("-")[0];
+  return RTL_LOCALES.has(base);
 }
 
-function getValueAtPath(root: unknown, path: string): unknown {
-  const segments = path.split(".");
-  let current: unknown = root;
-  for (const segment of segments) {
-    if (
-      current === null ||
-      typeof current !== "object" ||
-      !Object.prototype.hasOwnProperty.call(current, segment)
-    ) {
-      return undefined;
+export function getTextDirection(locale: string): "rtl" | "ltr" {
+  return isRtlLocale(locale) ? "rtl" : "ltr";
+}
+
+export function applyDocumentDirection(locale: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const dir = getTextDirection(locale);
+  const html = document.documentElement;
+  html.setAttribute("dir", dir);
+  html.setAttribute("lang", locale);
+  html.dataset.locale = locale;
+}
+
+function readStoredLocale(): LocaleCode {
+  if (typeof window === "undefined") {
+    return "en";
+  }
+  try {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (stored === "en" || stored === "es") {
+      return stored;
     }
-    current = (current as Record<string, unknown>)[segment];
+  } catch {
+    // Ignore quota / privacy-mode failures.
   }
-  return current;
+  return "en";
 }
 
-/**
- * Looks up a translated string for the given dot-separated key (e.g. `nav.vaults`).
- *
- * **Missing keys:** If the key is absent in the active locale and in the English
- * catalog, this function returns the `key` string unchanged. That avoids rendering
- * `undefined`, empty text, or throwing — developers see the key in the UI and can
- * fix the catalog.
- *
- * **Adding a new locale:** Create `frontend/src/i18n/locales/<code>.ts` exporting
- * an object with the same nested shape as `en.ts`. Register it in the `catalogs`
- * map and extend the `LocaleCode` union in this file.
- *
- * **Switching locale:** Call `setLocale('es')` (or another registered code).
- * React components should use {@link useTranslation} so they re-render when the
- * locale changes; plain `t()` reads the current module locale on each call.
- *
- * @param key - Dot-separated path in the locale catalog (e.g. `wallet.connectFreighter`)
- * @returns The resolved string, an English fallback, or `key` if not found
- */
-export function t(key: string, defaultValue?: string): string {
-  const localized = getValueAtPath(catalogs[activeLocale], key);
-  if (typeof localized === "string") {
-    return localized;
+function persistLocale(code: LocaleCode): void {
+  if (typeof window === "undefined") {
+    return;
   }
-  const fallbackEn = getValueAtPath(catalogs.en, key);
-  if (typeof fallbackEn === "string") {
-    return fallbackEn;
+  try {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, code);
+  } catch {
+    // Ignore quota / privacy-mode failures.
   }
-  return defaultValue ?? key;
 }
+
+if (!i18n.isInitialized) {
+  void i18n.use(initReactI18next).init({
+    resources: catalogs,
+    lng: readStoredLocale(),
+    fallbackLng: "en",
+    supportedLngs: [...SUPPORTED_LOCALES],
+    defaultNS: "translation",
+    interpolation: {
+      escapeValue: false,
+    },
+    returnNull: false,
+    returnEmptyString: false,
+  });
+}
+
+applyDocumentDirection(i18n.language || "en");
+
+i18n.on("languageChanged", (lng) => {
+  applyDocumentDirection(lng);
+});
 
 export function getLocale(): LocaleCode {
-  return activeLocale;
+  const lng = (i18n.resolvedLanguage || i18n.language || "en").split("-")[0];
+  return lng === "es" ? "es" : "en";
 }
 
 export function setLocale(code: string): void {
-  if (code === "en" || code === "es") {
-    activeLocale = code;
-    notifyLocaleListeners();
+  if (code !== "en" && code !== "es") {
+    return;
   }
+  persistLocale(code);
+  applyDocumentDirection(code);
+  void i18n.changeLanguage(code);
 }
 
-export function subscribeLocale(onStoreChange: () => void): () => void {
-  localeListeners.add(onStoreChange);
-  return () => {
-    localeListeners.delete(onStoreChange);
-  };
+/**
+ * Looks up a translated string. Supports i18next interpolation via an options
+ * object (`t('session.warning.message', { minutes: 5 })`) and a string default
+ * (`t('missing.key', 'fallback')`) for existing call sites.
+ */
+export function t(
+  key: string,
+  defaultValueOrOptions?: string | Record<string, unknown>,
+): string {
+  if (typeof defaultValueOrOptions === "string") {
+    return String(i18n.t(key, { defaultValue: defaultValueOrOptions }));
+  }
+  if (defaultValueOrOptions && typeof defaultValueOrOptions === "object") {
+    return String(i18n.t(key, defaultValueOrOptions));
+  }
+  const value = i18n.t(key, { defaultValue: key });
+  return typeof value === "string" ? value : key;
 }
 
 export function useTranslation(): {
   t: typeof t;
   locale: LocaleCode;
   setLocale: typeof setLocale;
+  dir: "rtl" | "ltr";
 } {
-  const locale = useSyncExternalStore(subscribeLocale, getLocale, getLocale);
-  return { t, locale, setLocale };
+  const { i18n: instance } = useI18nextTranslation();
+  const locale: LocaleCode = instance.language?.startsWith("es") ? "es" : "en";
+  const dir = getTextDirection(locale);
+  return useMemo(
+    () => ({ t, locale, setLocale, dir }),
+    [locale, dir],
+  );
 }
+
+export { i18n };
+export default i18n;

@@ -9,6 +9,7 @@ This directory contains operational runbooks for disaster recovery and incident 
 | Runbook | RTO | RPO | Use When |
 |---------|-----|-----|----------|
 | [Incident Triage & Severity Classification](./INCIDENT_TRIAGE_AND_SEVERITY.md) | N/A | N/A | First responder triage and severity classification for any alert |
+| [Incident Response & Rollback Operations](./rollback-and-hotfix.md) | 15 min | N/A | Emergency pause, incident escalation, and multi-tier rollback procedures |
 | [RTO/RPO Targets](./RTO_RPO_TARGETS.md) | N/A | N/A | Understanding recovery objectives |
 | [Database Restore](./DATABASE_RESTORE.md) | 1 hour | 15 min | Database corruption or failure |
 | [Backend Redeploy](./BACKEND_REDEPLOY.md) | 30 min | N/A | Backend service issues |

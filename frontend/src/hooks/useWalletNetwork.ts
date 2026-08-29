@@ -62,11 +62,12 @@ export function useWalletNetwork(walletAddress: string | null): WalletNetworkSta
       return;
     }
 
-    void poll();
+    const initialId = window.setTimeout(() => void poll(), 0);
     const id = window.setInterval(() => void poll(), POLL_MS);
 
     return () => {
       activeRef.current = false;
+      window.clearTimeout(initialId);
       window.clearInterval(id);
     };
   }, [walletAddress, poll]);

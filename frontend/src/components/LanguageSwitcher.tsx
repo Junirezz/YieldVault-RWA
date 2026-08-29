@@ -5,11 +5,39 @@ const LOCALES: { code: LocaleCode; flag: string }[] = [
   { code: "es", flag: "🇪🇸" },
 ];
 
-export default function LanguageSwitcher() {
+interface LanguageSwitcherProps {
+  compact?: boolean;
+}
+
+export default function LanguageSwitcher({ compact = false }: LanguageSwitcherProps) {
   const { t, locale, setLocale } = useTranslation();
 
+  if (compact) {
+    return (
+      <div className="language-switcher language-switcher--compact" role="group" aria-label={t("langSwitch.label")}>
+        {LOCALES.map(({ code, flag }) => {
+          const isActive = locale === code;
+          return (
+            <button
+              key={code}
+              type="button"
+              onClick={() => setLocale(code)}
+              aria-pressed={isActive}
+              aria-label={t(`langSwitch.${code}`)}
+              className="language-switcher__btn"
+              data-active={isActive ? "true" : "false"}
+            >
+              <span aria-hidden="true">{flag}</span>
+              <span className="language-switcher__code">{code.toUpperCase()}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+    <div className="language-switcher" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
       <span
         style={{
           fontSize: "0.82rem",
@@ -27,6 +55,7 @@ export default function LanguageSwitcher() {
           return (
             <button
               key={code}
+              type="button"
               onClick={() => setLocale(code)}
               aria-pressed={isActive}
               aria-label={t(`langSwitch.${code}`)}

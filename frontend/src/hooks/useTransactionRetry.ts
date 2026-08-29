@@ -110,7 +110,7 @@ export function useTransactionRetry(
     return newId;
   }, [transactions]);
 
-  const refreshStatus = useCallback((_id: string) => {
+  const refreshStatus = useCallback(() => {
     // In a real implementation this would poll Horizon for tx status
   }, []);
 

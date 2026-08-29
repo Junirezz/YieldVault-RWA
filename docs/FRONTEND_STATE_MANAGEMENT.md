@@ -112,10 +112,19 @@ Custom hooks in `frontend/src/hooks/` encapsulate all complex logic.
 **Mutation Hooks (React Query):**
 - **`useVaultMutations`**: Exposes `useDepositMutation` and `useWithdrawMutation` for executing Soroban contract calls. Applies optimistic cache updates via `optimisticVaultCache`, rolls back on failure, and invalidates related query caches on settle.
 
-**Utility Hooks:**
+**Utility Hooks & State Detectors:**
+- **`useWalletNetwork`**: Polls and monitors the connected Freighter wallet network passphrase against configured network settings. Exposes `isMismatch`, `walletNetwork`, `expectedNetwork`, and `checkNow()` for instant recheck without waiting for polling intervals.
 - **`useClientDataTable`**: Handles client-side pagination, sorting, and text-based filtering of arrays.
 - **`useInfiniteScroll`**: Manages IntersectionObserver logic for loading more items in infinite-scroll views.
 - **`useFeeEstimate` / `useSlippage`**: Calculates estimated transaction fees and slippage parameters for deposits and withdrawals.
+
+### Network Mismatch Detector & Guided Fix Flow
+- **Components**: `NetworkWarningBanner`, `NetworkMismatchGuideModal`.
+- **Behavior**: When a connected wallet is on a mismatched network (e.g. Freighter on Mainnet when app is on Testnet), a persistent, accessible banner alerts the user. Clicking "Show me how to fix this" opens a step-by-step guided modal that allows instant network verification (`checkNow()`) and automatically dismisses upon successful resolution.
+
+### Account Statement Export Flow
+- **Components & Libs**: `AccountStatementExport`, `lib/accountStatement.ts`, `lib/exportDownload.ts`.
+- **Behavior**: Generates client-side CSV or JSON account statements covering holdings and transaction histories. Supports customizable start/end date range filtering, formatted ISO timestamps, asset amounts, and secure download triggers.
 
 ---
 

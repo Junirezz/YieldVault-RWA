@@ -54,8 +54,14 @@
 //!
 //! See `DEPLOYMENT.md` for step-by-step deployment to Stellar testnet/mainnet.
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod admin;
+pub mod audit_events;
+/// Test-only reference strategy implementation. Excluded from production
+/// builds: bundling a second `#[contract]` type into the vault's wasm binary
+/// would collide with `YieldVault`'s own exported method names (e.g. `deposit`).
+/// Production vaults interact with strategies generically via `StrategyClient`
+/// against a separately-deployed strategy contract address.
+#[cfg(test)]
 pub mod benji_strategy;
 pub mod errors;
 pub use errors::VaultError;
@@ -69,6 +75,7 @@ mod event_tests;
 pub mod external_calls;
 #[cfg(test)]
 mod feature_tests;
+pub mod fee_curve;
 pub mod fee_math;
 mod formal_verification_tests;
 #[cfg(test)]
@@ -250,6 +257,9 @@ pub enum DataKeyExt {
     PriceOracle,
     OracleEnabled,
     OracleHeartbeat,
+    /// Last oracle price validated by `total_assets()`, used as the reference
+    /// point for the price-deviation circuit breaker on the next read.
+    LastOraclePrice,
 
     // Strategy heartbeat config & timestamps
     StrategyHeartbeat,
@@ -266,6 +276,16 @@ pub enum DataKeyExt {
 
     // Issue #1173 / #1231: nested to stay within DataKeyExt variant limits
     Risk(RiskExtKey),
+    // Issue #1230: Performance fee switch for strategy performance incentives
+    PerformanceFeeBps,
+    PerformanceIncentivePool,
+    PerformanceFeeEnabled,
+    // Issue #1173 / #1231: nested to stay within DataKeyExt variant limits
+    Risk(RiskExtKey),
+
+    // Issue #1243: utilization-based dynamic fee curve (+ its queued change)
+    FeeCurve,
+    PendingFeeCurve,
 }
 
 #[contracttype]
@@ -288,8 +308,6 @@ pub enum DataKey {
     Pauser,
     EmergencyApprovers,
     Emergency(EmergencyStorageKey),
-    EmergencyProposalNonce,
-    EmergencyProposal(u32),
     AdminProposalNonce,
     AdminProposal(u32),
 
@@ -339,8 +357,6 @@ pub enum DataKey {
     // FIFO withdrawal queue + admin param guard metadata
     WithdrawalQueueMeta,
     WithdrawalQueueEntry(u64),
-    // Multisig governance configuration (nested to keep DataKey variant count within Soroban limits)
-    Governance(GovernanceStorageKey),
 }
 
 #[contracttype]
@@ -351,15 +367,6 @@ pub enum EmergencyStorageKey {
     ProposalNonce,
     Proposal(u32),
     DisputeWindow,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GovernanceStorageKey {
-    Signers,
-    Threshold,
-    MigrationDeadline,
-    PreviousSigners,
 }
 
 #[contracttype]
@@ -442,6 +449,34 @@ pub struct BatchDepositResult {
 
 #[contractclient(name = "OracleClient")]
 /// Client for reading price data from the configured oracle.
+///
+/// ## Vault dependency on this interface
+///
+/// The vault only calls `get_price` from [`YieldVault::total_assets`] (and,
+/// transitively, [`YieldVault::invest`]), and only when both
+/// [`YieldVault::is_oracle_enabled`] is `true` and
+/// [`YieldVault::price_oracle`] is configured. Every response is passed
+/// through [`oracle::OracleValidator::validate_price_data`] before it is
+/// trusted; see the [`oracle`] module docs for the full stale-data policy
+/// (heartbeat freshness capped by `set_oracle_heartbeat`, non-future
+/// timestamps, sane price/decimals bounds, and the deviation circuit
+/// breaker versus the last validated price). Any validation failure reverts
+/// the call with `VaultError::OracleValidationFailed` — the vault never
+/// falls back to a cached, default, or otherwise synthesized price.
+///
+/// ## Responsibilities of an implementation
+///
+/// - `get_price` must return the best data currently available and must
+///   NOT itself substitute a stale, cached, or placeholder price when the
+///   real feed is unavailable — silently returning fallback data here
+///   would defeat the vault's staleness checks, since the vault has no way
+///   to distinguish a genuine fresh read from a fabricated one.
+/// - The returned timestamp must reflect when the underlying price was
+///   actually observed, not the time of the call, so the vault's heartbeat
+///   check reflects true data age.
+/// - If no reliable price can be produced, the implementation should panic
+///   (reverting the call) rather than return degraded data; the vault
+///   treats a reverted oracle call the same as a failed validation.
 pub trait OracleInterface {
     fn get_price(env: Env, base: Address, quote: Address) -> oracle::PriceData;
 }
@@ -671,7 +706,6 @@ impl YieldVault {
     /// Register a new strategy (Pending state). Admin-only.
     pub fn register_strategy(env: Env, strategy: Address) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
-        admin.require_auth();
         strategy_registration::register_strategy(&env, &admin, &strategy)
             .map(|_| ())
             .map_err(Self::map_registration_error)
@@ -680,7 +714,6 @@ impl YieldVault {
     /// Advance a strategy from Pending → Active. Admin-only.
     pub fn activate_strategy_registration(env: Env, strategy: Address) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
-        admin.require_auth();
         strategy_registration::activate_strategy(&env, &admin, &strategy)
             .map(|_| ())
             .map_err(Self::map_registration_error)
@@ -690,7 +723,6 @@ impl YieldVault {
     /// Fails if `strategy` is the currently-active vault strategy.
     pub fn retire_strategy(env: Env, strategy: Address) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
-        admin.require_auth();
         let active = Self::strategy(env.clone());
         strategy_registration::retire_strategy(&env, &admin, &strategy, active)
             .map(|_| ())
@@ -785,8 +817,17 @@ impl YieldVault {
             .publish((symbol_short!("stratcd"),), (now, cooldown));
         env.events().publish(
             (symbol_short!("stratset"), admin.clone()),
-            (previous_strategy, strategy),
+            (previous_strategy.clone(), strategy.clone()),
         );
+
+        crate::audit_events::emit_strategy_switch(
+            &env,
+            &admin,
+            &previous_strategy,
+            &strategy,
+            env.ledger().timestamp(),
+        );
+
         Ok(())
     }
 
@@ -1316,7 +1357,15 @@ impl YieldVault {
     }
 
     /// Read the total underlying assets (idle in vault + invested in strategy).
-    pub fn total_assets(env: Env) -> i128 {
+    ///
+    /// When oracle validation is enabled and a price oracle is configured, the
+    /// strategy's mark-to-market value is only trusted once the oracle's
+    /// price data passes the [`oracle`] module's stale-data policy (heartbeat
+    /// freshness, non-future timestamp, sane price bounds, and deviation
+    /// versus the last validated price). Any failure reverts with
+    /// [`VaultError::OracleValidationFailed`] instead of returning a
+    /// possibly-stale or manipulated valuation.
+    pub fn total_assets(env: Env) -> Result<i128, VaultError> {
         // Canonical idle assets live in VaultState.
         let state = Self::get_state(&env);
         let idle_assets = state.total_assets;
@@ -1332,6 +1381,7 @@ impl YieldVault {
                         .storage()
                         .instance()
                         .get(&DataKeyExt::Risk(RiskExtKey::LastPx));
+                    let last_price = Self::last_oracle_price(&env);
                     oracle::OracleValidator::validate_price_data(
                         &env,
                         &price_data,
@@ -1343,6 +1393,10 @@ impl YieldVault {
                     env.storage()
                         .instance()
                         .set(&DataKeyExt::Risk(RiskExtKey::LastPx), &price_data);
+                        last_price.as_ref(),
+                    )
+                    .map_err(|_| VaultError::OracleValidationFailed)?;
+                    Self::set_last_oracle_price(&env, &price_data);
                 }
             }
             let token = Self::token(env.clone());
@@ -1351,7 +1405,19 @@ impl YieldVault {
             0
         };
 
-        idle_assets.checked_add(strategy_assets).expect("overflow")
+        idle_assets
+            .checked_add(strategy_assets)
+            .ok_or(VaultError::MathOverflow)
+    }
+
+    fn last_oracle_price(env: &Env) -> Option<oracle::PriceData> {
+        env.storage().instance().get(&DataKeyExt::LastOraclePrice)
+    }
+
+    fn set_last_oracle_price(env: &Env, price_data: &oracle::PriceData) {
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::LastOraclePrice, price_data);
     }
 
     /// Returns the current vault share price scaled to 10^18.
@@ -1498,14 +1564,58 @@ impl YieldVault {
             return Err(VaultError::InvalidYieldAmount);
         }
 
+        // Issue #1230: Performance fee — redirect portion of yield above watermark
+        let perf_enabled: bool = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false);
+        let mut perf_fee_amount: i128 = 0;
+        if perf_enabled && harvested > 0 {
+            let current_watermark = Self::strategy_watermark(env.clone(), strategy.clone());
+            let yield_above_hwm = harvested
+                .checked_sub(current_watermark)
+                .unwrap_or(0);
+            if yield_above_hwm > 0 {
+                let perf_fee_bps: i128 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKeyExt::PerformanceFeeBps)
+                    .unwrap_or(0);
+                if perf_fee_bps > 0 {
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    perf_fee_amount = pf;
+                    if perf_fee_amount > 0 {
+                        if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
+                            let token_addr = Self::token(env.clone());
+                            let token_client = token::Client::new(&env, &token_addr);
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &pool,
+                                &perf_fee_amount,
+                            );
+                            env.events().publish(
+                                (symbol_short!("pperffee"), strategy.clone()),
+                                (perf_fee_amount, yield_above_hwm),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let net_harvested = harvested
+            .checked_sub(perf_fee_amount)
+            .unwrap_or(0);
+
         let mut state = Self::get_state(&env);
         let pre_total_assets = state.total_assets;
-        let new_total_assets = pre_total_assets.checked_add(harvested).expect("overflow");
+        let new_total_assets = pre_total_assets.checked_add(net_harvested).expect("overflow");
         state.total_assets = new_total_assets;
         env.storage().instance().set(&DataKey::State, &state);
 
         env.events()
-            .publish((symbol_short!("k_yield"),), (harvested, new_total_assets));
+            .publish((symbol_short!("k_yield"),), (net_harvested, new_total_assets));
 
         Ok(harvested)
     }
@@ -1754,7 +1864,8 @@ impl YieldVault {
             .instance()
             .get(&DataKey::DaoThreshold)
             .unwrap_or(1);
-        if proposal.yes_votes < threshold {
+        let total_votes = proposal.yes_votes.checked_add(proposal.no_votes).expect("overflow");
+        if total_votes < threshold {
             return Err(VaultError::QuorumNotReached);
         }
         if proposal.yes_votes <= proposal.no_votes {
@@ -2124,6 +2235,15 @@ impl YieldVault {
             (symbol_short!("deposit"), user.clone()),
             (amount, shares_to_mint),
         );
+
+        crate::audit_events::emit_deposit(
+            &env,
+            &user,
+            amount,
+            shares_to_mint,
+            env.ledger().timestamp(),
+        );
+
         Ok(shares_to_mint)
     }
 
@@ -2534,28 +2654,6 @@ impl YieldVault {
         // ── Effects: update storage ────────────────────────────────────────────
         env.storage().instance().set(&deposit_key, &new_deposit);
 
-        // Update idle TotalAssets in storage
-        let ta: i128 = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalAssets,
-            &ta.checked_add(amount).expect("overflow"),
-        );
-
-        // Update TotalShares in storage
-        let ts: i128 = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalShares)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalShares,
-            &ts.checked_add(shares_to_mint).expect("overflow"),
-        );
-
         // Update in-memory state (used for subsequent entries in the same batch)
         state.total_assets = state.total_assets.checked_add(amount).expect("overflow");
         state.total_shares = state
@@ -2714,13 +2812,7 @@ impl YieldVault {
         let token_client = token::Client::new(env, &token_addr);
 
         // Check if vault has enough idle assets, otherwise queue the withdrawal
-        let idle_ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-
-        if idle_ta < assets_to_return {
+        if state.total_assets < assets_to_return {
             return Self::enqueue_withdrawal_for_liquidity(
                 env,
                 state,
@@ -2731,17 +2823,6 @@ impl YieldVault {
         }
 
         token_client.transfer(&env.current_contract_address(), &user, &assets_to_return);
-
-        env.storage().instance().set(
-            &DataKey::TotalAssets,
-            &idle_ta.checked_sub(assets_to_return).expect("underflow"),
-        );
-
-        let ts = Self::total_shares(env.clone());
-        env.storage().instance().set(
-            &DataKey::TotalShares,
-            &ts.checked_sub(shares).expect("underflow"),
-        );
 
         // Capture pre-burn share balance for proportional cost-basis reduction.
         let vault_balance = Self::balance(env.clone(), user.clone());
@@ -2794,9 +2875,18 @@ impl YieldVault {
         env.storage().instance().set(&deposit_key, &new_deposit);
 
         env.events().publish(
-            (symbol_short!("withdraw"), user),
+            (symbol_short!("withdraw"), user.clone()),
             (assets_to_return, shares),
         );
+
+        crate::audit_events::emit_withdrawal(
+            &env,
+            &user,
+            shares,
+            assets_to_return,
+            env.ledger().timestamp(),
+        );
+
         Ok(assets_to_return)
     }
 
@@ -2847,7 +2937,7 @@ impl YieldVault {
         shares: i128,
         assets_to_return: i128,
     ) -> Result<i128, VaultError> {
-        let tail = Self::withdrawal_queue_tail(env);
+        let tail = YieldVault::withdrawal_queue_tail(env);
         let entry = WithdrawalQueueEntry {
             user: user.clone(),
             shares,
@@ -2857,18 +2947,12 @@ impl YieldVault {
         env.storage()
             .instance()
             .set(&DataKey::WithdrawalQueueEntry(tail), &entry);
-        Self::set_withdrawal_queue_tail(env, tail.checked_add(1).expect("queue overflow"));
+        YieldVault::set_withdrawal_queue_tail(env, tail.checked_add(1).expect("queue overflow"));
 
         let vault_balance = Self::balance(env.clone(), user.clone());
         env.storage().instance().set(
             &DataKey::ShareBalance(user.clone()),
             &vault_balance.checked_sub(shares).expect("underflow"),
-        );
-
-        let ts = Self::total_shares(env.clone());
-        env.storage().instance().set(
-            &DataKey::TotalShares,
-            &ts.checked_sub(shares).expect("underflow"),
         );
 
         state.total_shares = state.total_shares.checked_sub(shares).expect("underflow");
@@ -2911,10 +2995,7 @@ impl YieldVault {
 
     /// Returns idle assets held in the vault (excluding strategy mark-to-market).
     pub fn idle_total_assets(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0)
+        Self::get_state(&env).total_assets
     }
 
     /// Process queued withdrawals in deterministic FIFO order while liquidity allows.
@@ -2948,10 +3029,6 @@ impl YieldVault {
             }
 
             token_client.transfer(&vault_addr, &entry.user, &entry.assets);
-            env.storage().instance().set(
-                &DataKey::TotalAssets,
-                &available.checked_sub(entry.assets).expect("underflow"),
-            );
             env.storage().instance().remove(&key);
             env.events().publish(
                 (symbol_short!("wdqproc"), entry.user.clone()),
@@ -2981,12 +3058,8 @@ impl YieldVault {
         let token_addr = Self::token(env.clone());
         let total_invested = Self::validate_strategy_response(&env, &strategy_addr, &token_addr)?;
 
-        let idle_ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        if idle_ta < amount {
+        let mut state = Self::get_state(&env);
+        if state.total_assets < amount {
             return Err(VaultError::InsufficientLiquidity);
         }
 
@@ -3000,15 +3073,7 @@ impl YieldVault {
             return Err(VaultError::ExceedsStrategyCap);
         }
 
-        let idle_ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        if idle_ta < amount {
-            return Err(VaultError::InsufficientLiquidity);
-        }
-        let remaining_idle = idle_ta.checked_sub(amount).expect("underflow");
+        let remaining_idle = state.total_assets.checked_sub(amount).expect("underflow");
         if remaining_idle < Self::min_liquidity_buffer(env.clone()) {
             return Err(VaultError::LiquidityBufferNotMet);
         }
@@ -3019,7 +3084,7 @@ impl YieldVault {
             .instance()
             .get(&DataKey::StrategyRiskThreshold(strategy_addr.clone()))
             .unwrap_or(10_000);
-        let total_assets = Self::total_assets(env.clone());
+        let total_assets = Self::total_assets(env.clone())?;
         let new_total_invested = total_invested.checked_add(amount).expect("overflow");
         if total_assets > 0
             && (new_total_invested.checked_mul(10_000).expect("overflow") / total_assets)
@@ -3048,9 +3113,8 @@ impl YieldVault {
         Self::raise_strategy_watermark(&env, &strategy_addr, new_total_invested);
 
         // Update idle assets
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAssets, &remaining_idle);
+        state.total_assets = remaining_idle;
+        env.storage().instance().set(&DataKey::State, &state);
         Ok(())
     }
 
@@ -3094,15 +3158,9 @@ impl YieldVault {
                 .set(&DataKey::StrategyWatermark(strategy_addr.clone()), &0i128);
         }
 
-        let idle_ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalAssets,
-            &idle_ta.checked_add(withdrawn).expect("overflow"),
-        );
+        let mut state = Self::get_state(&env);
+        state.total_assets = state.total_assets.checked_add(withdrawn).expect("overflow");
+        env.storage().instance().set(&DataKey::State, &state);
         // divest is best-effort recall; signature remains `-> ()`.
     }
 
@@ -3288,16 +3346,6 @@ impl YieldVault {
                 (fee_amount, treasury_bal),
             );
         }
-
-        let ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalAssets,
-            &ta.checked_add(net_yield).expect("overflow"),
-        );
 
         let mut state = Self::get_state(&env);
         let price_before = if state.total_shares > 0 {
@@ -3506,6 +3554,246 @@ impl YieldVault {
     /// Returns the current fee in basis points.
     pub fn fee_bps(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+    }
+
+    // ── Issue #1230: Performance fee switch for strategy incentives ─────────
+
+    /// Set the performance fee in basis points (0–10000).
+    ///
+    /// When the performance fee switch is enabled, this percentage of
+    /// strategy yield above the high-water mark is redirected to the
+    /// performance incentive pool instead of accruing to depositors.
+    ///
+    /// Only the Admin can call this. Takes effect immediately.
+    pub fn set_performance_fee_bps(env: Env, bps: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if !(0..=10_000).contains(&bps) {
+            return Err(VaultError::InvalidPerformanceFeeBps);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceFeeBps, &bps);
+        env.events()
+            .publish((symbol_short!("pperfchg"),), (bps,));
+        Ok(())
+    }
+
+    /// Returns the configured performance fee in basis points (default 0).
+    pub fn performance_fee_bps(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeBps)
+            .unwrap_or(0)
+    }
+
+    /// Set the performance incentive pool address.
+    ///
+    /// When the performance fee switch is enabled, accumulated performance
+    /// fees are transferred to this address on each yield report.
+    ///
+    /// Only the Admin can call this.
+    pub fn set_performance_incentive_pool(
+        env: Env,
+        pool: Address,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceIncentivePool, &pool);
+        env.events()
+            .publish((symbol_short!("pperfpool"),), (pool,));
+        Ok(())
+    }
+
+    /// Returns the configured performance incentive pool address, if any.
+    pub fn performance_incentive_pool(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceIncentivePool)
+    }
+
+    /// Enable or disable the performance fee switch.
+    ///
+    /// When enabled, a portion of strategy yield above the high-water mark
+    /// is redirected to the performance incentive pool. The pool address
+    /// must be configured before enabling.
+    ///
+    /// Only the Admin can call this.
+    pub fn set_performance_fee_enabled(
+        env: Env,
+        enabled: bool,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if enabled {
+            let pool: Option<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKeyExt::PerformanceIncentivePool);
+            if pool.is_none() {
+                return Err(VaultError::PerformanceIncentivePoolNotConfigured);
+            }
+        }
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::PerformanceFeeEnabled, &enabled);
+        env.events()
+            .publish((symbol_short!("pperftog"),), (enabled,));
+        Ok(())
+    }
+
+    /// Returns whether the performance fee switch is currently enabled.
+    pub fn is_performance_fee_enabled(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false)
+    // ── Utilization-based dynamic fee curve (Issue #1243) ────────────────────
+
+    /// Returns the configured dynamic fee curve.
+    ///
+    /// Vaults that have never configured one read back
+    /// [`fee_curve::default_curve`], which is disabled — so the vault keeps
+    /// charging the flat [`Self::fee_bps`] until governance opts in.
+    pub fn fee_curve(env: Env) -> fee_curve::FeeCurve {
+        env.storage()
+            .instance()
+            .get(&DataKeyExt::FeeCurve)
+            .unwrap_or_else(fee_curve::default_curve)
+    }
+
+    /// Returns the vault's current utilization in basis points: the share of
+    /// total assets that is working inside the strategy rather than sitting
+    /// idle. A vault with no strategy, or no assets, reads as 0.
+    ///
+    /// Like [`Self::total_assets`], this reads through to the strategy (and
+    /// validates the oracle when one is enabled), so it can fail for the same
+    /// reasons that call can.
+    pub fn utilization_bps(env: Env) -> i128 {
+        let idle = Self::get_state(&env).total_assets;
+        let total = Self::total_assets(env.clone());
+        fee_curve::utilization_bps(total.saturating_sub(idle), total)
+    }
+
+    /// Returns the protocol fee (bps) the vault would charge on yield reported
+    /// right now.
+    ///
+    /// While the curve is disabled — the default — this is exactly
+    /// [`Self::fee_bps`] and performs no strategy or oracle call. Once enabled,
+    /// it is the curve's fee at the current [`Self::utilization_bps`].
+    pub fn effective_fee_bps(env: Env) -> i128 {
+        let curve = Self::fee_curve(env.clone());
+        let static_fee_bps = Self::fee_bps(env.clone());
+        if !curve.enabled {
+            return static_fee_bps;
+        }
+        fee_curve::fee_bps_at(&curve, Self::utilization_bps(env))
+    }
+
+    /// Queue a new dynamic fee curve. Takes effect once
+    /// `execute_fee_curve_change` is called after the configured timelock delay
+    /// elapses. Emits `fcurveq` with the queued legs and its eta.
+    ///
+    /// The curve is queued behind the same timelock as [`Self::fee_bps`] on
+    /// purpose: it moves the fee depositors actually pay, so letting it apply
+    /// instantly would be a way around that protection.
+    ///
+    /// ### Errors
+    /// * [`VaultError::InvalidFeeBps`] - the curve is not monotonically
+    ///   non-decreasing, a leg is outside 0–10000 bps, or the kink is not
+    ///   strictly between 0% and 100% utilization.
+    /// * [`VaultError::AdminParamChangeTooSoon`] - the admin parameter-change
+    ///   interval has not elapsed.
+    pub fn queue_fee_curve_change(env: Env, curve: fee_curve::FeeCurve) -> Result<u64, VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        Self::assert_admin_param_interval(&env)?;
+        fee_curve::validate(&curve)?;
+        let eta = Self::queue_eta(&env);
+        env.storage().instance().set(
+            &DataKeyExt::PendingFeeCurve,
+            &fee_curve::PendingFeeCurveChange {
+                new_value: curve.clone(),
+                eta,
+            },
+        );
+        Self::record_admin_param_change(&env);
+        env.events().publish(
+            (symbol_short!("fcurveq"),),
+            (
+                curve.enabled,
+                curve.base_fee_bps,
+                curve.optimal_fee_bps,
+                curve.max_fee_bps,
+                curve.optimal_utilization_bps,
+                eta,
+            ),
+        );
+        Ok(eta)
+    }
+
+    /// Returns the currently queued fee-curve change, if any.
+    pub fn pending_fee_curve_change(env: Env) -> Option<fee_curve::PendingFeeCurveChange> {
+        env.storage().instance().get(&DataKeyExt::PendingFeeCurve)
+    }
+
+    /// Execute a previously queued fee-curve change once its timelock has
+    /// elapsed. Emits `fcurve` with the newly active legs.
+    ///
+    /// ### Errors
+    /// * [`VaultError::NoPendingWithdrawal`] - nothing is queued.
+    /// * [`VaultError::TimelockNotExpired`] - the eta has not been reached.
+    pub fn execute_fee_curve_change(env: Env) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        let pending: fee_curve::PendingFeeCurveChange = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PendingFeeCurve)
+            .ok_or(VaultError::NoPendingWithdrawal)?;
+        Self::assert_timelock_ready(&env, pending.eta)?;
+        // Re-validate: the bounds this curve was accepted under are what the
+        // fee math relies on, and the queue may have outlived a code change.
+        fee_curve::validate(&pending.new_value)?;
+        let previous = Self::fee_curve(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::FeeCurve, &pending.new_value);
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::PendingFeeCurve);
+        env.events().publish(
+            (symbol_short!("fcurve"),),
+            (
+                previous.enabled,
+                pending.new_value.enabled,
+                pending.new_value.base_fee_bps,
+                pending.new_value.optimal_fee_bps,
+                pending.new_value.max_fee_bps,
+                pending.new_value.optimal_utilization_bps,
+            ),
+        );
+        Ok(())
+    }
+
+    /// Cancel a previously queued fee-curve change before it executes.
+    ///
+    /// ### Errors
+    /// * [`VaultError::NoPendingWithdrawal`] - nothing is queued.
+    pub fn cancel_fee_curve_change(env: Env) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if !env.storage().instance().has(&DataKeyExt::PendingFeeCurve) {
+            return Err(VaultError::NoPendingWithdrawal);
+        }
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::PendingFeeCurve);
+        env.events()
+            .publish((symbol_short!("fcurvecn"), admin.clone()), ());
+        Ok(())
     }
 
     /// Queue a new treasury address where fees accumulate. Takes effect once
@@ -4029,11 +4317,18 @@ impl YieldVault {
 
     /// Set the oracle heartbeat in seconds — the maximum age of a price feed
     /// before it is considered stale. Defaults to 3600 (1 hour).
+    ///
+    /// Capped at [`oracle::MAX_ORACLE_HEARTBEAT`] (24 hours) so an admin
+    /// cannot effectively disable staleness protection with an unbounded
+    /// heartbeat; rejected with `VaultError::OracleValidationFailed`.
     /// Only the Admin can call this.
     pub fn set_oracle_heartbeat(env: Env, seconds: u64) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
         Self::assert_admin_param_interval(&env)?;
+        if seconds > oracle::MAX_ORACLE_HEARTBEAT {
+            return Err(VaultError::OracleValidationFailed);
+        }
         env.storage()
             .instance()
             .set(&DataKeyExt::OracleHeartbeat, &seconds);
@@ -4211,6 +4506,14 @@ impl YieldVault {
             .unwrap_or(0)
     }
 
+    /// Reports harvested yield from the Benji strategy, taking the protocol fee
+    /// and crediting the remainder to depositors.
+    ///
+    /// The fee rate is [`Self::effective_fee_bps`]: the flat [`Self::fee_bps`]
+    /// by default, or the dynamic curve's rate at the current utilization once
+    /// governance enables one. When the curve is active the applied rate is
+    /// published as `dynfee` alongside the utilization it was derived from, so
+    /// every fee actually charged is auditable from the event stream.
     pub fn report_benji_yield(env: Env, strategy: Address, amount: i128) -> Result<(), VaultError> {
         if amount <= 0 {
             return Err(VaultError::InvalidYieldAmount);
@@ -4223,16 +4526,33 @@ impl YieldVault {
                 "Benji"
             )))
             .unwrap();
-        crate::permissions::require_strategy_auth(&strategy, &configured);
         if strategy != configured {
             return Err(VaultError::UnauthorizedStrategy);
         }
+        strategy.require_auth();
+
+        // Resolve the fee rate *before* the transfer: utilization is then read
+        // from the position that actually earned the yield, not from the
+        // half-settled state between the transfer and the accounting below.
+        let curve = Self::fee_curve(env.clone());
+        let static_fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        let (fee_bps, utilization) = if curve.enabled {
+            let utilization = Self::utilization_bps(env.clone());
+            (fee_curve::fee_bps_at(&curve, utilization), utilization)
+        } else {
+            (static_fee_bps, 0)
+        };
 
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&strategy, &env.current_contract_address(), &amount);
 
-        let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        if curve.enabled {
+            env.events().publish(
+                (symbol_short!("dynfee"), strategy.clone()),
+                (utilization, fee_bps, static_fee_bps),
+            );
+        }
         let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps);
         if fee_amount > 0 {
             let treasury_bal: i128 = env
@@ -4245,20 +4565,50 @@ impl YieldVault {
                 &treasury_bal.checked_add(fee_amount).expect("overflow"),
             );
         }
+
+        // Issue #1230: Performance fee — redirect portion of yield above watermark
+        let perf_enabled: bool = env
+            .storage()
+            .instance()
+            .get(&DataKeyExt::PerformanceFeeEnabled)
+            .unwrap_or(false);
+        let mut perf_fee_amount: i128 = 0;
+        if perf_enabled && net_yield > 0 {
+            let current_watermark = Self::strategy_watermark(env.clone(), strategy.clone());
+            let yield_above_hwm = net_yield
+                .checked_sub(current_watermark)
+                .unwrap_or(0);
+            if yield_above_hwm > 0 {
+                let perf_fee_bps: i128 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKeyExt::PerformanceFeeBps)
+                    .unwrap_or(0);
+                if perf_fee_bps > 0 {
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    perf_fee_amount = pf;
+                    if perf_fee_amount > 0 {
+                        if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
+                            let token_addr = Self::token(env.clone());
+                            let token_client = token::Client::new(&env, &token_addr);
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &pool,
+                                &perf_fee_amount,
+                            );
+                            env.events().publish(
+                                (symbol_short!("pperffee"), strategy.clone()),
+                                (perf_fee_amount, yield_above_hwm),
+                            );
+                        }
+                    }
+                }
+            }
+        }
         let next_watermark = Self::strategy_watermark(env.clone(), strategy.clone())
             .checked_add(amount)
             .expect("overflow");
         Self::raise_strategy_watermark(&env, &strategy, next_watermark);
-
-        let ta = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::TotalAssets)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalAssets,
-            &ta.checked_add(net_yield).expect("overflow"),
-        );
 
         let mut state = Self::get_state(&env);
         state.total_assets = state.total_assets.checked_add(net_yield).expect("overflow");
@@ -4487,3 +4837,18 @@ pub struct ContractMetadata {
     pub contract_paused: bool,
     pub has_strategy: bool,
 }
+ #[cfg(test)]
+    #[doc(hidden)]
+    pub fn test_seed_withdrawal_queue_entry(env: Env, user: Address, shares: i128, assets: i128) {
+        let tail = YieldVault::withdrawal_queue_tail(&env);
+        let entry = WithdrawalQueueEntry {
+            user,
+            shares,
+            assets,
+            enqueued_at: env.ledger().timestamp(),
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalQueueEntry(tail), &entry);
+        YieldVault::set_withdrawal_queue_tail(&env, tail.checked_add(1).expect("queue overflow"));
+    }

@@ -12,6 +12,7 @@ import Skeleton, {
   TransactionRowSkeleton,
   PortfolioCardSkeleton,
   AnalyticsWidgetSkeleton,
+  StrategyCardSkeleton,
 } from "./Skeleton";
 
 describe("Skeleton", () => {
@@ -53,6 +54,7 @@ describe("Skeleton", () => {
       <TransactionRowSkeleton key="tx" />,
       <PortfolioCardSkeleton key="port" />,
       <AnalyticsWidgetSkeleton key="analytics" />,
+      <StrategyCardSkeleton key="strategy" />,
     ];
     for (const variant of variants) {
       const { container, unmount } = render(variant);

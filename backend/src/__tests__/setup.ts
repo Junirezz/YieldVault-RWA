@@ -42,6 +42,8 @@ process.env.RATE_LIMIT_WRITES_MAX = process.env.RATE_LIMIT_WRITES_MAX || '10000'
 process.env.RATE_LIMIT_AUTH_MAX = process.env.RATE_LIMIT_AUTH_MAX || '10000';
 process.env.DEPOSITS_RATE_LIMIT_MAX = process.env.DEPOSITS_RATE_LIMIT_MAX || '10000';
 process.env.RATE_LIMIT_READS_MAX = process.env.RATE_LIMIT_READS_MAX || '10000';
+process.env.RATE_LIMIT_IP_MAX = process.env.RATE_LIMIT_IP_MAX || '10000';
+process.env.RATE_LIMIT_API_KEY_MAX = process.env.RATE_LIMIT_API_KEY_MAX || '10000';
 process.env.SUMMARY_RATE_LIMIT_MAX = process.env.SUMMARY_RATE_LIMIT_MAX || '10000';
 process.env.API_RATE_LIMIT_MAX_REQUESTS = process.env.API_RATE_LIMIT_MAX_REQUESTS || '10000';
 

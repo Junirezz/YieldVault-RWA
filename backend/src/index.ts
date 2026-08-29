@@ -18,9 +18,13 @@ import {
   writesLimiter,
   readsLimiter,
   adminLimiter,
+  identityRateLimiter,
+  getRateLimitMonitorSnapshot,
+  loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
 import { idempotencyStore } from './idempotency';
-import { createAdminAuditMiddleware, getAuditLogs, getAuditLogMetrics } from './auditLog';
+import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
+import { AuditLogQuerySchema } from './middleware/validate';
 import { recordAdminAuditLog } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
@@ -43,12 +47,21 @@ import { setupSwagger } from './swagger';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
+import {
+  errorHandler,
+  notFoundHandler,
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  InternalError,
+  RateLimitError,
+} from './errors';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema } from './middleware/validate';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware, createTimeoutFor } from './middleware/timeoutMiddleware';
@@ -85,6 +98,8 @@ import {
 } from './middleware/allowlist';
 import { adminRbacMiddleware, assertWebhookParameterUpdate } from './middleware/rbac';
 import { apiVersionMiddleware } from './middleware/versionNegotiation';
+import { versionRoutingMiddleware } from './middleware/versionRouting';
+import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
@@ -100,14 +115,19 @@ import {
 import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
 import listRouter from './listEndpoints';
 import referralRouter from './referralEndpoints';
+import auditLogRouter from './auditLogEndpoints';
 import { referralService } from './referralService';
 import {
   register,
   httpRequestCount,
   httpResponseTime,
+  httpRequestErrorCount,
   activeConnections,
   updateVaultMetrics,
   syncJobGovernanceMetrics,
+  rateLimitEvents,
+  httpErrorCount,
+  httpClientErrorCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -640,7 +660,8 @@ app.use(apiErrorContractMiddleware);
 // Structured logging with correlation IDs
 app.use(structuredLoggingMiddleware);
 
-// API version negotiation & deprecation headers
+// API version routing, negotiation & deprecation headers
+app.use(versionRoutingMiddleware);
 app.use(apiVersionMiddleware);
 
 // Global timeout middleware (30 seconds default)
@@ -667,6 +688,22 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
     httpRequestCount.inc(labels);
     httpResponseTime.observe(labels, durationSeconds);
+    if (res.statusCode >= 400) {
+      httpRequestErrorCount.inc({
+        ...labels,
+        status_class: `${Math.floor(res.statusCode / 100)}xx`,
+      });
+    }
+    if (res.statusCode === 429) {
+      rateLimitEvents.inc({ tier: req.apiVersion ?? 'global', outcome: 'limited' });
+    }
+
+    // Track error rates for alerting (5xx = critical, 4xx = client error).
+    if (res.statusCode >= 500) {
+      httpErrorCount.inc(labels);
+    } else if (res.statusCode >= 400) {
+      httpClientErrorCount.inc(labels);
+    }
 
     // Record latency for SLO monitoring (only track successful requests)
     if (res.statusCode < 400) {
@@ -680,7 +717,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Apply the Redis-backed default limiter (reads tier) globally (skip health/ready probes).
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/health' || req.path === '/ready') return next();
-  return readsLimiter(req, res, next);
+  return identityRateLimiter(req, res, (err?: unknown) => {
+    if (err) return next(err as Error);
+    if (res.headersSent) return;
+    return readsLimiter(req, res, next);
+  });
 });
 app.use(adaptiveThrottleMiddleware);
 
@@ -737,6 +778,28 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
   res.json({
     endpoints: listEndpointSlaRegistry(),
     generatedAt: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/rate-limits
+ * Rate-limit monitoring snapshot: allowed vs limited counts by tier.
+ */
+app.get('/admin/rate-limits', validateApiKey, (_req: Request, res: Response) => {
+  const cfg = loadRateLimiterConfig();
+  res.json({
+    snapshot: getRateLimitMonitorSnapshot(),
+    tiers: {
+      auth: cfg.auth,
+      writes: cfg.writes,
+      reads: cfg.reads,
+      admin: cfg.admin,
+      deposits: cfg.deposits,
+      ip: cfg.ip,
+      apiKey: cfg.apiKey,
+    },
+    headers: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After'],
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -841,12 +904,14 @@ setupSwagger(app);
 // â”€â”€â”€ Versioned API v1 Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const apiV1 = express.Router();
 app.use('/api/v1', apiV1);
+app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
+apiV1.use('/audit-logs', auditLogRouter);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks
@@ -870,6 +935,41 @@ apiV1.post('/auth/login', authIpLimiter, authLimiter, authUserLimiter, validate(
  * Rotate the refresh token and issue a new access JWT.
  */
 apiV1.post('/auth/refresh', authIpLimiter, authLimiter, authUserLimiter, validate({ body: RefreshSchema }), refreshHandler);
+
+/**
+ * POST /api/v1/webhooks — authenticated clients register an HTTPS callback
+ * instead of polling for transaction/vault events.
+ */
+apiV1.post('/webhooks', requireAuth, validate({ body: WebhookRegisterSchema }), (req: Request, res: Response) => {
+  try {
+    const { url, eventTypes, enabled, secret } = req.body;
+    const endpoint = registerWebhookEndpoint({
+      url,
+      eventTypes,
+      enabled: enabled ?? true,
+      secret,
+    });
+    res.status(201).json({
+      message: 'Webhook endpoint registered',
+      endpoint,
+    });
+  } catch (error) {
+    res.status(422).json({
+      error: 'Unprocessable Entity',
+      status: 422,
+      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
+    });
+  }
+});
+
+apiV1.get('/webhooks', requireAuth, validate({ query: PaginationQuerySchema }), (req: Request, res: Response) => {
+  const includeDeleted = req.query.includeDeleted === 'true';
+  const endpoints = listWebhookEndpoints(includeDeleted);
+  res.status(200).json({
+    endpoints,
+    metrics: getWebhookDeliveryMetrics(),
+  });
+});
 
 // Admin routes share API-key authentication and role-based authorization.
 app.use('/admin', validateApiKey, adminRbacMiddleware);
@@ -953,7 +1053,7 @@ app.get('/api/vault/apy', (_req: Request, res: Response) => {
 });
 
 // /webhooks/verify â†’ /api/v1/webhooks/verify
-app.post('/webhooks/verify', (req: Request, res: Response) => {
+app.post('/webhooks/verify', validate({ body: WebhookVerifyBodySchema }), (req: Request, res: Response) => {
   const { secret, payload, signature } = req.body || {};
   if (typeof secret !== 'string' || !secret.trim()) {
     res.status(400).json({
@@ -1156,7 +1256,7 @@ app.get(
  * Body: { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
  * Requires API key authentication.
  */
-app.post('/admin/apy/backfill', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBodySchema }), async (req: Request, res: Response) => {
   const { start, end } = req.body;
   if (!start || !end || typeof start !== 'string' || typeof end !== 'string') {
     res.status(400).json({
@@ -1270,7 +1370,7 @@ app.get('/admin/maintenance', validateApiKey, (_req: Request, res: Response) => 
  * Body: { enabled: boolean, reason?: string, retryAfterSeconds?: number }
  * Requires API key authentication.
  */
-app.post('/admin/maintenance', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggleSchema }), async (req: Request, res: Response) => {
   const { enabled, reason, retryAfterSeconds } = req.body;
   if (typeof enabled !== 'boolean') {
     res.status(400).json({
@@ -1378,7 +1478,7 @@ app.get('/admin/maintenance/windows', validateApiKey, (_req: Request, res: Respo
  * POST /admin/maintenance/windows - schedule a maintenance window
  * Body: { title: string, reason?: string, startsAt: string, endsAt: string }
  */
-app.post('/admin/maintenance/windows', validateApiKey, (req: Request, res: Response) => {
+app.post('/admin/maintenance/windows', validateApiKey, validate({ body: MaintenanceWindowBodySchema }), (req: Request, res: Response) => {
   const { title, reason, startsAt, endsAt } = req.body;
   if (typeof title !== 'string' || !title.trim()) {
     res.status(400).json({
@@ -1419,7 +1519,7 @@ app.post('/admin/maintenance/windows', validateApiKey, (req: Request, res: Respo
 /**
  * DELETE /admin/maintenance/windows/:windowId - cancel a scheduled window
  */
-app.delete('/admin/maintenance/windows/:windowId', validateApiKey, (req: Request, res: Response) => {
+app.delete('/admin/maintenance/windows/:windowId', validateApiKey, validate({ params: WindowIdParamSchema }), (req: Request, res: Response) => {
   const cancelled = cancelMaintenanceWindow(req.params.windowId);
   if (!cancelled) {
     res.status(404).json({
@@ -1479,7 +1579,7 @@ app.get('/admin/feature-flags/overrides', validateApiKey, async (_req: Request, 
  *   expiresAt: string (ISO 8601)
  * }
  */
-app.post('/admin/feature-flags/overrides', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/feature-flags/overrides', validateApiKey, validate({ body: FeatureFlagOverrideSchema }), async (req: Request, res: Response) => {
   const { flagName, enabled, scopeType, scopeValue, expiresAt } = req.body;
 
   if (!flagName || typeof flagName !== 'string') {
@@ -1704,7 +1804,7 @@ app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
  * POST /admin/cache/invalidate - Invalidate cache by pattern (legacy endpoint)
  * Requires API key authentication
  */
-app.post('/admin/cache/invalidate', validateApiKey, (req: Request, res: Response) => {
+app.post('/admin/cache/invalidate', validateApiKey, validate({ body: CacheInvalidateSchema }), (req: Request, res: Response) => {
   const { pattern } = req.body;
   if (isDryRunRequest(req)) {
     res.json({
@@ -1730,7 +1830,7 @@ app.post('/admin/cache/invalidate', validateApiKey, (req: Request, res: Response
  * POST /admin/events/replay - Manual admin endpoint to replay events for a specific ledger range
  * Requires API key authentication
  */
-app.post('/admin/events/replay', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBodySchema }), async (req: Request, res: Response) => {
   try {
     const { fromLedger, toLedger } = req.body;
     
@@ -1845,7 +1945,7 @@ app.post('/admin/events/replay', validateApiKey, async (req: Request, res: Respo
  * Grants a temporary admin override for a wallet's daily withdrawal limit.
  * Requires super-admin API key.
  */
-app.post('/admin/withdrawal-limits/override', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/withdrawal-limits/override', validateApiKey, validate({ body: WithdrawalLimitOverrideSchema }), async (req: Request, res: Response) => {
   const walletAddress = typeof req.body?.walletAddress === 'string' ? req.body.walletAddress.trim() : '';
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
   const ttlSeconds =
@@ -1943,11 +2043,10 @@ app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: R
  * Requires API key authentication.
  * Body: { "walletAddress": "G..." }
  */
-app.post('/admin/allowlist/add', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const added = addAddress(walletAddress);
   const actor = resolveActingAdminAddress(req);
@@ -1983,16 +2082,14 @@ app.post('/admin/allowlist/add', validateApiKey, async (req: Request, res: Respo
  * Requires API key authentication.
  * Body: { "walletAddress": "G..." }
  */
-app.delete('/admin/allowlist/remove', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: AllowlistWalletBodySchema }), async (req: Request, res: Response) => {
   const { walletAddress } = req.body;
   if (!walletAddress || typeof walletAddress !== 'string') {
-    res.status(400).json({ error: 'Missing or invalid walletAddress in request body' });
-    return;
+    throw new ValidationError('Missing or invalid walletAddress in request body');
   }
   const removed = removeAddress(walletAddress);
   if (!removed) {
-    res.status(404).json({ error: 'Wallet address not found in allowlist' });
-    return;
+    throw new NotFoundError('Wallet address not found in allowlist');
   }
 
   const actor = resolveActingAdminAddress(req);
@@ -2094,7 +2191,7 @@ app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Req
  * POST /admin/impersonate/sessions - start a time-bounded impersonation session
  * Requires super-admin API key.
  */
-app.post('/admin/impersonate/sessions', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/impersonate/sessions', validateApiKey, validate({ body: ImpersonationSessionBodySchema }), async (req: Request, res: Response) => {
   const actingAdminAddress = resolveActingAdminAddress(req);
   const { actor, apiKeyHash, ipAddress, userAgent } = resolveImpersonationSessionContext(req);
   const targetWallet = typeof req.body?.targetWallet === 'string' ? req.body.targetWallet.trim() : '';
@@ -2308,22 +2405,12 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
 
   if (!wallet) {
     req.adminAuditAction = 'admin.impersonate.invalid';
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'wallet path parameter is required',
-    });
-    return;
+    throw new ValidationError('wallet path parameter is required');
   }
 
   if (!hasRequiredApiKeyRole(req, 'super-admin')) {
     req.adminAuditAction = 'admin.impersonate.denied';
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required for impersonation',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required for impersonation');
   }
 
   if (!sessionId && process.env.IMPERSONATION_SESSION_STORAGE) {
@@ -2396,11 +2483,7 @@ app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: 
         ...req.adminAuditMetadata,
         error: error instanceof Error ? error.message : String(error),
       };
-      res.status(500).json({
-        error: 'Internal Server Error',
-        status: 500,
-        message: 'Failed to build impersonated vault state',
-      });
+      throw new InternalError('Failed to build impersonated vault state');
   }
 });
 
@@ -2485,21 +2568,15 @@ app.get('/admin/receipts/:id/verify', validateApiKey, async (req: Request, res: 
  * POST /admin/api-keys/register - Register a new API key
  * Requires API key authentication (for boostrapping, requires special permission)
  */
-app.post('/admin/api-keys/register', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/api-keys/register', validateApiKey, validate({ body: ApiKeyRegisterSchema }), async (req: Request, res: Response) => {
   const { key, role: requestedRole } = req.body;
   if (!key || typeof key !== 'string' || !key.trim()) {
-    res.status(400).json({ error: 'Missing key in request body' });
-    return;
+    throw new ValidationError('Missing key in request body');
   }
 
   const role = normalizeApiKeyRole(requestedRole) || 'admin';
   if (role === 'super-admin' && !hasRequiredApiKeyRole(req, 'super-admin')) {
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Super-admin role is required to register super-admin API keys',
-    });
-    return;
+    throw new ForbiddenError('Super-admin role is required to register super-admin API keys');
   }
 
   const normalizedKey = key.trim();
@@ -2534,7 +2611,7 @@ app.post('/admin/api-keys/register', validateApiKey, async (req: Request, res: R
  * Body: { oldHash: string, newKey: string }
  * Requires API key authentication.
  */
-app.post('/admin/api-keys/rotate', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/api-keys/rotate', validateApiKey, validate({ body: ApiKeyRotateSchema }), async (req: Request, res: Response) => {
   const { oldHash, newKey } = req.body || {};
   if (!isApiKeyHash(oldHash)) {
     res.status(400).json({
@@ -2605,7 +2682,7 @@ app.post('/admin/api-keys/rotate', validateApiKey, async (req: Request, res: Res
  * Body: { hash: string }
  * Requires API key authentication.
  */
-app.post('/admin/api-keys/revoke', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/api-keys/revoke', validateApiKey, validate({ body: ApiKeyRevokeSchema }), async (req: Request, res: Response) => {
   const { hash } = req.body || {};
   if (!isApiKeyHash(hash)) {
     res.status(400).json({
@@ -2726,33 +2803,25 @@ app.get('/admin/api-keys/audit-events', validateApiKey, async (req: Request, res
  * POST /admin/webhooks - register webhook endpoint for transaction events
  */
 app.post('/admin/webhooks', validateApiKey, validate({ body: WebhookRegisterSchema }), (req: Request, res: Response) => {
-  try {
-    const { url, eventTypes, enabled, secret } = req.body;
+  const { url, eventTypes, enabled, secret } = req.body;
 
-    const endpoint = registerWebhookEndpoint({
-      url,
-      eventTypes,
-      enabled: enabled ?? true,
-      secret,
-    });
+  const endpoint = registerWebhookEndpoint({
+    url,
+    eventTypes,
+    enabled: enabled ?? true,
+    secret,
+  });
 
-    res.status(201).json({
-      message: 'Webhook endpoint registered',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
-    });
-  }
+  res.status(201).json({
+    message: 'Webhook endpoint registered',
+    endpoint,
+  });
 });
 
 /**
  * POST /admin/webhooks/:id/verify - run challenge-response verification for an endpoint
  */
-app.post('/admin/webhooks/:id/verify', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/webhooks/:id/verify', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const endpoint = await verifyWebhookEndpoint(req.params.id);
     if (!endpoint) {
@@ -2789,39 +2858,26 @@ app.post('/admin/webhooks/:id/verify', validateApiKey, async (req: Request, res:
 /**
  * PATCH /admin/webhooks/:id - update webhook endpoint
  */
-app.patch('/admin/webhooks/:id', validateApiKey, validate({ body: WebhookUpdateSchema }), (req: Request, res: Response) => {
+app.patch('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSchema, body: WebhookUpdateSchema }), (req: Request, res: Response) => {
   if (!assertWebhookParameterUpdate(req, res)) {
     return;
   }
 
-  try {
-    const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
-    if (!endpoint) {
-      res.status(404).json({
-        error: 'Not Found',
-        status: 404,
-        message: 'Webhook endpoint not found',
-      });
-      return;
-    }
-
-    res.status(200).json({
-      message: 'Webhook endpoint updated',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Failed to update webhook endpoint',
-    });
+  const endpoint = updateWebhookEndpoint(req.params.id, req.body || {});
+  if (!endpoint) {
+    throw new NotFoundError('Webhook endpoint not found');
   }
+
+  res.status(200).json({
+    message: 'Webhook endpoint updated',
+    endpoint,
+  });
 });
 
 /**
  * GET /admin/webhooks - list webhook endpoints
  */
-app.get('/admin/webhooks', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/webhooks', validateApiKey, validate({ query: PaginationQuerySchema }), (req: Request, res: Response) => {
   const includeDeleted = req.query.includeDeleted === 'true';
   const limit = parseLimited(req.query.limit, 100, 1, 500);
   const allEndpoints = listWebhookEndpoints(includeDeleted);
@@ -2843,7 +2899,7 @@ app.get('/admin/webhooks', validateApiKey, (req: Request, res: Response) => {
 /**
  * DELETE /admin/webhooks/:id - soft delete webhook endpoint
  */
-app.delete('/admin/webhooks/:id', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const actor = resolveActingAdminAddress(req);
   const endpoint = deleteWebhookEndpoint(req.params.id, actor);
 
@@ -2871,7 +2927,7 @@ app.delete('/admin/webhooks/:id', validateApiKey, async (req: Request, res: Resp
 /**
  * POST /admin/webhooks/:id/restore - restore soft-deleted webhook endpoint
  */
-app.post('/admin/webhooks/:id/restore', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/webhooks/:id/restore', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const actor = resolveActingAdminAddress(req);
   const endpoint = restoreWebhookEndpoint(req.params.id, actor);
 
@@ -2899,7 +2955,7 @@ app.post('/admin/webhooks/:id/restore', validateApiKey, async (req: Request, res
 /**
  * GET /admin/webhooks/dead-letter - list permanently failed webhook deliveries
  */
-app.get('/admin/webhooks/dead-letter', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/webhooks/dead-letter', validateApiKey, validate({ query: WebhookListQuerySchema }), (req: Request, res: Response) => {
   const endpointId = typeof req.query.endpointId === 'string' ? req.query.endpointId : undefined;
   const eventType = typeof req.query.eventType === 'string' ? req.query.eventType : undefined;
   const start = typeof req.query.start === 'string' ? req.query.start : undefined;
@@ -2957,7 +3013,7 @@ app.post('/admin/webhooks/dead-letter/:id/retry', validateApiKey, async (req: Re
  * GET /admin/webhooks/deliveries - list recent webhook delivery attempts
  * Supports cursor-based pagination: ?limit=N&cursor=<opaque>
  */
-app.get('/admin/webhooks/deliveries', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/webhooks/deliveries', validateApiKey, validate({ query: PaginationQuerySchema }), (req: Request, res: Response) => {
   const limit = parseLimited(req.query.limit, 100, 1, 500);
   const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
 
@@ -2993,7 +3049,7 @@ app.get('/admin/webhooks/deliveries', validateApiKey, (req: Request, res: Respon
 /**
  * POST /api/v1/webhooks/verify - verify webhook secret/signature pairing before go-live
  */
-app.post('/api/v1/webhooks/verify', (req: Request, res: Response) => {
+app.post('/api/v1/webhooks/verify', validate({ body: WebhookVerifyBodySchema }), (req: Request, res: Response) => {
   const { secret, payload, signature } = req.body || {};
   if (typeof secret !== 'string' || !secret.trim()) {
     res.status(400).json({
@@ -3029,17 +3085,21 @@ app.post('/api/v1/webhooks/verify', (req: Request, res: Response) => {
 /**
  * GET /admin/audit/logs - list admin activity logs
  */
-app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/audit/logs', validateApiKey, validate({ query: AuditLogQuerySchema }), (req: Request, res: Response) => {
   const statusCode = req.query.statusCode ? parseInt(String(req.query.statusCode), 10) : undefined;
   const limit = parseLimited(req.query.limit, 100, 1, 500);
-
-  const logs = getAuditLogs({
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const filters = {
     actor: req.query.actor ? String(req.query.actor) : undefined,
     action: req.query.action ? String(req.query.action) : undefined,
     path: req.query.path ? String(req.query.path) : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: req.query.from ? String(req.query.from) : undefined,
+    to: req.query.to ? String(req.query.to) : undefined,
+  };
+
+  const logs = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(logs, limit);
 
   sendStandardListEnvelope(res, {
@@ -3048,6 +3108,8 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
     hasNextPage,
     extras: {
       logs: data,
+      page,
+      total: countAuditLogs(filters),
       metrics: getAuditLogMetrics(),
     },
   });
@@ -3056,18 +3118,26 @@ app.get('/admin/audit/logs', validateApiKey, (req: Request, res: Response) => {
 /**
  * GET /admin/audit-logs - list admin audit entries (Issue #253)
  */
-app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySchema }), async (req: Request, res: Response) => {
   const limit = parseLimited(req.query.limit, 50, 1, 200);
-  const statusCode = req.query.statusCode
-    ? parseLimited(req.query.statusCode, 0, 100, 599)
+  const page = parseLimited(req.query.page, 1, 1, 1000000);
+  const offset = (page - 1) * limit;
+  const statusValue = req.query.statusCode ?? req.query.status;
+  const statusCode = statusValue
+    ? parseLimited(statusValue, 0, 100, 599)
     : undefined;
-
-  const rows = getAuditLogs({
-    action: typeof req.query.action === 'string' ? req.query.action : undefined,
+  const filters = {
+    action: typeof req.query.action === 'string'
+      ? req.query.action
+      : typeof req.query.type === 'string' ? req.query.type : undefined,
     actor: typeof req.query.actor === 'string' ? req.query.actor : undefined,
+    path: typeof req.query.path === 'string' ? req.query.path : undefined,
     statusCode,
-    limit: limit + 1,
-  });
+    from: typeof req.query.from === 'string' ? req.query.from : undefined,
+    to: typeof req.query.to === 'string' ? req.query.to : undefined,
+  };
+
+  const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
   void recordAdminAuditLog(req, 'audit-logs.read', 200, {
@@ -3082,6 +3152,8 @@ app.get('/admin/audit-logs', validateApiKey, async (req: Request, res: Response)
     extras: {
       meta: {
         count: data.length,
+        total: countAuditLogs(filters),
+        page,
         limit,
         timestamp: new Date().toISOString(),
       },
@@ -3164,7 +3236,7 @@ app.get('/admin/exports/jobs', validateApiKey, async (req: Request, res: Respons
  * POST /admin/exports/jobs/:id/verify - verify a previously generated export checksum
  * Body: { checksum: string }
  */
-app.post('/admin/exports/jobs/:id/verify', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/exports/jobs/:id/verify', validateApiKey, validate({ params: IdParamSchema, body: ChecksumVerifyBodySchema }), async (req: Request, res: Response) => {
   const checksum =
     typeof req.body?.checksum === 'string'
       ? req.body.checksum.trim().toLowerCase()
@@ -3217,7 +3289,7 @@ app.post('/admin/exports/jobs/:id/verify', validateApiKey, async (req: Request, 
  * POST /admin/exports/bulk - create a new bulk export job
  * Body: { format: "csv"|"json", filters: { ... } }
  */
-app.post('/admin/exports/bulk', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/exports/bulk', validateApiKey, validate({ body: BulkExportBodySchema }), async (req: Request, res: Response) => {
   try {
     const { format, filters } = req.body;
     if (format !== 'csv' && format !== 'json') {
@@ -3386,7 +3458,7 @@ app.get('/admin/jobs/metrics', validateApiKey, (req: Request, res: Response) => 
 /**
  * POST /admin/transactions/backfill - controlled backfill of missing ledger index ranges
  */
-app.post('/admin/transactions/backfill', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/transactions/backfill', validateApiKey, validate({ body: TransactionBackfillBodySchema }), async (req: Request, res: Response) => {
   const startLedger = Number(req.body?.startLedger);
   const endLedger = Number(req.body?.endLedger);
   const batchSize = req.body?.batchSize === undefined ? undefined : Number(req.body.batchSize);
@@ -3505,7 +3577,7 @@ app.get('/admin/governance/snapshots', validateApiKey, async (req: Request, res:
 /**
  * POST /admin/governance/snapshots/export - export historical governance snapshots
  */
-app.post('/admin/governance/snapshots/export', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/governance/snapshots/export', validateApiKey, validate({ body: GovernanceSnapshotExportSchema }), async (req: Request, res: Response) => {
   const requester = resolveActingAdminAddress(req);
   const types = Array.isArray(req.body?.types)
     ? (req.body.types as string[])
@@ -3533,7 +3605,7 @@ app.post('/admin/governance/snapshots/export', validateApiKey, async (req: Reque
 /**
  * POST /admin/reports/exports - generate a report export and immutable manifest record
  */
-app.post('/admin/reports/exports', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/reports/exports', validateApiKey, validate({ body: ReportExportBodySchema }), async (req: Request, res: Response) => {
   const reportType = String(req.body?.reportType || 'transactions').trim();
   const requester = resolveActingAdminAddress(req);
   const filters =
@@ -3600,7 +3672,7 @@ app.get('/admin/reports/exports/manifests/:id', validateApiKey, async (req: Requ
 /**
  * POST /admin/reports/exports/manifests/:id/verify - verify manifest checksum
  */
-app.post('/admin/reports/exports/manifests/:id/verify', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/reports/exports/manifests/:id/verify', validateApiKey, validate({ params: IdParamSchema, body: ChecksumVerifyBodySchema }), async (req: Request, res: Response) => {
   const checksum = String(req.body?.checksum || '').trim();
   if (!checksum) {
     res.status(400).json({
@@ -4034,7 +4106,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
  * Body: { notes?: string }
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ params: IdParamSchema, body: DeadLetterResolveSchema }), async (req: Request, res: Response) => {
   const actor = resolveActingAdminAddress(req);
   const notes = typeof req.body?.notes === 'string' ? req.body.notes : undefined;
 
@@ -4113,7 +4185,7 @@ app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: R
  * Body: { ids: string[] }
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, validate({ body: DeadLetterIdsSchema }), async (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.ids) ? (req.body.ids as string[]) : [];
 
   if (ids.length === 0) {
@@ -4162,7 +4234,7 @@ app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, async (req: Requ
  * Body: { ids: string[] }
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, validate({ body: DeadLetterIdsSchema }), (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.ids) ? (req.body.ids as string[]) : [];
 
   if (ids.length === 0) {
@@ -4209,7 +4281,7 @@ app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, (req: Request,
  * Body: { batchSize?: number }
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/process', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/process', validateApiKey, validate({ body: DeadLetterProcessSchema }), async (req: Request, res: Response) => {
   const batchSize = typeof req.body?.batchSize === 'number' && req.body.batchSize > 0 ? req.body.batchSize : 10;
   const actor = resolveActingAdminAddress(req);
 
@@ -4769,7 +4841,7 @@ function checkStellarRpcDependency(): boolean {
   return getStellarRpcHealth() === 'up';
 }
 
-// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Health Probe Registration (Issue #719) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 healthProbeService.register('database', async () => {
   const health = await getDatabaseHealth();
   return health.primary === 'up' ? 'up' : 'down';
@@ -4807,7 +4879,6 @@ app.get('/health/probes', async (_req: Request, res: Response) => {
 });
 
 // â”€â”€â”€ Write-Ahead Audit Log Endpoints (Issue #707) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 /**
  * GET /admin/wal/entries
  * Lists write-ahead audit log entries with optional filters.
@@ -4924,7 +4995,7 @@ app.get('/admin/scoped-tokens/permissions', validateApiKey, (_req: Request, res:
  * Requires super-admin API key.
  * Returns the plaintext secret once; it is never stored.
  */
-app.post('/admin/scoped-tokens', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/scoped-tokens', validateApiKey, validate({ body: ScopedTokenCreateSchema }), async (req: Request, res: Response) => {
   if (!hasRequiredApiKeyRole(req, 'super-admin')) {
     res.status(403).json({ error: 'Forbidden', status: 403, message: 'Super-admin role is required to create scoped tokens' });
     return;

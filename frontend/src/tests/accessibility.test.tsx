@@ -58,6 +58,23 @@ describe("Accessibility: axe-core audit", () => {
     expect(link.getAttribute("href")).toBe("#main-content");
   });
 
+  it("skip navigation includes main content and primary nav targets", () => {
+    const { container } = render(
+      <nav className="skip-links" aria-label="Skip links">
+        <a className="skip-link" href="#main-content">
+          Skip to main content
+        </a>
+        <a className="skip-link" href="#primary-nav">
+          Skip to navigation
+        </a>
+      </nav>,
+    );
+    const links = container.querySelectorAll(".skip-link");
+    expect(links).toHaveLength(2);
+    expect(links[0].getAttribute("href")).toBe("#main-content");
+    expect(links[1].getAttribute("href")).toBe("#primary-nav");
+  });
+
   it("buttons have accessible names", async () => {
     const { container } = render(
       <div>

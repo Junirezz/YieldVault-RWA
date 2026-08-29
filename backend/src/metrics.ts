@@ -29,6 +29,43 @@ export const httpResponseTime = new Histogram({
   registers: [register],
 });
 
+export const httpRequestErrorCount = new Counter({
+  name: 'http_request_error_total',
+  help: 'Total HTTP requests completed with a client or server error status',
+  labelNames: ['method', 'route', 'status_code', 'status_class'],
+  registers: [register],
+});
+
+export const externalDependencyLatency = new Histogram({
+  name: 'external_dependency_latency_seconds',
+  help: 'Latency of external dependency probes and calls in seconds',
+  labelNames: ['dependency', 'operation', 'outcome'],
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+  registers: [register],
+});
+
+export const externalDependencyErrorCount = new Counter({
+  name: 'external_dependency_error_total',
+  help: 'Total failed external dependency probes and calls',
+  labelNames: ['dependency', 'operation'],
+  registers: [register],
+});
+
+export function observeExternalDependency(
+  dependency: string,
+  operation: string,
+  durationMs: number,
+  outcome: 'success' | 'failure',
+): void {
+  externalDependencyLatency.observe(
+    { dependency, operation, outcome },
+    durationMs / 1000,
+  );
+  if (outcome === 'failure') {
+    externalDependencyErrorCount.inc({ dependency, operation });
+  }
+}
+
 export const activeConnections = new Gauge({
   name: 'http_active_connections',
   help: 'Number of active HTTP connections',
@@ -78,9 +115,32 @@ export const cacheMissCount = new Counter({
   registers: [register],
 });
 
+export const rateLimitEvents = new Counter({
+  name: 'rate_limit_events_total',
+  help: 'Rate-limit allow and reject outcomes by enforcement tier',
+  labelNames: ['tier', 'outcome'],
+  registers: [register],
+});
+
 export const cacheEvictionCount = new Counter({
   name: 'cache_eviction_count',
   help: 'Number of cache evictions due to size limit',
+  registers: [register],
+});
+
+// --- Error / Alerting Metrics ---
+
+export const httpErrorCount = new Counter({
+  name: 'http_error_count',
+  help: 'Total number of HTTP responses with a 5xx status code (critical errors for alerting)',
+  labelNames: ['method', 'route', 'status_code'],
+  registers: [register],
+});
+
+export const httpClientErrorCount = new Counter({
+  name: 'http_client_error_count',
+  help: 'Total number of HTTP responses with a 4xx status code',
+  labelNames: ['method', 'route', 'status_code'],
   registers: [register],
 });
 

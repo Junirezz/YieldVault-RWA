@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { Toaster, toast as sonnerToast } from "sonner";
 
 export type ToastVariant = "success" | "error" | "warning" | "info";
 
@@ -33,12 +34,35 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 const DEFAULT_DURATION = 5000;
 const DEDUPE_WINDOW_MS = 3000;
+const MAX_QUEUE = 5;
 
 function generateDedupeKey(options: ToastOptions): string {
   if (options.dedupeKey) {
     return options.dedupeKey;
   }
   return `${options.title}|${options.description || ""}|${options.variant || "info"}`;
+}
+
+function pushSonner(toast: ToastItem) {
+  const payload = {
+    id: toast.id,
+    description: toast.description,
+    duration: toast.duration,
+    closeButton: true,
+  };
+  switch (toast.variant) {
+    case "success":
+      sonnerToast.success(toast.title, payload);
+      break;
+    case "error":
+      sonnerToast.error(toast.title, payload);
+      break;
+    case "warning":
+      sonnerToast.warning(toast.title, payload);
+      break;
+    default:
+      sonnerToast.info(toast.title, payload);
+  }
 }
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -48,6 +72,18 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   const nextToastId = useRef(0);
   const timeoutRefs = useRef<Map<string, number>>(new Map());
   const recentToasts = useRef<Map<string, string>>(new Map());
+  const [sonnerTheme, setSonnerTheme] = useState<"light" | "dark">("dark");
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncTheme = () => {
+      setSonnerTheme(root.getAttribute("data-theme") === "light" ? "light" : "dark");
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const dismissToast = (id: string) => {
     setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== id));
@@ -56,6 +92,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       window.clearTimeout(timeoutId);
       timeoutRefs.current.delete(id);
     }
+    sonnerToast.dismiss(id);
   };
 
   const clearAll = () => {
@@ -65,6 +102,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     timeoutRefs.current.clear();
     recentToasts.current.clear();
+    sonnerToast.dismiss();
   };
 
   const showToast = ({
@@ -74,8 +112,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   }: ToastOptions) => {
     const dedupeKey = generateDedupeKey({ ...options, variant });
     // eslint-disable-next-line react-hooks/purity -- showToast runs on user/system events
-    // Timestamp is intentionally captured at toast creation time for dedupe windows.
-    // eslint-disable-next-line react-hooks/purity -- event-handler side effect, not render output
     const now = Date.now();
 
     const existingId = recentToasts.current.get(dedupeKey);
@@ -99,8 +135,24 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       ...options,
     };
 
-    setToasts((currentToasts) => [...currentToasts, nextToast]);
+    setToasts((currentToasts) => {
+      const queued = [...currentToasts, nextToast];
+      if (queued.length <= MAX_QUEUE) {
+        return queued;
+      }
+      const dropped = queued.slice(0, queued.length - MAX_QUEUE);
+      dropped.forEach((toast) => {
+        const timeoutId = timeoutRefs.current.get(toast.id);
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+          timeoutRefs.current.delete(toast.id);
+        }
+        sonnerToast.dismiss(toast.id);
+      });
+      return queued.slice(-MAX_QUEUE);
+    });
     recentToasts.current.set(dedupeKey, id);
+    pushSonner(nextToast);
 
     const timeoutId = window.setTimeout(() => {
       dismissToast(id);
@@ -147,30 +199,20 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       }}
     >
       {children}
-      <div className="toast-viewport" aria-live="polite" aria-relevant="additions text">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`toast toast-${toast.variant}`}
-            role={toast.variant === "error" ? "alert" : "status"}
-          >
-            <div className="toast-copy">
-              <div className="toast-title">{toast.title}</div>
-              {toast.description && (
-                <div className="toast-description">{toast.description}</div>
-              )}
-            </div>
-            <button
-              type="button"
-              className="toast-dismiss"
-              aria-label={`Dismiss ${toast.title}`}
-              onClick={() => dismissToast(toast.id)}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
+      <Toaster
+        theme={sonnerTheme}
+        position="top-right"
+        closeButton
+        richColors
+        visibleToasts={MAX_QUEUE}
+        toastOptions={{
+          duration: DEFAULT_DURATION,
+          classNames: {
+            toast: "yv-sonner-toast",
+            closeButton: "yv-sonner-close",
+          },
+        }}
+      />
     </ToastContext.Provider>
   );
 };
@@ -185,3 +227,8 @@ export function useToast() {
 
   return context;
 }
+
+/** Alias matching the notification-context acceptance criteria. */
+export const NotificationProvider = ToastProvider;
+// eslint-disable-next-line react-refresh/only-export-components
+export const useNotification = useToast;

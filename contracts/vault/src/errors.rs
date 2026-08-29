@@ -93,7 +93,13 @@ pub enum VaultError {
     ProposalRejected = 36,
 
     // ── Oracle / treasury / strategy health (27–29, 37) ──────────────────────
-    /// Oracle validation failed (stale or manipulated price).
+    /// Oracle validation failed: expired heartbeat, invalid price data (zero,
+    /// negative, future timestamp, unsafe decimals/overflow), excessive
+    /// deviation from the last validated price, or an out-of-range
+    /// `set_oracle_heartbeat` configuration. See [`crate::oracle`] for the
+    /// full stale-data policy. Reused across all of `oracle::OracleError`'s
+    /// variants rather than spending a dedicated code per variant under the
+    /// 50-case cap.
     OracleValidationFailed = 27,
     /// Treasury claim quota exceeded for the current epoch.
     ClaimQuotaExceeded = 28,
@@ -144,4 +150,12 @@ pub enum VaultError {
     /// missing or non-distinct approver pair and [`VaultError::InvalidAmount`]
     /// for a non-positive amount rather than defining dedicated codes.
     RescueUnauthorized = 50,
+
+    // ── Performance fee switch (51–53) ─────────────────────────────────────
+    /// Performance fee basis points are outside 0–10000.
+    InvalidPerformanceFeeBps = 51,
+    /// Performance incentive pool address is not configured.
+    PerformanceIncentivePoolNotConfigured = 52,
+    /// Performance fee switch is in an invalid state for the requested operation.
+    InvalidPerformanceFeeSwitchState = 53,
 }
