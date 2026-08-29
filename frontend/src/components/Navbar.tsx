@@ -265,6 +265,11 @@ const Navbar: FC<NavbarProps> = ({
           </NavLink>
         )}
 
+          <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
+            <ThemeToggle />
+            <LanguageSwitcher compact />
+            {walletAddress && <span>{networkLabel}</span>}
+          </div>
         <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
           <ThemeToggle />
           {walletAddress && <span>{networkLabel}</span>}

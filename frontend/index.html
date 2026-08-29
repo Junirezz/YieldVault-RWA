@@ -32,6 +32,13 @@
           document.documentElement.setAttribute('lang', locale);
           document.documentElement.setAttribute('dir', rtl[base] ? 'rtl' : 'ltr');
         } catch (e) {}
+        try {
+          var locale = localStorage.getItem('yieldvault.locale') || 'en';
+          var rtl = { ar: true, he: true, fa: true, ur: true };
+          var base = String(locale).toLowerCase().split('-')[0];
+          document.documentElement.setAttribute('lang', locale);
+          document.documentElement.setAttribute('dir', rtl[base] ? 'rtl' : 'ltr');
+        } catch (e) {}
       })();
     </script>
   </head>
