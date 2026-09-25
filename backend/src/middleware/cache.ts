@@ -332,6 +332,18 @@ export function triggerCacheInvalidation(
   for (const hook of invalidationHooks) {
     try {
       const hookPatterns = hook(eventType, metadata);
+      // Validate and sanitize hook return value
+      if (!Array.isArray(hookPatterns)) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'invalidation_hook_error',
+            error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
+            eventType,
+          }),
+        );
+        continue;
+      }
       patterns.push(...hookPatterns);
     } catch (err) {
       console.error(
