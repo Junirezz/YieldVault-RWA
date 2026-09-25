@@ -61,6 +61,7 @@ describe('#711 API contract schema snapshots', () => {
         databaseReplica: 'up',
         prisma: 'up',
         jobs: 'up',
+        indexer: 'up',
       },
       sorobanCircuitBreaker: {
         state: 'closed',
