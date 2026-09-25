@@ -431,7 +431,9 @@ async function buildReferralStatsSnapshot(wallet: string) {
       body: {
         error: 'Not Found',
         status: 404,
+        code: 'ROUTE_NOT_FOUND',
         message: 'No referral activity found for this wallet',
+        retryable: false,
       },
     };
   }
