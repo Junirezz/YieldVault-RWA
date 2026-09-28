@@ -249,7 +249,10 @@ export function diffSchemaShapes(
     }
 
     for (const key of baselineRequired) {
-      if (!(key in baseline.properties ?? {})) {
+      // `in` binds tighter than `??`, so the parentheses are required: without
+      // them this reads as `(key in baseline.properties) ?? {}` and throws a
+      // TypeError whenever a committed snapshot has no `properties` object.
+      if (!(key in (baseline.properties ?? {}))) {
         issues.push({ path: at(key), message: 'required field missing from snapshot properties (orphaned reference)' });
       }
       if (!(key in currentProps)) {
@@ -260,7 +263,7 @@ export function diffSchemaShapes(
     }
 
     for (const key of currentRequired) {
-      if (!(key in current.properties ?? {})) {
+      if (!(key in (current.properties ?? {}))) {
         issues.push({ path: at(key), message: 'required field missing from live schema properties (invalid schema)' });
       }
       if (!baselineRequired.has(key)) {

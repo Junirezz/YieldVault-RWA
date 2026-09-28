@@ -776,7 +776,7 @@ router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), val
     });
   });
 
-  res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
+  return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
 });
 
 /**
