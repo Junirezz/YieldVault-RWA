@@ -13,6 +13,8 @@ import { Router, Request, Response } from 'express';
 import { Readable } from 'stream';
 import {
   parsePaginationQuery,
+  clampLimitNumber,
+  clampPageNumber,
   paginateWithCursor,
   paginateWithOffset,
   sortItems,
@@ -196,7 +198,7 @@ const MOCK_VAULT_HISTORY: VaultHistoryPoint[] = Array.from({ length: 365 }, (_, 
 
 // ─── Pagination Configs ─────────────────────────────────────────────────────
 
-const TRANSACTION_PAGINATION_CONFIG: Partial<PaginationConfig> = {
+export const TRANSACTION_PAGINATION_CONFIG: Partial<PaginationConfig> = {
   defaultLimit: 20,
   maxLimit: 100,
   defaultSortBy: 'timestamp',
@@ -457,7 +459,12 @@ export async function buildTransactionsResponse(
   query: WalletStateQuery
 ): Promise<PaginatedResponse<Transaction>> {
   const prisma = getPrismaClient();
-  const limit = query.limit ?? TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20;
+  // Clamp rather than trust the caller: this builder is reachable from the
+  // routes, from the legacy /api/transactions handler and from the in-process
+  // impersonation snapshot, and a raw parseInt from any of them must not be
+  // able to put a NaN, zero or oversized limit in the envelope.
+  const limit = clampLimitNumber(query.limit, TRANSACTION_PAGINATION_CONFIG);
+  const page = clampPageNumber(query.page);
   const normalizedDateRange = parseDateRangeOrThrow({ from: query.from, to: query.to });
 
   const sortBy = query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy ?? 'timestamp';
@@ -485,8 +492,8 @@ export async function buildTransactionsResponse(
       take: limit + 1,
       ...(query.cursor
         ? { cursor: { id: Buffer.from(query.cursor, 'base64url').toString('utf-8') }, skip: 1 }
-        : query.page && query.page > 1
-          ? { skip: (query.page - 1) * limit }
+        : page && page > 1
+          ? { skip: (page - 1) * limit }
           : {}),
     }),
   ]);
@@ -500,10 +507,10 @@ export async function buildTransactionsResponse(
     limit,
     total,
     hasNextPage,
-    hasPrevPage: !!(query.cursor || (query.page && query.page > 1)),
+    hasPrevPage: !!(query.cursor || (page && page > 1)),
     nextCursor: hasNextPage && data.length > 0 ? encodeCursor(data[data.length - 1].id) : null,
-    currentPage: query.page ?? null,
-    totalPages: query.page ? Math.ceil(total / limit) : null,
+    currentPage: page ?? null,
+    totalPages: page ? Math.max(1, Math.ceil(total / limit)) : null,
   });
 
   return createPaginatedResponse(mapped, pagination, {
@@ -627,7 +634,7 @@ export function buildPortfolioHoldingsResponse(
   query: WalletStateQuery
 ): PaginatedResponse<PortfolioHolding> {
   const pagination = {
-    limit: query.limit ?? PORTFOLIO_PAGINATION_CONFIG.defaultLimit ?? 20,
+    limit: clampLimitNumber(query.limit, PORTFOLIO_PAGINATION_CONFIG),
     cursor: query.cursor,
     sortBy: query.sortBy ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortBy,
     sortOrder: query.sortOrder ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
@@ -653,7 +660,7 @@ export function buildVaultHistoryResponse(
   query: Pick<WalletStateQuery, 'limit' | 'cursor' | 'sortBy' | 'sortOrder' | 'from' | 'to'>
 ): PaginatedResponse<VaultHistoryPoint> {
   const pagination = {
-    limit: query.limit ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultLimit ?? 30,
+    limit: clampLimitNumber(query.limit, VAULT_HISTORY_PAGINATION_CONFIG),
     cursor: query.cursor,
     sortBy: query.sortBy ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortBy,
     sortOrder: query.sortOrder ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',

@@ -111,10 +111,15 @@ import {
   buildTransactionExportArtifact,
   buildTransactionsResponse,
   buildVaultHistoryResponse,
+  TRANSACTION_PAGINATION_CONFIG,
 } from './listEndpoints';
 import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
 import listRouter from './listEndpoints';
-import referralRouter from './referralEndpoints';
+import referralRouter, {
+  buildReferralCodeErrorBody,
+  buildReferralStatsErrorBody,
+  buildReferralStatsNotFoundBody,
+} from './referralEndpoints';
 import auditLogRouter from './auditLogEndpoints';
 import { referralService } from './referralService';
 import {
@@ -425,30 +430,67 @@ function sendStandardListEnvelope<T>(
 
 async function buildReferralStatsSnapshot(wallet: string) {
   const normalizedWallet = normalizeWalletAddress(wallet);
-  const stats = await referralService.getReferralStats(normalizedWallet);
-  if (!stats) {
+
+  try {
+    const stats = await referralService.getReferralStats(normalizedWallet);
+
+    if (!stats) {
+      // Must be the exact envelope GET /api/v1/referrals/:wallet returns, not
+      // a hand-rolled stand-in — admin impersonation is compared against that
+      // endpoint field-for-field by the governance contract test.
+      return {
+        statusCode: 404,
+        body: buildReferralStatsNotFoundBody(),
+      };
+    }
+
     return {
-      statusCode: 404,
-      body: {
-        error: 'Not Found',
-        status: 404,
-        code: 'ROUTE_NOT_FOUND',
-        message: 'No referral activity found for this wallet',
-        retryable: false,
-      },
+      statusCode: 200,
+      body: stats,
+    };
+  } catch (error) {
+    // Same reasoning as the 404 above. The route reports a failed lookup as a
+    // 500 with the canonical envelope; letting the rejection escape instead
+    // would 500 the entire impersonation response with a different message, so
+    // one broken sub-resource would take the whole snapshot with it (#1319).
+    logger.log('error', 'Error building referral stats snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralStatsErrorBody(),
     };
   }
+}
 
-  return {
-    statusCode: 200,
-    body: stats,
-  };
+async function buildReferralCodeSnapshot(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+
+  try {
+    const code = await referralService.getOrCreateReferralCode(normalizedWallet);
+    return {
+      statusCode: 200,
+      body: { code },
+    };
+  } catch (error) {
+    logger.log('error', 'Error building referral code snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralCodeErrorBody(),
+    };
+  }
 }
 
 async function buildWalletTransactionsSnapshot(wallet: string) {
   const normalizedWallet = normalizeWalletAddress(wallet);
   const prisma = getPrismaClient();
-  const limit = 20;
+  // Shared with GET /api/v1/transactions so the proxy can never drift to a
+  // different page size than the endpoint it stands in for (#1322).
+  const limit = TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20;
   const where = { user: normalizedWallet };
   const [total, transactions] = await Promise.all([
     prisma.transaction.count({ where }),
@@ -486,10 +528,7 @@ async function buildImpersonatedVaultState(wallet: string) {
     portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: normalizedWallet }),
     vaultHistory: buildVaultHistoryResponse({}),
     referralStats: await buildReferralStatsSnapshot(normalizedWallet),
-    referralCode: {
-      statusCode: 200,
-      body: { code: await referralService.getOrCreateReferralCode(normalizedWallet) },
-    },
+    referralCode: await buildReferralCodeSnapshot(normalizedWallet),
   };
 }
 

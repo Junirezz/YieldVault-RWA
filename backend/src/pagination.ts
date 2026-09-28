@@ -96,6 +96,52 @@ export const DEFAULT_PAGINATION_CONFIG: PaginationConfig = {
 // ─── Query Parsing ──────────────────────────────────────────────────────────
 
 /**
+ * Clamp a parsed 1-based page number to a usable value.
+ *
+ * Non-numeric, non-finite and non-positive values all become 1 so that
+ * out-of-range `page` params resolve to the first page instead of producing a
+ * negative offset or a negative `currentPage` in the response envelope.
+ *
+ * This is the single definition of page clamping: `parsePaginationQuery` and the
+ * list-response builders both route through it so the request parser and the
+ * response metadata can never disagree about what a given `page` means.
+ */
+export function clampPageNumber(page: number | undefined): number | undefined {
+  if (page === undefined) {
+    return undefined;
+  }
+  return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+}
+
+/**
+ * Clamp a requested page size into the endpoint's usable range.
+ *
+ * Undefined, non-numeric, non-finite and non-positive values all fall back to
+ * the endpoint default; anything above `maxLimit` is capped at `maxLimit`. This
+ * never rejects — a `limit` the caller could not use becomes a valid page size
+ * instead of a 400, which is what the contract tests require of every list
+ * endpoint.
+ *
+ * Like `clampPageNumber`, this is the single definition of limit clamping:
+ * `parsePaginationQuery` and the list-response builders both route through it,
+ * so a hand-rolled `parseInt(req.query.limit)` in a route handler can no longer
+ * leak a `NaN`, zero or oversized `limit` into a pagination envelope.
+ */
+export function clampLimitNumber(
+  limit: number | undefined,
+  config: Partial<PaginationConfig> = {}
+): number {
+  const mergedConfig = { ...DEFAULT_PAGINATION_CONFIG, ...config };
+
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return mergedConfig.defaultLimit;
+  }
+
+  const floored = Math.floor(limit);
+  return floored > 0 ? Math.min(floored, mergedConfig.maxLimit) : mergedConfig.defaultLimit;
+}
+
+/**
  * Parse and validate pagination query parameters from request.
  *
  * @param req - Express request object
@@ -109,28 +155,20 @@ export function parsePaginationQuery(
   const mergedConfig = { ...DEFAULT_PAGINATION_CONFIG, ...config };
   const query: PaginationQuery = {};
 
-  // Parse limit
+  // Parse limit (clamped — never rejected)
   if (req.query.limit !== undefined) {
-    const limit = parseInt(req.query.limit as string, 10);
-    if (!isNaN(limit) && limit > 0) {
-      query.limit = Math.min(limit, mergedConfig.maxLimit);
-    }
+    query.limit = clampLimitNumber(parseInt(req.query.limit as string, 10), mergedConfig);
   }
-  query.limit = query.limit || mergedConfig.defaultLimit;
+  query.limit = query.limit ?? mergedConfig.defaultLimit;
 
   // Parse cursor (opaque string, no validation needed)
   if (req.query.cursor !== undefined && typeof req.query.cursor === 'string') {
     query.cursor = req.query.cursor;
   }
 
-  // Parse page (1-based)
+  // Parse page (1-based, clamped — never rejected)
   if (req.query.page !== undefined) {
-    const page = parseInt(req.query.page as string, 10);
-    if (!isNaN(page) && page > 0) {
-      query.page = page;
-    } else {
-      query.page = 1;
-    }
+    query.page = clampPageNumber(parseInt(req.query.page as string, 10));
   }
 
   // Parse sortBy
@@ -167,12 +205,13 @@ export function paginateWithCursor<T>(
   query: PaginationQuery,
   getCursor: (item: T) => string
 ): { data: T[]; pagination: PaginationMeta } {
-  const limit = query.limit || DEFAULT_PAGINATION_CONFIG.defaultLimit;
+  const limit = clampLimitNumber(query.limit);
+  const page = clampPageNumber(query.page);
   let startIndex = 0;
   const invalidCursor = false;
 
-  if (query.page && query.page > 0) {
-    startIndex = (query.page - 1) * limit;
+  if (page && page > 1) {
+    startIndex = (page - 1) * limit;
   }
 
   // Find starting position based on cursor
@@ -184,11 +223,11 @@ export function paginateWithCursor<T>(
         pagination: createPaginationEnvelope({
           count: 0,
           limit,
-          total: query.page ? items.length : null,
+          total: page ? items.length : null,
           hasNextPage: false,
           hasPrevPage: false,
-          currentPage: query.page ? Math.max(1, query.page) : null,
-          totalPages: query.page ? Math.max(1, Math.ceil(items.length / limit)) : null,
+          currentPage: page ?? null,
+          totalPages: page ? Math.max(1, Math.ceil(items.length / limit)) : null,
         }),
       };
     }
@@ -221,8 +260,8 @@ export function paginateWithCursor<T>(
     total: items.length,
     hasNextPage: hasMore,
     hasPrevPage: startIndex > 0,
-    currentPage: query.page || null,
-    totalPages: query.page ? Math.max(1, Math.ceil(items.length / limit)) : null,
+    currentPage: page ?? null,
+    totalPages: page ? Math.max(1, Math.ceil(items.length / limit)) : null,
   });
 
   if (hasMore && data.length > 0) {
@@ -251,8 +290,8 @@ export function paginateWithOffset<T>(
   items: T[],
   query: PaginationQuery
 ): { data: T[]; pagination: PaginationMeta } {
-  const limit = query.limit || DEFAULT_PAGINATION_CONFIG.defaultLimit;
-  const page = query.page || 1;
+  const limit = clampLimitNumber(query.limit);
+  const page = clampPageNumber(query.page) ?? 1;
   const startIndex = (page - 1) * limit;
   const endIndex = startIndex + limit;
 

@@ -12,6 +12,58 @@ export interface ApiErrorOptions {
   error?: string;
 }
 
+/**
+ * Canonical wire shape for every error response.
+ *
+ * `error`/`status`/`code`/`message`/`retryable` are always present; `details`,
+ * `correlationId` and `traceId` are only emitted when known.
+ */
+export interface ApiErrorBody {
+  error: string;
+  status: number;
+  code: string;
+  message: string;
+  retryable: boolean;
+  details?: unknown;
+  correlationId?: string;
+  traceId?: string;
+}
+
+export interface BuildApiErrorBodyOptions {
+  status?: number;
+  code?: string;
+  message: string;
+  details?: unknown;
+  retryable?: boolean;
+  error?: string;
+  correlationId?: string;
+  traceId?: string;
+}
+
+/**
+ * Build the canonical error envelope for a status/message pair.
+ *
+ * Every code path that produces an error body must go through this helper —
+ * `sendApiError` for thrown/structured errors, `apiErrorContractMiddleware`
+ * for handlers that hand-roll `res.status(n).json({ error, message })`, and
+ * in-process snapshot builders that stand in for an HTTP endpoint. Synthesizing
+ * a response outside this helper is what produced bodies that matched a route
+ * in name but drifted from the real wire shape.
+ */
+export function buildApiErrorBody(options: BuildApiErrorBodyOptions): ApiErrorBody {
+  const status = options.status ?? 500;
+  return {
+    error: options.error ?? statusLabel(status),
+    status,
+    code: options.code ?? defaultErrorCode(status),
+    message: options.message,
+    retryable: options.retryable ?? status >= 500,
+    ...(options.details !== undefined ? { details: options.details } : {}),
+    ...(options.correlationId ? { correlationId: options.correlationId } : {}),
+    ...(options.traceId ? { traceId: options.traceId } : {}),
+  };
+}
+
 export function sendApiError(
   req: Request,
   res: Response,
@@ -24,16 +76,18 @@ export function sendApiError(
     res.setHeader('Retry-After', String(options.retryAfterSeconds));
   }
 
-  res.status(options.status).json({
-    error: options.error ?? statusLabel(options.status),
-    status: options.status,
-    code: options.code,
-    message: options.message,
-    retryable: options.retryable ?? options.status >= 500,
-    ...(options.details !== undefined ? { details: options.details } : {}),
-    ...(correlationId ? { correlationId } : {}),
-    ...(traceId ? { traceId } : {}),
-  });
+  res.status(options.status).json(
+    buildApiErrorBody({
+      error: options.error,
+      status: options.status,
+      code: options.code,
+      message: options.message,
+      retryable: options.retryable,
+      details: options.details,
+      correlationId,
+      ...(traceId ? { traceId } : {}),
+    })
+  );
 }
 
 export function apiErrorContractMiddleware(
@@ -52,13 +106,20 @@ export function apiErrorContractMiddleware(
       return json(body);
     }
 
+    // Every field is passed explicitly so this normalization keeps its original
+    // defaults; the shared builder supplies the shape (key set and order), not
+    // the fallback values.
     return json({
       ...errorBody,
-      error: typeof errorBody.error === 'string' ? errorBody.error : statusLabel(res.statusCode),
-      status: typeof errorBody.status === 'number' ? errorBody.status : res.statusCode,
-      code: typeof errorBody.code === 'string' ? errorBody.code : defaultErrorCode(res.statusCode),
-      message: typeof errorBody.message === 'string' ? errorBody.message : String(errorBody.error),
-      retryable: typeof errorBody.retryable === 'boolean' ? errorBody.retryable : res.statusCode >= 500,
+      ...buildApiErrorBody({
+        error: typeof errorBody.error === 'string' ? errorBody.error : statusLabel(res.statusCode),
+        status: typeof errorBody.status === 'number' ? errorBody.status : res.statusCode,
+        code: typeof errorBody.code === 'string' ? errorBody.code : defaultErrorCode(res.statusCode),
+        message:
+          typeof errorBody.message === 'string' ? errorBody.message : String(errorBody.error),
+        retryable: typeof errorBody.retryable === 'boolean' ? errorBody.retryable : res.statusCode >= 500,
+        details: errorBody.details,
+      }),
     });
   }) as Response['json'];
 
