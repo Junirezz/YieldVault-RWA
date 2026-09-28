@@ -262,6 +262,7 @@ export function diffSchemaShapes(
     for (const key of currentRequired) {
       if (!(key in current.properties ?? {})) {
         issues.push({ path: at(key), message: 'required field missing from live schema properties (invalid schema)' });
+      }
       if (!baselineRequired.has(key)) {
         issues.push({ path: at(key), message: 'field is now required — regenerate snapshots with npm run snapshots:write' });
       }
