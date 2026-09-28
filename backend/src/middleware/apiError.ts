@@ -10,6 +10,9 @@ export interface ApiErrorOptions {
   retryable?: boolean;
   retryAfterSeconds?: number | null;
   error?: string;
+  summary?: string;
+  errors?: unknown[];
+  path?: string;
 }
 
 /**
@@ -17,6 +20,11 @@ export interface ApiErrorOptions {
  *
  * `error`/`status`/`code`/`message`/`retryable` are always present; `details`,
  * `correlationId` and `traceId` are only emitted when known.
+ *
+ * `summary`, `errors` and `path` are additive and only set by the callers that
+ * have that information: `errors` mirrors `details` on validation failures so
+ * clients can read the field list under either key, and `path` is set by the
+ * catch-all route handler.
  */
 export interface ApiErrorBody {
   error: string;
@@ -27,6 +35,9 @@ export interface ApiErrorBody {
   details?: unknown;
   correlationId?: string;
   traceId?: string;
+  summary?: string;
+  errors?: unknown[];
+  path?: string;
 }
 
 export interface BuildApiErrorBodyOptions {
@@ -38,6 +49,9 @@ export interface BuildApiErrorBodyOptions {
   error?: string;
   correlationId?: string;
   traceId?: string;
+  summary?: string;
+  errors?: unknown[];
+  path?: string;
 }
 
 /**
@@ -59,6 +73,9 @@ export function buildApiErrorBody(options: BuildApiErrorBodyOptions): ApiErrorBo
     message: options.message,
     retryable: options.retryable ?? status >= 500,
     ...(options.details !== undefined ? { details: options.details } : {}),
+    ...(options.summary !== undefined ? { summary: options.summary } : {}),
+    ...(options.errors !== undefined ? { errors: options.errors } : {}),
+    ...(options.path !== undefined ? { path: options.path } : {}),
     ...(options.correlationId ? { correlationId: options.correlationId } : {}),
     ...(options.traceId ? { traceId: options.traceId } : {}),
   };
@@ -84,6 +101,9 @@ export function sendApiError(
       message: options.message,
       retryable: options.retryable,
       details: options.details,
+      summary: options.summary,
+      errors: options.errors,
+      path: options.path,
       correlationId,
       ...(traceId ? { traceId } : {}),
     })

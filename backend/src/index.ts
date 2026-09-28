@@ -5443,6 +5443,10 @@ app.use((req: Request, res: Response) => {
     status: 404,
     code: 'ROUTE_NOT_FOUND',
     message: `Cannot ${req.method} ${req.originalUrl}`,
+    // `path` is also surfaced at the top level because that is where the
+    // documented not-found envelope puts it; `details.path` stays for callers
+    // that already read the field from there.
+    path: req.originalUrl,
     details: { path: req.originalUrl },
     retryable: false,
   });

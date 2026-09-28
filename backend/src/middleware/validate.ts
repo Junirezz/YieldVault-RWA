@@ -244,11 +244,17 @@ export function validate(schemas: ValidateTargets) {
           message: e.message,
         }));
 
+        // `details` carries the field list for clients that read the canonical
+        // key; `errors` mirrors it because the webhook and admin validation
+        // contract documents the field list under `errors`, and `summary` is the
+        // stable human-readable label those clients assert on.
         sendApiError(req, res, {
           status: 400,
           code: 'VALIDATION_ERROR',
+          summary: 'Request validation failed',
           message: formatZodError(issues),
           details,
+          errors: details,
           retryable: false,
         });
         return;
