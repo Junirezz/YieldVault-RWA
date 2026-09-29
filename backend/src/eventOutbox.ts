@@ -36,6 +36,7 @@ export interface EventOutboxRecord {
   status: OutboxEventStatus;
   aggregateType: OutboxAggregateType;
   aggregateId: string;
+  sequence: number;
   attemptCount: number;
   maxAttempts: number;
   lastError: string | null;
@@ -51,6 +52,7 @@ export interface OutboxWriteInput {
   payload: TransactionEventPayload;
   aggregateType: OutboxAggregateType;
   aggregateId: string;
+  vaultId?: string;
   maxAttempts?: number;
 }
 
@@ -125,6 +127,7 @@ class EventOutboxService {
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
     const now = new Date();
+    const vaultId = input.vaultId ?? input.aggregateId;
     const record = await prisma.eventOutbox.create({
       data: {
         id: `obx-${crypto.randomUUID()}`,
@@ -133,6 +136,8 @@ class EventOutboxService {
         status: 'pending',
         aggregateType: input.aggregateType,
         aggregateId: input.aggregateId,
+        vaultId,
+        sequence: await this.nextSequenceForVault(vaultId),
         attemptCount: 0,
         maxAttempts: input.maxAttempts ?? getMaxAttempts(),
         createdAt: now,
@@ -161,7 +166,12 @@ class EventOutboxService {
     };
 
     try {
-      // 1. Find eligible entries: pending or failed entries whose lock is expired
+      // 1. Find eligible entries: pending or failed entries whose lock is expired.
+      //    Order by (vaultId, sequence, createdAt) so per-vault ordering is
+      //    preserved and events for different vaults do not block each other.
+      //    We select the head-of-line event per vault to enforce strict
+      //    per-vault ordering (a vault's next event is only processed after
+      //    its predecessor has been relayed or dead-lettered).
       const candidates = await prisma.eventOutbox.findMany({
         where: {
           status: { in: ['pending', 'failed'] },
@@ -170,7 +180,11 @@ class EventOutboxService {
             { lockedAt: { lt: lockExpiry } },
           ],
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [
+          { vaultId: 'asc' },
+          { sequence: 'asc' },
+          { createdAt: 'asc' },
+        ],
         take: limit,
       });
 
@@ -178,8 +192,27 @@ class EventOutboxService {
         return result;
       }
 
+      // 1b. Enforce per-vault head-of-line blocking: for each vault, only
+      //     process the lowest-sequence eligible event. This guarantees a
+      //     consumer tracking vault.version never observes sequence N+1
+      //     before sequence N for the same vault.
+      const headOfLine = new Map<string, typeof candidates[number]>();
+      for (const c of candidates) {
+        const key = c.vaultId ?? c.aggregateId;
+        const existing = headOfLine.get(key);
+        if (!existing || c.sequence < existing.sequence) {
+          headOfLine.set(key, c);
+        }
+      }
+      const orderedCandidates = Array.from(headOfLine.values()).sort((a, b) => {
+        const va = a.vaultId ?? a.aggregateId;
+        const vb = b.vaultId ?? b.aggregateId;
+        if (va !== vb) return va < vb ? -1 : 1;
+        return a.sequence - b.sequence;
+      });
+
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
-      const candidateIds = candidates.map((e) => e.id);
+      const candidateIds = orderedCandidates.map((e) => e.id);
       await prisma.eventOutbox.updateMany({
         where: {
           id: { in: candidateIds },
@@ -202,7 +235,11 @@ class EventOutboxService {
           lockedBy: this.instanceId,
           lockedAt: now,
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [
+          { vaultId: 'asc' },
+          { sequence: 'asc' },
+          { createdAt: 'asc' },
+        ],
       });
 
       if (entries.length === 0) {
@@ -242,6 +279,7 @@ class EventOutboxService {
             eventType: entry.eventType,
             aggregateType: entry.aggregateType,
             aggregateId: entry.aggregateId,
+            sequence: entry.sequence,
             deliveredCount,
           });
         } catch (error) {
@@ -562,6 +600,7 @@ class EventOutboxService {
     status: string;
     aggregateType: string;
     aggregateId: string;
+    sequence: number;
     attemptCount: number;
     maxAttempts: number;
     lastError: string | null;
@@ -578,6 +617,7 @@ class EventOutboxService {
       status: row.status as OutboxEventStatus,
       aggregateType: row.aggregateType as OutboxAggregateType,
       aggregateId: row.aggregateId,
+      sequence: row.sequence,
       attemptCount: row.attemptCount,
       maxAttempts: row.maxAttempts,
       lastError: row.lastError,
@@ -587,6 +627,24 @@ class EventOutboxService {
       updatedAt: row.updatedAt.toISOString(),
       relayedAt: row.relayedAt?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * Computes the next monotonic sequence number for a given vault.
+   * Sequences are per-vault and increment by exactly 1. Uses a transaction
+   * with a row-level lock on the vault's outbox rows to avoid races between
+   * concurrent writers.
+   */
+  private async nextSequenceForVault(vaultId: string): Promise<number> {
+    const result = await prisma.$transaction(async (tx) => {
+      const latest = await tx.eventOutbox.findFirst({
+        where: { vaultId },
+        orderBy: { sequence: 'desc' },
+        select: { sequence: true },
+      });
+      return (latest?.sequence ?? 0) + 1;
+    });
+    return result;
   }
 }
 

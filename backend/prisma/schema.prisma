@@ -573,6 +573,7 @@ model EventOutbox {
   status        String    @default("pending") // pending | relayed | failed | dead_letter
   aggregateType String    // e.g. "transaction", "vault"
   aggregateId   String    // e.g. transaction id, vault id
+  sequence      Int       @default(0) // monotonic per aggregateId (vaultId)
   attemptCount  Int       @default(0)
   maxAttempts   Int       @default(3)
   lastError     String?
@@ -585,6 +586,7 @@ model EventOutbox {
   @@index([status])
   @@index([status, createdAt])
   @@index([aggregateType, aggregateId])
+  @@index([aggregateType, aggregateId, sequence])
   @@index([lockedAt])
   @@index([createdAt])
 }

@@ -32,6 +32,8 @@ CREATE TABLE "EventOutbox" (
     "status" TEXT NOT NULL DEFAULT 'pending',
     "aggregateType" TEXT NOT NULL,
     "aggregateId" TEXT NOT NULL,
+    "vaultId" TEXT,
+    "sequence" INTEGER,
     "attemptCount" INTEGER NOT NULL DEFAULT 0,
     "maxAttempts" INTEGER NOT NULL DEFAULT 3,
     "lastError" TEXT,
@@ -52,7 +54,8 @@ ALTER TABLE "BulkExportJob" ADD COLUMN "version" INTEGER DEFAULT 1 NOT NULL;
 ALTER TABLE "VaultState" ADD COLUMN "version" INTEGER DEFAULT 1 NOT NULL;
 
 -- CreateIndex
-CREATE INDEX "AdminConfigChange_configType_idx" ON "AdminConfigChange"("configType");
+CREATE INDEX "AdminConfigChange_configType_idx" ON "AdminConfigChange"
+configType");
 
 -- CreateIndex
 CREATE INDEX "AdminConfigChange_createdAt_idx" ON "AdminConfigChange"("createdAt");
@@ -86,3 +89,17 @@ CREATE INDEX "EventOutbox_lockedAt_idx" ON "EventOutbox"("lockedAt");
 
 -- CreateIndex
 CREATE INDEX "EventOutbox_createdAt_idx" ON "EventOutbox"("createdAt");
+
+-- CreateIndex: per-vault ordering for the outbox poller.
+-- The poller selects pending rows ordered by "vaultId", "sequence" so that
+-- events for a given vault are relayed in the order they were enqueued,
+-- while events for different vaults do not block each other.
+CREATE INDEX "EventOutbox_vaultId_sequence_idx" ON "EventOutbox"("vaultId", "sequence");
+
+-- CreateIndex: supports the per-vault status scan with FOR UPDATE SKIP LOCKED.
+CREATE INDEX "EventOutbox_vaultId_status_sequence_idx" ON "EventOutbox"("vaultId", "status", "sequence");
+
+-- Ensure sequence is monotonic and unique per vault.
+-- Partial index excludes rows with NULL vaultId or NULL sequence
+-- so legacy / non-vault events are not affected.
+CREATE UNIQUE INDEX "EventOutbox_vaultId_sequence_key" ON "EventOutbox"("vaultId", "sequence") WHERE "vaultId" IS NOT NULL AND "sequence" IS NOT NULL;
