@@ -419,3 +419,33 @@ export function startIdempotencyCleanupTask(intervalMs = 3600000): NodeJS.Timer 
     });
   }, intervalMs);
 }
+
+// ─── Fingerprint helper ───────────────────────────────────────────────────────
+
+export function getIdempotencyHashThreshold(): number {
+  return parseInt(process.env.IDEMPOTENCY_HASH_THRESHOLD_BYTES || '4096', 10);
+}
+
+export function buildIdempotencyFingerprint(payload: unknown): string {
+  const stable = stableStringify(payload);
+  const byteLength = Buffer.byteLength(stable, 'utf-8');
+  if (byteLength > getIdempotencyHashThreshold()) {
+    return `hashv1:${crypto.createHash('sha256').update(stable).digest('hex')}`;
+  }
+  return stable;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null) return 'null';
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (typeof value !== 'object') return JSON.stringify(value);
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const serialized = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+  return `{${serialized.join(',')}}`;
+}
