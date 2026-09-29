@@ -205,4 +205,30 @@ export const VaultStrategyBodySchema = z.object({
   walletAddress: z.string().optional(),
 });
 
+/**
+ * POST /admin/vaults request body.
+ *
+ * - name: trimmed, 1–50 characters.
+ * - symbol: trimmed, 1–10 uppercase alphanumeric characters.
+ * - tenantId: required, non-empty string.
+ *
+ * `.trim()` runs before `.min(1)` so a whitespace-only value (e.g. " ")
+ * fails validation here and never reaches the database layer.
+ */
+export const CreateVaultBodySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '`name` must not be empty')
+    .max(50, '`name` must be 50 characters or fewer'),
+  symbol: z
+    .string()
+    .trim()
+    .min(1, '`symbol` must not be empty')
+    .max(10, '`symbol` must be 10 characters or fewer')
+    .regex(/^[A-Z0-9]+$/, '`symbol` must contain only uppercase letters and digits'),
+  tenantId: z.string().min(1, '`tenantId` is required'),
+});
+
 export const EmptyBodySchema = z.object({}).passthrough();
+

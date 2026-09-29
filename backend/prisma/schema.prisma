@@ -615,6 +615,8 @@ model WriteAheadAuditEntry {
 model Vault {
   id        String    @id @default(uuid())
   tenantId  String
+  name      String
+  symbol    String
   aum       Float     @default(0)
   tvlUsd    String?
   createdAt DateTime  @default(now())
@@ -675,6 +677,8 @@ model WalletTenantAssociation {
 
   @@index([walletAddress, tenantId])
   @@index([tenantId])
+}
+
 model IdempotencyKey {
   id            String    @id @default(uuid())
   keyId         String

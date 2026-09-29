@@ -61,7 +61,7 @@ import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema } from './middleware/validate';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware, createTimeoutFor } from './middleware/timeoutMiddleware';
@@ -5368,6 +5368,58 @@ if (process.env.NODE_ENV !== 'test') {
   // Initialize job governance from persisted dead-letter records
   void initializeJobGovernance();
 }
+
+// ─── Vault management ────────────────────────────────────────────────────────
+
+/**
+ * POST /admin/vaults
+ *
+ * Creates a new vault for a tenant.
+ *
+ * Body: { name: string, symbol: string, tenantId: string }
+ *
+ * Validation is handled entirely by CreateVaultBodySchema (which trims
+ * whitespace before checking min/max lengths), so no manual trim() calls
+ * are needed in this handler. A whitespace-only name like " " fails schema
+ * validation and returns 400 before any DB write is attempted.
+ */
+app.post(
+  '/admin/vaults',
+  validateApiKey,
+  validate({ body: CreateVaultBodySchema }),
+  async (req: Request, res: Response) => {
+    const { name, symbol, tenantId } = req.body as {
+      name: string;
+      symbol: string;
+      tenantId: string;
+    };
+
+    const prismaClient = getPrismaClient();
+    const vault = await prismaClient.vault.create({
+      data: { name, symbol, tenantId },
+    });
+
+    void recordAdminAuditLog(req, 'vault.created', 201, {
+      vaultId: vault.id,
+      name: vault.name,
+      symbol: vault.symbol,
+      tenantId: vault.tenantId,
+      actor: resolveActingAdminAddress(req),
+    });
+
+    res.status(201).json({
+      vault: {
+        id: vault.id,
+        name: vault.name,
+        symbol: vault.symbol,
+        tenantId: vault.tenantId,
+        aum: vault.aum,
+        createdAt: vault.createdAt.toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
 
 // Normalize dependency and unhandled application failures before the 404 route.
 app.use(errorBoundaryMiddleware);
