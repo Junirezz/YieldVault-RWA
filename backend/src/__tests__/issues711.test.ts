@@ -8,10 +8,11 @@ import {
   diffSchemaShapes,
   generateSnapshotFor,
   loadSnapshot,
+  snapshotPathFor,
   validateResponseAgainstSchema,
-  writeAllSnapshots,
   zodToJsonShape,
   HealthResponseSchema,
+  JsonSchemaShape,
 } from '../apiContractSnapshots';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,10 +20,6 @@ import * as path from 'path';
 const SNAPSHOT_DIR = path.join(__dirname, '..', '..', 'schema-snapshots');
 
 describe('#711 API contract schema snapshots', () => {
-  beforeAll(() => {
-    writeAllSnapshots();
-  });
-
   it('defines snapshots for all critical public endpoints', () => {
     expect(CRITICAL_ENDPOINTS.length).toBeGreaterThanOrEqual(4);
     for (const endpoint of CRITICAL_ENDPOINTS) {
@@ -47,11 +44,11 @@ describe('#711 API contract schema snapshots', () => {
   });
 
   it('detects newly added required fields as breaking changes', () => {
-    const baseline = zodToJsonShape(HealthResponseSchema);
-    const current = JSON.parse(JSON.stringify(baseline)) as typeof baseline;
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
     // Simulate an older snapshot that is missing the 'indexer' field
-    delete current.properties?.checks?.properties?.indexer;
-    current.properties!.checks!.required = (current.properties!.checks!.required ?? []).filter(
+    delete baseline.properties?.checks?.properties?.indexer;
+    baseline.properties!.checks!.required = (baseline.properties!.checks!.required ?? []).filter(
       (k: string) => k !== 'indexer',
     );
 
@@ -171,5 +168,27 @@ describe('#711 API contract schema snapshots', () => {
     current.properties.newField = { type: 'string' };
     const issues = diffSchemaShapes(baseline, current, 'GET /health');
     expect(issues.some((issue) => issue.message === 'new field added to live schema (snapshot drift)' && issue.path === 'GET /health.newField')).toBe(true);
+  });
+
+  // #1378: committed snapshots must be generator output, not hand-edited, and
+  // must carry the indexer check that /health and /ready emit.
+  it('committed snapshots match generator output byte-for-byte', () => {
+    for (const endpoint of CRITICAL_ENDPOINTS) {
+      const committed = fs.readFileSync(snapshotPathFor(endpoint), 'utf8');
+      expect(committed).toBe(JSON.stringify(generateSnapshotFor(endpoint), null, 2) + '\n');
+    }
+  });
+
+  it('health and ready snapshots include the indexer check', () => {
+    const health = loadSnapshot('GET /health');
+    expect(health?.properties?.checks?.properties?.indexer).toEqual({
+      type: 'string',
+      enum: ['up', 'down', 'degraded', 'unknown'],
+    });
+    expect(health?.properties?.checks?.required).toContain('indexer');
+
+    const ready = loadSnapshot('GET /ready');
+    expect(ready?.properties?.dependencies?.properties?.indexer).toEqual({ type: 'boolean' });
+    expect(ready?.properties?.dependencies?.required).toContain('indexer');
   });
 });
