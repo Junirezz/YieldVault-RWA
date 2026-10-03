@@ -168,6 +168,10 @@ class EventOutboxService {
    * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
+    if (!prisma.eventOutbox) {
+      throw new Error('prisma.eventOutbox is not initialized. Ensure Prisma schema includes eventOutbox model.');
+    }
+
     assertEventOutboxModelAvailable();
     const now = new Date();
     const record = await getEventOutboxDelegate().create({

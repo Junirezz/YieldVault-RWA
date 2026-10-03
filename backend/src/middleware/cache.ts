@@ -338,6 +338,7 @@ export function triggerCacheInvalidation(
   for (const hook of invalidationHooks) {
     try {
       const hookPatterns = hook(eventType, metadata);
+      // Validate and sanitize hook return value
       if (hookPatterns instanceof Promise) {
         void hookPatterns.catch((err) => {
           console.error(
@@ -359,12 +360,16 @@ export function triggerCacheInvalidation(
         console.error(
           JSON.stringify({
             level: 'error',
+            event: 'invalidation_hook_error',
+            error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
+            eventType,
             event: 'invalidation_hook_invalid_return',
             error: 'Invalidation hook must return an array of cache key patterns',
           }),
         );
         continue;
       }
+      patterns.push(...hookPatterns);
       patterns.push(...hookPatterns.filter((pattern): pattern is string => typeof pattern === 'string'));
     } catch (err) {
       console.error(
