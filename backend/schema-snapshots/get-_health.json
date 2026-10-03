@@ -81,6 +81,15 @@
             "degraded",
             "unknown"
           ]
+        },
+        "indexer": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "degraded",
+            "unknown"
+          ]
         }
       },
       "required": [
@@ -90,7 +99,8 @@
         "databasePrimary",
         "databaseReplica",
         "prisma",
-        "jobs"
+        "jobs",
+        "indexer"
       ],
       "additionalProperties": false
     },

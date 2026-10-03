@@ -4,7 +4,10 @@
 //! required conditions are met, preventing stale proposals and invalid state transitions.
 
 use crate::VaultError;
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{Address, Vec};
+
+#[cfg(test)]
+use soroban_sdk::Env;
 
 /// Configuration for governance validation.
 ///
@@ -47,7 +50,7 @@ impl GovernanceValidator {
     /// - `config`: Governance configuration with quorum requirement
     ///
     /// # Errors
-    /// - Returns `VaultError::InsufficientGovernanceVotes` if quorum not met
+    /// - Returns `VaultError::QuorumNotReached` if quorum not met
     ///
     /// # Examples
     /// ```ignore
@@ -58,7 +61,7 @@ impl GovernanceValidator {
         config: &GovernanceConfig,
     ) -> Result<(), VaultError> {
         if votes_received < config.quorum {
-            return Err(VaultError::InsufficientGovernanceVotes);
+            return Err(VaultError::QuorumNotReached);
         }
         Ok(())
     }
@@ -71,7 +74,7 @@ impl GovernanceValidator {
     /// - `max_age_seconds`: Maximum allowed age of proposal
     ///
     /// # Errors
-    /// - Returns `VaultError::ProposalStale` if proposal is too old
+    /// - Returns `VaultError::NoPendingWithdrawal` if proposal is too old
     ///
     /// # Examples
     /// ```ignore
@@ -88,7 +91,7 @@ impl GovernanceValidator {
     ) -> Result<(), VaultError> {
         let age = current_timestamp.saturating_sub(proposal_created_at);
         if age > max_age_seconds {
-            return Err(VaultError::ProposalStale);
+            return Err(VaultError::NoPendingWithdrawal);
         }
         Ok(())
     }
@@ -101,7 +104,7 @@ impl GovernanceValidator {
     /// - `min_voting_period`: Minimum seconds that must elapse
     ///
     /// # Errors
-    /// - Returns `VaultError::ProposalNotReady` if minimum period has not elapsed
+    /// - Returns `VaultError::TimelockNotExpired` if minimum period has not elapsed
     pub fn validate_minimum_voting_period(
         voting_started_at: u64,
         current_timestamp: u64,
@@ -109,7 +112,7 @@ impl GovernanceValidator {
     ) -> Result<(), VaultError> {
         let elapsed = current_timestamp.saturating_sub(voting_started_at);
         if elapsed < min_voting_period {
-            return Err(VaultError::ProposalNotReady);
+            return Err(VaultError::TimelockNotExpired);
         }
         Ok(())
     }
@@ -133,7 +136,7 @@ impl GovernanceValidator {
     /// - Active → Rejected (cancel)
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidProposalTransition` if transition is invalid
+    /// - Returns `VaultError::ProposalAlreadyExecuted` if transition is invalid
     pub fn validate_state_transition(
         from: ProposalState,
         to: ProposalState,
@@ -156,7 +159,7 @@ impl GovernanceValidator {
         if valid {
             Ok(())
         } else {
-            Err(VaultError::InvalidProposalTransition)
+            Err(VaultError::ProposalAlreadyExecuted)
         }
     }
 
@@ -173,18 +176,18 @@ impl GovernanceValidator {
     /// - `current_signers`: Signers at execution time (sorted, deduplicated)
     ///
     /// # Errors
-    /// - Returns `VaultError::GovernanceSignersChanged` if signer set differs
+    /// - Returns `VaultError::GovernanceSignersNotConfigured` if signer set differs
     pub fn validate_signer_set_unchanged(
         original_signers: &Vec<Address>,
         current_signers: &Vec<Address>,
     ) -> Result<(), VaultError> {
         if original_signers.len() != current_signers.len() {
-            return Err(VaultError::GovernanceSignersChanged);
+            return Err(VaultError::GovernanceSignersNotConfigured);
         }
 
         for (orig, curr) in original_signers.iter().zip(current_signers.iter()) {
             if orig != curr {
-                return Err(VaultError::GovernanceSignersChanged);
+                return Err(VaultError::GovernanceSignersNotConfigured);
             }
         }
 
@@ -337,8 +340,8 @@ mod tests {
         let env = Env::default();
         let addr1 = Address::generate(&env);
         let addr2 = Address::generate(&env);
-        let signers: Vec<Address> = [addr1.clone(), addr2.clone()].into_iter().collect(&env);
-        let signers_same: Vec<Address> = [addr1.clone(), addr2.clone()].into_iter().collect(&env);
+        let signers: Vec<Address> = Vec::from_array(&env, [addr1.clone(), addr2.clone()]);
+        let signers_same: Vec<Address> = Vec::from_array(&env, [addr1.clone(), addr2.clone()]);
 
         let result = GovernanceValidator::validate_signer_set_unchanged(&signers, &signers_same);
         assert!(result.is_ok());
@@ -350,8 +353,8 @@ mod tests {
         let addr1 = Address::generate(&env);
         let addr2 = Address::generate(&env);
         let addr3 = Address::generate(&env);
-        let signers: Vec<Address> = [addr1.clone(), addr2.clone()].into_iter().collect(&env);
-        let signers_changed: Vec<Address> = [addr1, addr3].into_iter().collect(&env);
+        let signers: Vec<Address> = Vec::from_array(&env, [addr1.clone(), addr2.clone()]);
+        let signers_changed: Vec<Address> = Vec::from_array(&env, [addr1, addr3]);
 
         let result = GovernanceValidator::validate_signer_set_unchanged(&signers, &signers_changed);
         assert!(result.is_err());

@@ -32,6 +32,25 @@ describe('OpenAPI documentation', () => {
     expect(spec.info.description).toMatch(/Rate limit/i);
   });
 
+  it('documents the indexer health dependency', () => {
+    const health = spec.paths['/health'] as {
+      get: {
+        responses: {
+          '200': {
+            content: {
+              'application/json': {
+                schema: { $ref: string };
+              };
+            };
+          };
+        };
+      };
+    };
+    expect(health.get.responses['200'].content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/HealthResponse',
+    );
+  });
+
   it('serves the spec and Swagger UI over HTTP', async () => {
     const app = express();
     setupSwagger(app);

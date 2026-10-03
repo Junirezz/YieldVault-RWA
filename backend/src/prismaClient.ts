@@ -8,9 +8,11 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { PrismaClient as PrismaClientRuntime } from '.prisma/client';
 import { assertCriticalEntityMutationAllowed } from './criticalEntityPolicy';
 import { logger } from './middleware/structuredLogging';
 import { recordQueryPerformance } from './queryBudgets';
+import { invalidateVaultCountAfterMutation } from './vaultCountCache';
 
 let prismaClientInstance: PrismaClient | null = null;
 let queryInstrumentationAttached = false;
@@ -42,9 +44,26 @@ export function getPrismaClient(): PrismaClient {
       },
     ];
 
-    // Create the Prisma Client instance with explicit options
+    // Create the Prisma Client instance with explicit options.
+    // Prefer the generated runtime client (which includes all model delegates
+    // such as eventOutbox) and fall back to the @prisma/client re-export.
+    const PrismaClientCtor: any =
+      (PrismaClientRuntime as any) || (PrismaClient as any);
+
     try {
-      prismaClientInstance = new PrismaClient(clientOptions) as any;
+      prismaClientInstance = new PrismaClientCtor(clientOptions) as any;
+
+      // Guard against a partially-initialized client where model delegates
+      // (e.g. eventOutbox) resolve to undefined under certain runtime paths.
+      if (
+        !prismaClientInstance ||
+        typeof (prismaClientInstance as any).eventOutbox?.create !== 'function'
+      ) {
+        throw new Error(
+          'Prisma Client initialized without eventOutbox delegate; check generated client and import path',
+        );
+      }
+
       attachQueryInstrumentation(prismaClientInstance!);
     } catch (error) {
       logger.log('error', 'Failed to create Prisma Client', {
@@ -67,7 +86,9 @@ function attachQueryInstrumentation(client: PrismaClient): void {
     const startedAt = process.hrtime.bigint();
 
     try {
-      return await next(params);
+      const result = await next(params);
+      invalidateVaultCountAfterMutation(params.model, params.action);
+      return result;
     } finally {
       const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
       const model = params.model || 'raw';

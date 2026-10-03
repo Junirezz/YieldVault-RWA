@@ -1,0 +1,82 @@
+name: Governance & PR Standards Validation
+
+on:
+  pull_request:
+    paths:
+      - '.github/CODEOWNERS'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/workflows/codeowners-check.yml'
+      - 'scripts/validate-codeowners.ts'
+      - 'scripts/validate-codeowners.test.ts'
+      - 'scripts/validate-pr-template.ts'
+      - 'scripts/validate-pr-template.test.ts'
+      - 'scripts/validate-contribution-standards.ts'
+      - 'scripts/validate-contribution-standards.test.ts'
+      - 'scripts/validate-renovate-config.ts'
+      - 'scripts/validate-renovate-config.test.ts'
+      - 'renovate.json'
+      - 'contracts/**'
+      - 'backend/**'
+      - 'frontend/**'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - '.github/CODEOWNERS'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/workflows/codeowners-check.yml'
+      - 'scripts/validate-codeowners.ts'
+      - 'scripts/validate-codeowners.test.ts'
+      - 'scripts/validate-pr-template.ts'
+      - 'scripts/validate-pr-template.test.ts'
+      - 'scripts/validate-contribution-standards.ts'
+      - 'scripts/validate-contribution-standards.test.ts'
+      - 'scripts/validate-renovate-config.ts'
+      - 'scripts/validate-renovate-config.test.ts'
+      - 'renovate.json'
+      - 'contracts/**'
+      - 'backend/**'
+      - 'frontend/**'
+
+jobs:
+  validate-governance:
+    name: Verify CODEOWNERS, PR Template & Contribution Rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable Corepack & Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate CODEOWNERS syntax and rule coverage
+        run: pnpm validate:codeowners
+
+      - name: Run CODEOWNERS and PR review simulation tests
+        run: pnpm test:validate-codeowners
+
+      - name: Validate PR Template Checklist Sections
+        run: pnpm validate:pr-template
+
+      - name: Run PR Template Unit & Simulation Tests
+        run: pnpm test:validate-pr-template
+
+      - name: Validate Renovate Configuration
+        run: pnpm validate:renovate
+
+      - name: Run Renovate & CVE Mitigation Tests
+        run: pnpm test:validate-renovate
+
+      - name: Run Contribution Standards Validation
+        run: pnpm validate:contribution-standards

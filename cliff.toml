@@ -42,6 +42,11 @@ topo_order = false
 sort_commits = "oldest"
 
 commit_parsers = [
+  # These patterns are lower-case and case-sensitive. git-cliff's conventional
+  # parser accepts [a-zA-Z]+ for the type, so an upper-case `Fix:` would parse as
+  # type `Fix`, match none of the `^fix` patterns below, and silently drop out of
+  # the "Bug Fixes" group. commitlint.config.js enforces `type-case:
+  # lower-case` via .husky/commit-msg to keep every commit in exactly one group.
   { message = "^sec", group = "Security Highlights" },
   { message = "^security", group = "Security Highlights" },
   { body = ".*security", group = "Security Highlights" },

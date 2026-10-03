@@ -382,11 +382,10 @@ proptest! {
         let (env, client, _admin, token) = setup();
         let user = Address::generate(&env);
 
-        // Set a non-zero cooldown
-        env.storage().instance().set(
-            &crate::DataKey::WithdrawalCooldown,
-            &cooldown_secs,
-        );
+        // Set a non-zero cooldown. Used to write `DataKey::WithdrawalCooldown`
+        // straight into storage, which SDK 22 rejects outside a contract
+        // invocation; the admin entry point is the supported way to do this.
+        client.set_withdrawal_cooldown(&cooldown_secs);
 
         mint(&env, &token, &user, deposit_amount);
         let shares = match client.try_deposit(&user, &deposit_amount) {

@@ -1,7 +1,7 @@
 //! Access control hardening tests for Issue #963.
 //!
 //! Verifies that every admin-only function rejects non-admin callers,
-//! and that emergency-action functions return `VaultError::UnauthorizedCaller`
+//! and that emergency-action functions return `VaultError::RescueUnauthorized`
 //! instead of panicking when an unauthorized address is provided.
 
 #[cfg(test)]
@@ -64,20 +64,26 @@ mod access_control {
         assert!(!client2.is_paused());
     }
 
-    // ── #963: set_fee_bps requires admin ─────────────────────────────────────
+    // ── #963: fee configuration requires admin ───────────────────────────────
+    //
+    // The direct `set_fee_bps` setter was replaced by the timelocked
+    // `queue_fee_bps_change` / `execute_fee_bps_change` pair (Issue #969), so
+    // these exercise the current entry point.
 
     #[test]
-    fn test_set_fee_bps_only_admin() {
+    fn test_queue_fee_bps_change_only_admin() {
         let (_env, client, _admin, _token) = setup();
         // Valid range succeeds for admin (mock_all_auths active)
-        client.set_fee_bps(&500i128);
-        assert_eq!(client.fee_bps(), 500i128);
+        client.queue_fee_bps_change(&500i128);
     }
 
     #[test]
-    fn test_set_fee_bps_invalid_range_rejected() {
+    fn test_queue_fee_bps_change_invalid_range_rejected() {
         let (_env, client, _admin, _token) = setup();
-        let err = client.try_set_fee_bps(&10_001i128).unwrap_err().unwrap();
+        let err = client
+            .try_queue_fee_bps_change(&10_001i128)
+            .unwrap_err()
+            .unwrap();
         assert_eq!(err, VaultError::InvalidFeeBps);
     }
 
@@ -118,8 +124,8 @@ mod access_control {
 
         assert_eq!(
             result.unwrap_err().unwrap(),
-            VaultError::UnauthorizedCaller,
-            "non-primary approver must be rejected with UnauthorizedCaller"
+            VaultError::RescueUnauthorized,
+            "non-primary approver must be rejected with RescueUnauthorized"
         );
     }
 
@@ -164,15 +170,12 @@ mod access_control {
         );
 
         // Advance past dispute window
-        let env_ref = client.env;
-        env_ref
-            .ledger()
-            .set_timestamp(env_ref.ledger().timestamp() + 3_601);
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
 
         let result = client.try_confirm_emergency_action(&outsider, &proposal_id);
         assert_eq!(
             result.unwrap_err().unwrap(),
-            VaultError::UnauthorizedCaller,
+            VaultError::RescueUnauthorized,
             "non-secondary address must be rejected"
         );
     }
@@ -194,16 +197,13 @@ mod access_control {
         );
 
         // Advance past dispute window; try to confirm as primary (same as initiator)
-        let env_ref = client.env;
-        env_ref
-            .ledger()
-            .set_timestamp(env_ref.ledger().timestamp() + 3_601);
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
 
         // primary != secondary so this call would be rejected by the secondary check first
         let result = client.try_confirm_emergency_action(&primary, &proposal_id);
         assert_eq!(
             result.unwrap_err().unwrap(),
-            VaultError::UnauthorizedCaller,
+            VaultError::RescueUnauthorized,
             "initiator cannot also be the confirmer"
         );
     }
@@ -212,9 +212,8 @@ mod access_control {
 
     #[test]
     fn test_accrue_yield_requires_admin() {
-        let (_env, client, admin, token) = setup();
-        let env = client.env;
-        mint(env, &token, &admin, 1_000);
+        let (env, client, admin, token) = setup();
+        mint(&env, &token, &admin, 1_000);
         // Succeeds for admin
         client.accrue_yield(&1_000i128);
         assert_eq!(client.total_assets(), 1_000i128);
@@ -222,11 +221,15 @@ mod access_control {
 
     // ── #963: set_treasury requires admin ────────────────────────────────────
 
+    // The direct `set_treasury` setter was replaced by the timelocked
+    // `queue_treasury_change` / `execute_treasury_change` pair (Issue #969).
+
     #[test]
     fn test_set_treasury_requires_admin() {
         let (env, client, _admin, _token) = setup();
         let treasury_addr = Address::generate(&env);
-        client.set_treasury(&treasury_addr);
+        client.queue_treasury_change(&treasury_addr);
+        client.execute_treasury_change();
         assert_eq!(client.treasury(), Some(treasury_addr));
     }
 

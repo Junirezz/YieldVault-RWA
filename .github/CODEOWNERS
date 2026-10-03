@@ -5,8 +5,10 @@
 * @YieldVault-RWA/core-maintainers
 
 # Tier 1: Smart Contracts & Value Transfer
-/contracts/ @YieldVault-RWA/contracts-maintainers @YieldVault-RWA/security-team
-/contracts/**/src/ @YieldVault-RWA/contracts-maintainers @YieldVault-RWA/security-team
+/contracts/ @Junirezz @contract-reviewers
+/contracts @Junirezz @contract-reviewers
+/contracts/**/src/ @Junirezz @contract-reviewers
+*.rs @rust-reviewers
 /deployments/ @YieldVault-RWA/contracts-maintainers
 
 # Tier 2: Backend Services & API Layer

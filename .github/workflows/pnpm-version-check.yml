@@ -1,0 +1,49 @@
+name: pnpm version check
+
+# Catches ERR_PNPM_LOCKFILE_BREAKING_CHANGE before contributors waste 30 min
+# debugging a pnpm 8 vs pnpm 9 lockfile mismatch (Issue #1458).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Required version passes ─────────────────────────────────────────────────
+  pnpm-version-ok:
+    name: pnpm >=9.12 (required range)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate pnpm 9.12 via Corepack
+        run: corepack prepare pnpm@9.12.0 --activate
+
+      - name: Verify pnpm version satisfies requirement
+        run: node scripts/check-pnpm-version.js
+
+  # ── pnpm 8 fails fast with a clear message ───────────────────────────────────
+  pnpm-v8-rejected:
+    name: pnpm 8 rejected with clear error
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm 8 (the bad version)
+        run: npm install -g pnpm@8
+
+      - name: Expect check script to exit non-zero for pnpm 8
+        # The script must fail — if it exits 0 the version guard is broken.
+        run: |
+          node scripts/check-pnpm-version.js && echo "ERROR: script should have failed" && exit 1 || echo "OK: pnpm 8 correctly rejected"

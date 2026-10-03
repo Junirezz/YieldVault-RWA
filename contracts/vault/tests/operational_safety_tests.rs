@@ -139,7 +139,7 @@ fn test_event_ordering_maintained_across_pause_resume_sequence() {
 #[test]
 fn test_strategy_validator_rejects_negative_value() {
     let result = strategy_validation::StrategyValidator::validate_total_value(-100_000);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_strategy_validator_rejects_overflow_value() {
     let result = strategy_validation::StrategyValidator::validate_total_value(
         strategy_validation::MAX_STRATEGY_VALUE + 1,
     );
-    assert_eq!(result, Err(VaultError::StrategyValueOverflow));
+    assert_eq!(result, Err(VaultError::MathOverflow));
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn test_deposit_result_validation_rejects_negative_delta() {
     // Deposit 1000, but total decreased (impossible, indicates malicious response)
     let result =
         strategy_validation::StrategyValidator::validate_deposit_result(1000, 10_000, 9_000);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn test_withdrawal_result_validation_rejects_value_increase() {
     // Withdraw 1000, but total increased (impossible, indicates malicious response)
     let result =
         strategy_validation::StrategyValidator::validate_withdrawal_result(1000, 10_000, 11_000);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn test_decimals_validation_accepts_valid_range() {
 #[test]
 fn test_decimals_validation_rejects_excessive() {
     let result = strategy_validation::StrategyValidator::validate_decimals(31);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
@@ -232,13 +232,13 @@ fn test_price_response_validation_positive_price() {
 #[test]
 fn test_price_response_validation_rejects_zero_price() {
     let result = strategy_validation::StrategyValidator::validate_price_response(0, 6);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 #[test]
 fn test_price_response_validation_rejects_negative_price() {
     let result = strategy_validation::StrategyValidator::validate_price_response(-1_000_000, 6);
-    assert_eq!(result, Err(VaultError::InvalidStrategyResponse));
+    assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -268,7 +268,7 @@ fn test_governance_validator_quorum_not_met() {
     };
 
     let result = governance_validation::GovernanceValidator::validate_quorum(1, &config);
-    assert_eq!(result, Err(VaultError::InsufficientGovernanceVotes));
+    assert_eq!(result, Err(VaultError::QuorumNotReached));
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn test_governance_validator_proposal_freshness_stale() {
         100_000, // current time (way too late)
         3600,    // max age
     );
-    assert_eq!(result, Err(VaultError::ProposalStale));
+    assert_eq!(result, Err(VaultError::NoPendingWithdrawal));
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn test_governance_validator_minimum_voting_period_not_elapsed() {
         2000, // current time (too soon)
         3600, // min voting period
     );
-    assert_eq!(result, Err(VaultError::ProposalNotReady));
+    assert_eq!(result, Err(VaultError::TimelockNotExpired));
 }
 
 #[test]
@@ -335,7 +335,7 @@ fn test_state_transition_invalid_stale_no_further_transition() {
         governance_validation::ProposalState::Stale,
         governance_validation::ProposalState::Approved,
     );
-    assert_eq!(result, Err(VaultError::InvalidProposalTransition));
+    assert_eq!(result, Err(VaultError::ProposalAlreadyExecuted));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -397,7 +397,7 @@ fn test_rounding_policy_validate_loss_acceptable() {
 fn test_rounding_policy_validate_loss_exceeds_threshold() {
     // 200 bp loss exceeds 100 bp threshold
     let result = rounding_consistency::RoundingPolicy::validate_rounding_loss(200, 10_000, 100);
-    assert_eq!(result, Err(VaultError::RoundingLossTooHigh));
+    assert_eq!(result, Err(VaultError::SlippageExceeded));
 }
 
 #[test]

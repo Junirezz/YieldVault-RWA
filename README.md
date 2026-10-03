@@ -50,14 +50,21 @@ For a cross-layer view of ownership boundaries, API flow maps, event propagation
 
 ### Quick Start
 
+> **Node ≥ 20 and pnpm ≥ 9.12 are required.** The lockfile format changed between pnpm 8 and pnpm 9; using an older version produces `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`. Use [Corepack](https://nodejs.org/api/corepack.html) (bundled with Node ≥ 16) to pin the right version automatically:
+>
+> ```bash
+> corepack enable
+> corepack prepare pnpm@9.12.0 --activate
+> ```
+
 1. Start the backend:
 
    ```bash
    cd backend
    cp .env.example .env
-   npm install
+   pnpm install
    npx prisma migrate dev
-   npm run dev
+   pnpm dev
    ```
 
 2. Start the frontend in a second terminal:
@@ -65,8 +72,8 @@ For a cross-layer view of ownership boundaries, API flow maps, event propagation
    ```bash
    cd frontend
    cp .env.example .env
-   npm install
-   npm run dev
+   pnpm install
+   pnpm dev
    ```
 
 3. Optional: run contract tests from the repo root:

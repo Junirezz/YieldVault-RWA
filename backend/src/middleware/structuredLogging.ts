@@ -57,6 +57,22 @@ class Logger {
     /* eslint-disable-next-line no-console */
     console.log(JSON.stringify(entry));
   }
+
+  debug(message: string, fields?: Partial<LogEntry>): void {
+    this.log('debug', message, fields);
+  }
+
+  info(message: string, fields?: Partial<LogEntry>): void {
+    this.log('info', message, fields);
+  }
+
+  warn(message: string, fields?: Partial<LogEntry>): void {
+    this.log('warn', message, fields);
+  }
+
+  error(message: string, fields?: Partial<LogEntry>): void {
+    this.log('error', message, fields);
+  }
 }
 
 export const logger = new Logger();

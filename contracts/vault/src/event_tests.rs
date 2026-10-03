@@ -1,6 +1,6 @@
 use super::*;
 use soroban_sdk::testutils::{Address as _, Events as _};
-use soroban_sdk::{token, Address, Env};
+use soroban_sdk::{token, Address, Env, Symbol, TryFromVal};
 
 fn create_token_contract<'a>(env: &Env, admin: &Address) -> token::Client<'a> {
     let token_address = env
@@ -271,12 +271,12 @@ fn test_deposit_and_withdraw_emit_events() {
     let mut deposit_found = false;
     for event in events.iter() {
         if event.1.len() > 0 {
-            if let Ok(topic_0) = event.1.get(0).unwrap().try_into_val(&env) {
-                let topic_sym: soroban_sdk::Symbol = topic_0;
+            if let Ok(topic_sym) = Symbol::try_from_val(&env, &event.1.get(0).unwrap()) {
                 if topic_sym == symbol_short!("deposit") {
                     deposit_found = true;
                     // Check if second topic is the user
-                    let topic_1: Address = event.1.get(1).unwrap().try_into_val(&env).unwrap();
+                    let topic_1: Address =
+                        Address::try_from_val(&env, &event.1.get(1).unwrap()).unwrap();
                     assert_eq!(topic_1, user);
                 }
             }
@@ -290,12 +290,12 @@ fn test_deposit_and_withdraw_emit_events() {
     let mut withdraw_found = false;
     for event in events_after.iter() {
         if event.1.len() > 0 {
-            if let Ok(topic_0) = event.1.get(0).unwrap().try_into_val(&env) {
-                let topic_sym: soroban_sdk::Symbol = topic_0;
+            if let Ok(topic_sym) = Symbol::try_from_val(&env, &event.1.get(0).unwrap()) {
                 if topic_sym == symbol_short!("withdraw") {
                     withdraw_found = true;
                     // Check if second topic is the user
-                    let topic_1: Address = event.1.get(1).unwrap().try_into_val(&env).unwrap();
+                    let topic_1: Address =
+                        Address::try_from_val(&env, &event.1.get(1).unwrap()).unwrap();
                     assert_eq!(topic_1, user);
                 }
             }

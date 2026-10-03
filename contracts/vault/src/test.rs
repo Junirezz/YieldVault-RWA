@@ -601,11 +601,26 @@ fn test_strategy_response_rejects_mismatched_asset() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (vault, usdc, _, _) = setup_vault(&env);
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
     let wrong_asset = Address::generate(&env);
     let strategy_id = env.register(MaliciousStrategy, ());
-    let strategy = StrategyClient::new(&env, &strategy_id);
-    strategy.initialize(&vault.contract_id, &wrong_asset, &100);
+    // `MaliciousStrategy` stores its seed state directly; it has no
+    // `initialize` on the generated client.
+    env.as_contract(&strategy_id, || {
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Vault, &vault_id);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Asset, &wrong_asset);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Value, &100i128);
+    });
 
     let result = YieldVault::validate_strategy_response(&env, &strategy_id, &usdc.address);
     assert_eq!(result, Err(VaultError::UnauthorizedStrategy));
@@ -616,10 +631,23 @@ fn test_strategy_response_rejects_negative_total_value() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (vault, usdc, _, _) = setup_vault(&env);
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
     let strategy_id = env.register(MaliciousStrategy, ());
-    let strategy = StrategyClient::new(&env, &strategy_id);
-    strategy.initialize(&vault.contract_id, &usdc.address, &-1);
+    env.as_contract(&strategy_id, || {
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Vault, &vault_id);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Asset, &usdc.address);
+        env.storage()
+            .instance()
+            .set(&StrategyTestKey::Value, &-1i128);
+    });
 
     let result = YieldVault::validate_strategy_response(&env, &strategy_id, &usdc.address);
     assert_eq!(result, Err(VaultError::InvalidAmount));
@@ -2728,12 +2756,10 @@ fn test_overflow_protection_near_limits() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = Address::generate(&env);
-    let token = create_token_contract(&env, &admin);
-    let vault = create_vault_contract(&env, &admin, &token.address);
+    let (vault, _token, usdc_sa, _admin) = setup_vault(&env);
     let user = Address::generate(&env);
 
-    token.mint(&user, &1000);
+    usdc_sa.mint(&user, &1000);
     vault.deposit(&user, &1000); // 1000 shares for 1000 assets
 
     let res_shares = vault.try_calculate_shares(&i128::MAX);

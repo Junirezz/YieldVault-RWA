@@ -1,0 +1,9 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "tailwindCSS.experimental.classRegex": [
+    "clsx\\((?:[^)(]|\\((?:[^)(]|\\([^)(]*\\))*\\))*?[\"'`]([^\"'`]*[^\"'`\\s])[\"'`]",
+    "cn\\((?:[^)(]|\\((?:[^)(]|\\([^)(]*\\))*\\))*?[\"'`]([^\"'`]*[^\"'`\\s])[\"'`]"
+  ],
+  "files.eol": "\n"
+}

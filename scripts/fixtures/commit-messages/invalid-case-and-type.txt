@@ -1,0 +1,8 @@
+Fix: correct rounding on share price accrual
+FEAT: add vesting schedule to dashboard
+Docs: document the recovery runbook
+TEST: cover fee clawback branch
+Chore: bump soroban-sdk to 22.0.0
+Refactor: extract ledger entry mapper
+CI: run cargo audit on pull requests
+wip: not in the allowed type enum

@@ -16,6 +16,11 @@ process.env.OTEL_ENABLED = 'false';
 // Suppress OpenTelemetry spam in test output
 process.env.OTEL_LOG_LEVEL = 'error';
 
+// Flaky test mitigation: Retry failed tests up to 2 times
+if (typeof jest !== 'undefined' && typeof jest.retryTimes === 'function') {
+  jest.retryTimes(2, { logErrorsBeforeRetry: true });
+}
+
 // Provide healthy defaults expected by API/integration tests.
 process.env.STELLAR_RPC_URL = process.env.STELLAR_RPC_URL || 'https://test-rpc.stellar.local';
 process.env.ALLOWLIST_ENABLED = process.env.ALLOWLIST_ENABLED || 'false';

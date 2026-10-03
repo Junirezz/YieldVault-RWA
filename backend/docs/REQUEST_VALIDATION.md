@@ -19,6 +19,8 @@ On failure the middleware returns **400** with:
 | `status` | `400` |
 | `code` | `VALIDATION_ERROR` |
 | `message` | Human-readable summary of all issues |
+| `summary` | Always `Request validation failed` |
+| `errors[]` | `{ code, field, message }` per issue (frontend compatibility) |
 | `details[]` | `{ code, field, message }` per issue |
 | `retryable` | `false` |
 
@@ -33,6 +35,9 @@ webhook register/update reject unknown keys).
 | `backend/src/types/webhooks.ts` | Webhook event type literals |
 | `backend/src/middleware/validate.ts` | Auth, alias, webhook register schemas + middleware |
 | `packages/api-schemas` | Shared vault deposit/withdrawal contracts |
+
+> **Build Order:** The `@yieldvault/api-schemas` package must be built (`npm run build:schemas` or `npm run build` in backend) before TypeScript typechecking (`tsc --noEmit`) can resolve types imported by `backend/src/middleware/validate.ts`.
+
 
 ## Common rules
 

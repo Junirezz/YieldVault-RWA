@@ -50,7 +50,7 @@ impl RoundingPolicy {
     /// - Useful for catching unexpectedly large round-trip losses
     ///
     /// # Errors
-    /// - Returns `VaultError::RoundingLossTooHigh` if loss exceeds threshold
+    /// - Returns `VaultError::SlippageExceeded` if loss exceeds threshold
     ///
     /// # Examples
     /// ```ignore
@@ -80,7 +80,7 @@ impl RoundingPolicy {
         if remainder > 0 {
             let loss_bps = (remainder * 10_000) / exact_numerator;
             if loss_bps > max_allowed_loss_bps as u128 {
-                return Err(VaultError::RoundingLossTooHigh);
+                return Err(VaultError::SlippageExceeded);
             }
         }
 
@@ -105,7 +105,7 @@ impl RoundingPolicy {
     /// - `to_decimals`: Target decimal places
     ///
     /// # Errors
-    /// - Returns `VaultError::DecimalConversionOverflow` if result exceeds i128::MAX
+    /// - Returns `VaultError::MathOverflow` if result exceeds i128::MAX
     ///
     /// # Examples
     /// ```ignore
@@ -134,16 +134,16 @@ impl RoundingPolicy {
             // Downscaling: divide and round down
             let scale_factor = 10i128
                 .checked_pow(from_decimals - to_decimals)
-                .ok_or(VaultError::DecimalConversionOverflow)?;
+                .ok_or(VaultError::MathOverflow)?;
             Ok(amount / scale_factor)
         } else {
             // Upscaling: multiply carefully to avoid overflow
             let scale_factor = 10i128
                 .checked_pow(to_decimals - from_decimals)
-                .ok_or(VaultError::DecimalConversionOverflow)?;
+                .ok_or(VaultError::MathOverflow)?;
             amount
                 .checked_mul(scale_factor)
-                .ok_or(VaultError::DecimalConversionOverflow)
+                .ok_or(VaultError::MathOverflow)
         }
     }
 
@@ -156,7 +156,7 @@ impl RoundingPolicy {
     ///
     /// # Returns
     /// - `Ok(())` if loss is acceptable
-    /// - `Err(VaultError::RoundingLossTooHigh)` if loss exceeds threshold
+    /// - `Err(VaultError::SlippageExceeded)` if loss exceeds threshold
     ///
     /// # Basis Points Formula
     /// ```text
@@ -176,7 +176,7 @@ impl RoundingPolicy {
         let loss_bps = (loss_amount.abs() * 10_000) / original_amount.abs();
 
         if loss_bps > max_loss_bps {
-            return Err(VaultError::RoundingLossTooHigh);
+            return Err(VaultError::SlippageExceeded);
         }
 
         Ok(())

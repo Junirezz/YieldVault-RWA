@@ -3,9 +3,15 @@
 //! This module ensures all pause and resume actions are observable and auditable
 //! by emitting comprehensive events with metadata including actor, reason, and timestamp.
 
-use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, String};
 
 /// Emitted when the vault is paused.
+///
+/// The topic is `vpaused` / `vunpause` rather than the longer
+/// `vault_pause` / `vault_unpause`: `symbol_short!` rejects topic strings
+/// longer than 9 characters, and these match the `paused` / `unpaused`
+/// topics that `pause` / `unpause` in `lib.rs` already publish for the same
+/// transitions.
 ///
 /// # Fields
 /// - `actor`: The address that initiated the pause (typically admin)
@@ -13,7 +19,7 @@ use soroban_sdk::{symbol_short, Address, Env};
 /// - `timestamp`: Ledger timestamp when pause was enacted
 pub fn emit_pause_event(env: &Env, actor: &Address, reason_code: u32, timestamp: u64) {
     env.events().publish(
-        (symbol_short!("vault_pause"),),
+        (symbol_short!("vpaused"),),
         (actor.clone(), reason_code, timestamp),
     );
 }
@@ -24,10 +30,8 @@ pub fn emit_pause_event(env: &Env, actor: &Address, reason_code: u32, timestamp:
 /// - `actor`: The address that initiated the unpause (typically admin)
 /// - `timestamp`: Ledger timestamp when resume was enacted
 pub fn emit_unpause_event(env: &Env, actor: &Address, timestamp: u64) {
-    env.events().publish(
-        (symbol_short!("vault_unpause"),),
-        (actor.clone(), timestamp),
-    );
+    env.events()
+        .publish((symbol_short!("vunpause"),), (actor.clone(), timestamp));
 }
 
 /// Emitted when a pause transition is attempted but fails (e.g., already paused).
@@ -45,8 +49,13 @@ pub fn emit_pause_transition_failed(
     timestamp: u64,
 ) {
     env.events().publish(
-        (symbol_short!("pause_fail"),),
-        (actor.clone(), reason.to_string(), current_state, timestamp),
+        (symbol_short!("paufail"),),
+        (
+            actor.clone(),
+            String::from_str(env, reason),
+            current_state,
+            timestamp,
+        ),
     );
 }
 

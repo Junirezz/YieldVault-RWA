@@ -4,7 +4,7 @@
 //! cannot break vault logic through adversarial or corrupted payloads.
 
 use crate::VaultError;
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{xdr::ScAddress, Address, Env, TryFromVal};
 
 /// Maximum allowed strategy total value to prevent overflow and unreasonable responses.
 /// Set conservatively to catch malicious responses while allowing legitimate vaults.
@@ -22,8 +22,8 @@ impl StrategyValidator {
     /// 3. Value must be finite (not NaN or Inf, though i128 inherently prevents this)
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` if value is negative
-    /// - Returns `VaultError::StrategyValueOverflow` if value exceeds bounds
+    /// - Returns `VaultError::InvalidAmount` if value is negative
+    /// - Returns `VaultError::MathOverflow` if value exceeds bounds
     ///
     /// # Examples
     /// ```ignore
@@ -32,12 +32,12 @@ impl StrategyValidator {
     pub fn validate_total_value(value: i128) -> Result<(), VaultError> {
         // Rule 1: Value must be non-negative
         if value < 0 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         // Rule 2: Value must not exceed maximum bound
         if value > MAX_STRATEGY_VALUE {
-            return Err(VaultError::StrategyValueOverflow);
+            return Err(VaultError::MathOverflow);
         }
 
         Ok(())
@@ -51,7 +51,7 @@ impl StrategyValidator {
     /// 3. No negative movements (strategy cannot shrink after deposit)
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` on validation failure
+    /// - Returns `VaultError::InvalidAmount` on validation failure
     pub fn validate_deposit_result(
         requested_amount: i128,
         pre_deposit_total: i128,
@@ -59,14 +59,14 @@ impl StrategyValidator {
     ) -> Result<(), VaultError> {
         // Rule 1: Requested amount must be positive
         if requested_amount <= 0 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         // Rule 2: Total must increase by at least requested amount
         // (may be less if deposit had fees, but shouldn't be negative delta)
         let delta = post_deposit_total.saturating_sub(pre_deposit_total);
         if delta < 0 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         Ok(())
@@ -80,7 +80,7 @@ impl StrategyValidator {
     /// 3. Strategy cannot gain value during a withdrawal
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` on validation failure
+    /// - Returns `VaultError::InvalidAmount` on validation failure
     pub fn validate_withdrawal_result(
         requested_amount: i128,
         pre_withdrawal_total: i128,
@@ -88,12 +88,12 @@ impl StrategyValidator {
     ) -> Result<(), VaultError> {
         // Rule 1: Requested amount must be positive
         if requested_amount <= 0 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         // Rule 2: Total must decrease (or stay same for fees/slippage)
         if post_withdrawal_total > pre_withdrawal_total {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         Ok(())
@@ -106,10 +106,10 @@ impl StrategyValidator {
     /// - Prevents tiny-fraction attacks or overflow vectors
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` if decimals exceed bounds
+    /// - Returns `VaultError::InvalidAmount` if decimals exceed bounds
     pub fn validate_decimals(decimals: u32) -> Result<(), VaultError> {
         if decimals > 30 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
         Ok(())
     }
@@ -122,16 +122,16 @@ impl StrategyValidator {
     /// 3. Decimals must be within bounds (0-30)
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` on failure
+    /// - Returns `VaultError::InvalidAmount` on failure
     pub fn validate_price_response(price: i128, decimals: u32) -> Result<(), VaultError> {
         // Price must be positive
         if price <= 0 {
-            return Err(VaultError::InvalidStrategyResponse);
+            return Err(VaultError::InvalidAmount);
         }
 
         // Price must not overflow
         if price > MAX_STRATEGY_VALUE {
-            return Err(VaultError::StrategyValueOverflow);
+            return Err(VaultError::MathOverflow);
         }
 
         // Decimals must be within bounds
@@ -143,18 +143,26 @@ impl StrategyValidator {
     /// Comprehensive validation of strategy contract address.
     ///
     /// # Checks
-    /// - Address is not zero (default/null address)
+    /// - Address is not the all-zero address
     /// - Address is valid for external calls
     ///
     /// # Errors
-    /// - Returns `VaultError::InvalidStrategyResponse` if address is invalid
-    pub fn validate_strategy_address(_env: &Env, strategy: &Address) -> Result<(), VaultError> {
+    /// - Returns `VaultError::InvalidAmount` if address is invalid
+    pub fn validate_strategy_address(env: &Env, strategy: &Address) -> Result<(), VaultError> {
         // In production, might add more checks:
         // - Is the address deployed?
         // - Does it have the strategy interface?
-        // For now, basic non-zero check
-        if strategy == &Address::from_string(&String::new(_env)) {
-            return Err(VaultError::InvalidStrategyResponse);
+        // For now, basic non-zero check.
+        //
+        // The previous `Address::from_string(&String::new(_env))` could not
+        // build the SDK `String` type at all. Building the all-zero contract
+        // address from its `ScAddress` avoids strkey decoding, which rejects
+        // an empty string outright.
+        let zero =
+            Address::try_from_val(env, &ScAddress::Contract(soroban_sdk::xdr::Hash([0u8; 32])))
+                .map_err(|_| VaultError::InvalidAmount)?;
+        if strategy == &zero {
+            return Err(VaultError::InvalidAmount);
         }
         Ok(())
     }

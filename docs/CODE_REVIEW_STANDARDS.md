@@ -29,8 +29,8 @@ All contributors (core team, community members, and external partners) must adhe
 Approval thresholds are governed by the component criticality matrix defined in [`docs/QUALITY_GATES_MATRIX.md`](./QUALITY_GATES_MATRIX.md).
 
 ### Tier 1: Core Smart Contracts & Value Transfer
-*Scope: Vault contracts, yield strategies, oracle wrappers, access control, token handlers*
-- **Minimum Approvals:** **2 approving reviews** from Core Contract Maintainers (`@YieldVault-RWA/contracts-maintainers`).
+*Scope: Vault contracts, yield strategies, oracle wrappers, access control, token handlers, Rust source files*
+- **Minimum Approvals:** **2 approving reviews** from Contract Reviewers (`@Junirezz`, `@contract-reviewers`) and Rust Reviewers (`@rust-reviewers` for `*.rs`).
 - **Security Sign-Off:** Mandatory sign-off from Security Lead (`@YieldVault-RWA/security-team`).
 - **Required Checks:** 100% test coverage, Slither static analysis with 0 unresolved High/Medium findings, unit + fuzz test pass.
 
@@ -67,6 +67,9 @@ Before requesting a review, authors **must** perform a thorough self-review:
 3. **PR Description**: Must complete all sections in `.github/PULL_REQUEST_TEMPLATE.md`:
    - `### Goal`: Clear objective and linked issue (`Closes #123`).
    - `### Changes`: Detailed bullet points of exact changes.
+   - `### Risk Assessment`: Blast radius, risk tier, and migration impact analysis.
+   - `### Rollback Plan`: Rollback strategy, trigger conditions, and step-by-step procedures.
+   - `### Performance Impact`: Smart contract gas benchmarks, latency, and resource profiling.
    - `### Testing`: Verification steps, automated test coverage, and local reproduction results.
    - `### Security Review`: Full checklist completed for smart contract or auth changes.
 4. **Clean Commits**: Squashed or well-organized commits with informative commit messages following Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).

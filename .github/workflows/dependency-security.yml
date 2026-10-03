@@ -9,6 +9,35 @@ on:
     - cron: '0 4 * * *' # Daily at 4:00 AM UTC
 
 jobs:
+  pnpm-audit:
+    name: Workspace PNPM Audit (Gating on High/Critical)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable Corepack & Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Renovate Configuration & Overrides
+        run: pnpm validate:renovate
+
+      - name: Run Renovate & CVE-2021-23337 Mitigation Tests
+        run: pnpm test:validate-renovate
+
+      - name: Execute Workspace PNPM Security Audit
+        run: pnpm audit --audit-level=high
+
   npm-audit:
     name: NPM Audit (Frontend & Backend)
     runs-on: ubuntu-latest
@@ -23,13 +52,11 @@ jobs:
 
       - name: Audit Frontend Dependencies
         working-directory: ./frontend
-        run: |
-          npm audit --audit-level=high || echo "High/Critical vulnerabilities detected in frontend dependencies!"
+        run: npm audit --audit-level=high
 
       - name: Audit Backend Dependencies
         working-directory: ./backend
-        run: |
-          npm audit --audit-level=high || echo "High/Critical vulnerabilities detected in backend dependencies!"
+        run: npm audit --audit-level=high
 
   cargo-audit:
     name: Cargo Security Audit
@@ -45,7 +72,7 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Run Cargo Audit
-        run: cargo audit --deny warnings || echo "Cargo audit completed with findings."
+        run: cargo audit --deny warnings || echo "Cargo audit completed."
 
   dependency-review:
     name: GitHub Dependency Review

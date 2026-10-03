@@ -120,6 +120,7 @@ When creating an issue:
 **Template links**:
 - [Bug Report](/.github/ISSUE_TEMPLATE/bug_report.md)
 - [Feature Request](/.github/ISSUE_TEMPLATE/feature_request.md)
+- [Performance Regression](/.github/ISSUE_TEMPLATE/perf_regression.md)
 - [Security Report](/.github/ISSUE_TEMPLATE/security_report.md)
 - [Task/Chore](/.github/ISSUE_TEMPLATE/task_or_chore.md)
 

@@ -82,6 +82,57 @@ title: 'Fix: [Short description]'
     });
   });
 
+  describe('Performance Regression Template Validation', () => {
+    const templatePath = resolve(__dirname, '../.github/ISSUE_TEMPLATE/perf_regression.md');
+
+    it('ensures perf_regression.md exists', () => {
+      expect(existsSync(templatePath)).toBe(true);
+    });
+
+    it('validates perf_regression.md has valid frontmatter, perf label, and backend team assignment', () => {
+      const content = readFileSync(templatePath, 'utf8');
+      const validation = validateIssueTemplate(content, 'perf_regression.md');
+      expect(validation.valid).toBe(true);
+      expect(validation.errors).toEqual([]);
+
+      // Check frontmatter attributes
+      expect(content).toMatch(/name:\s*Performance Regression/i);
+      expect(content).toMatch(/labels:\s*.*type:\s*perf/i);
+      expect(content).toMatch(/assignees:\s*.*backend/i);
+    });
+
+    it('asserts that the performance regression template body contains all required fields', () => {
+      const content = readFileSync(templatePath, 'utf8');
+
+      // Check required fields from acceptance criteria
+      expect(content).toMatch(/Endpoint/i);
+      expect(content).toMatch(/p95\s+(before\/after|Before)/i);
+      expect(content).toMatch(/QPS/i);
+      expect(content).toMatch(/DB\s+query\s+plan/i);
+      expect(content).toMatch(/Repro\s+steps/i);
+      expect(content).toMatch(/Expected\s+SLO/i);
+    });
+  });
+
+  describe('Existing Issue Templates Validation', () => {
+    const existingTemplates = [
+      'bug_report.md',
+      'feature_request.md',
+      'perf_regression.md',
+      'security_report.md',
+      'task_or_chore.md',
+    ];
+
+    it.each(existingTemplates)('renders and validates %s without errors', (templateFile) => {
+      const tPath = resolve(__dirname, '../.github/ISSUE_TEMPLATE', templateFile);
+      expect(existsSync(tPath)).toBe(true);
+      const content = readFileSync(tPath, 'utf8');
+      const res = validateIssueTemplate(content, templateFile);
+      expect(res.valid).toBe(true);
+      expect(res.errors).toEqual([]);
+    });
+  });
+
   describe('runFullSprintAndTriageValidation', () => {
     it('passes full repository verification on actual codebase files', () => {
       const rootDir = resolve(__dirname, '..');
@@ -91,3 +142,4 @@ title: 'Fix: [Short description]'
     });
   });
 });
+

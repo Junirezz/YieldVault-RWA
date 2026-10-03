@@ -2,9 +2,16 @@
 name = "vault"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+# Mirrors the soroban-sdk convention. Exposes test-only contract types (such as
+# `benji_strategy`) so integration tests under `tests/` can register a strategy
+# contract; it is never enabled for a WASM build.
+testutils = []
 
 [dependencies]
 soroban-sdk = { workspace = true }
@@ -14,3 +21,4 @@ share-price-math = { path = "../share-price-math" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 mock-strategy = { path = "../mock-strategy" }
 proptest = { version = "1", default-features = false, features = ["std"] }
+vault = { path = ".", features = ["testutils"] }

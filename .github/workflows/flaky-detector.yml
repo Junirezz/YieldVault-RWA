@@ -1,0 +1,127 @@
+name: Flaky Test Detector
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Nightly at 2:00 AM UTC
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Number of times to run the test suite'
+        required: false
+        default: '10'
+      test_pattern:
+        description: 'Optional test pattern/file to target (e.g., flaky, auth, rateLimiter)'
+        required: false
+        default: ''
+
+jobs:
+  flaky-detector:
+    name: Detect Flaky Tests (10x Loop)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: yieldvault_flaky_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yieldvault_flaky_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/yieldvault_flaky_test
+      NODE_ENV: test
+      CI: true
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Build shared API schemas
+        run: npm ci && npm run build
+        working-directory: packages/api-schemas
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Run Test Suite Iterations
+        id: test_loop
+        run: |
+          ITERATIONS="${{ github.event.inputs.iterations || '10' }}"
+          TEST_PATTERN="${{ github.event.inputs.test_pattern || '' }}"
+          
+          echo "Starting flaky test detection ($ITERATIONS iterations)..."
+          
+          PASSED_RUNS=0
+          FAILED_RUNS=0
+          FAILED_RUN_INDICES=""
+          
+          for i in $(seq 1 $ITERATIONS); do
+            echo "--------------------------------------------------------"
+            echo "▶ Iteration $i / $ITERATIONS"
+            echo "--------------------------------------------------------"
+            
+            if [ -n "$TEST_PATTERN" ]; then
+              CMD="npm test -- -t \"$TEST_PATTERN\""
+            else
+              CMD="npm test"
+            fi
+            
+            if eval $CMD; then
+              echo "✓ Iteration $i passed."
+              PASSED_RUNS=$((PASSED_RUNS + 1))
+            else
+              echo "❌ Iteration $i failed."
+              FAILED_RUNS=$((FAILED_RUNS + 1))
+              FAILED_RUN_INDICES="$FAILED_RUN_INDICES $i"
+            fi
+          done
+          
+          echo "========================================================"
+          echo "Flaky Detection Summary: $PASSED_RUNS passed, $FAILED_RUNS failed out of $ITERATIONS runs."
+          echo "========================================================"
+          
+          echo "iterations=$ITERATIONS" >> $GITHUB_OUTPUT
+          echo "passed=$PASSED_RUNS" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED_RUNS" >> $GITHUB_OUTPUT
+          echo "failed_indices=$FAILED_RUN_INDICES" >> $GITHUB_OUTPUT
+          
+          if [ "$FAILED_RUNS" -gt 0 ]; then
+            echo "❌ Flakiness detected! $FAILED_RUNS out of $ITERATIONS runs failed."
+            exit 1
+          fi
+          
+          echo "✅ All $ITERATIONS iterations completed without test flakiness!"
+
+      - name: Generate Job Summary
+        if: always()
+        run: |
+          echo "### 🧪 Flaky Test Detection Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Iterations | ${{ steps.test_loop.outputs.iterations || '10' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed Runs | ${{ steps.test_loop.outputs.passed || '0' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed Runs | ${{ steps.test_loop.outputs.failed || '0' }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.test_loop.outputs.failed }}" != "0" ]; then
+            echo "| Status | ⚠️ Flakiness Detected |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Failed Iteration Indices:** \`${{ steps.test_loop.outputs.failed_indices }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | ✅ Stable |" >> $GITHUB_STEP_SUMMARY
+          fi

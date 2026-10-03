@@ -184,7 +184,13 @@ export function runFullSprintAndTriageValidation(rootDir: string = process.cwd()
   }
 
   const templatesDir = resolve(rootDir, '.github/ISSUE_TEMPLATE');
-  const requiredTemplates = ['bug_report.md', 'feature_request.md', 'task_or_chore.md'];
+  const requiredTemplates = [
+    'bug_report.md',
+    'feature_request.md',
+    'perf_regression.md',
+    'security_report.md',
+    'task_or_chore.md',
+  ];
 
   for (const template of requiredTemplates) {
     const tPath = resolve(templatesDir, template);

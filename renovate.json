@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 4am Monday"
+  ],
+  "timezone": "UTC",
+  "packageRules": [
+    {
+      "description": "Automerge indirect and transitive dependency updates",
+      "matchDepTypes": ["indirect"],
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Automerge security and patch fixes for indirect dependencies",
+      "matchDepTypes": ["indirect"],
+      "matchUpdateTypes": ["patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group vulnerability fixes and automerge high/critical transitive updates",
+      "matchPackageNames": ["lodash"],
+      "automerge": true
+    }
+  ]
+}

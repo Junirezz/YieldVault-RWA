@@ -1,14 +1,91 @@
 # Pull Request Template
 
 ## 📋 Description
-Add a complete environment variable matrix (`docs/ENV_VARIABLE_MATRIX.md`) covering every env var consumed across the backend and frontend, with defaults, required flags, and production recommendations. Update `README.md` and `ENV_QUICK_REFERENCE.md` to link to the new document.
+<!-- Provide a clear, concise summary of the goal and changes in this PR -->
+
+### Goal
+<!-- What problem does this solve? Reference issue: Closes #123 -->
+
+### Changes
+<!-- Bullet points explaining the key modifications -->
+- 
 
 ## 🔗 Type of Change
 - [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
 - [ ] ✨ New feature (non-breaking change that adds functionality)
 - [ ] ⚠️ Breaking change (fix or feature that would cause existing functionality to change)
-- [x] 📚 Documentation update
+- [ ] 🌊 Wave submission (contract migration, architectural wave release, or protocol upgrade)
+- [ ] 📚 Documentation update
 - [ ] 🔒 Security improvement
+- [ ] ⚡ Performance optimization
+
+---
+
+## 🛡️ Risk Assessment
+
+<!-- Mandatory for all PRs to evaluate blast radius, particularly contract migrations & Wave submissions -->
+
+### Risk Level
+- [ ] 🟢 **Low**: Non-breaking change, documentation, style, or isolated helper refactoring
+- [ ] 🟡 **Medium**: API enhancement, frontend workflow update, non-critical dependency upgrade
+- [ ] 🟠 **High**: Core contract logic change, access control modification, financial accounting / share math
+- [ ] 🔴 **Critical**: Wave submission, contract storage migration, protocol upgrade touching vault funds
+
+### Blast Radius & Impact Analysis
+- [ ] Contract storage layout / data key migration involved
+- [ ] Value transfer, deposit/withdraw flow, or vault share calculation affected
+- [ ] External integration (Oracle, Soroban RPC, Bridge, Token contract) affected
+- [ ] Database schema migration or data backfill required
+- [ ] Breaking API or interface change affecting downstream clients
+- [ ] Zero blast radius (isolated tooling / documentation only)
+
+**Detailed Risk & Blast Radius Notes:**
+<!-- Describe specific failure modes, edge cases, affected components, and risk mitigations -->
+```
+```
+
+---
+
+## 🔄 Rollback Plan
+
+<!-- Detail the exact steps and strategy to revert this change if unexpected failures occur in production -->
+
+### Rollback Strategy & Feasibility
+- [ ] **Clean Git Revert**: Revertable with zero persistent state drift
+- [ ] **Contract Upgrade Rollback**: Tested rollback to previous contract WASM hash / implementation
+- [ ] **Database Migration Revert**: Reversible migration down-script tested and verified
+- [ ] **Feature Flag / Circuit Breaker**: Feature can be toggled off instantly without redeployment
+- [ ] **Emergency Pause**: Contract pause / freeze mechanism available to halt affected functions
+- [ ] **Forward-Only / Irreversible**: State migration cannot be cleanly reversed; emergency recovery runbook linked below
+
+### Rollback Trigger Criteria
+<!-- What specific conditions, metrics, or alerts will trigger an immediate rollback? (e.g. error rate > 1%, oracle divergence, tx reverts) -->
+- 
+
+### Step-by-Step Rollback Procedure
+<!-- List the exact operational sequence required to execute a rollback -->
+1. 
+2. 
+3. 
+
+---
+
+## ⚡ Performance Impact
+
+<!-- Evaluate gas usage, execution compute units, latency, throughput, and bundle size impact -->
+
+### Performance & Resource Assessment
+- [ ] Smart contract gas / compute units benchmarked (no regression > 5%, or justified below)
+- [ ] Backend API latency (p95/p99) and database query execution plans verified
+- [ ] Database indexing verified for newly queried columns (no table scans)
+- [ ] Frontend bundle size and Time to Interactive (TTI) verified
+- [ ] Memory allocation and leak checks verified (no memory leaks in long-running services)
+- [ ] No measurable performance impact (documentation, tests, or trivial changes)
+
+**Performance & Gas Profiling Summary:**
+<!-- Include before/after gas consumption numbers, query explain plans, or benchmark output -->
+```
+```
 
 ---
 
@@ -28,7 +105,6 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
   
   **If any checkbox cannot be verified, explain below:**
   ```
-  N/A — this PR contains only documentation changes. No smart contract code was modified.
   ```
 
 ### Slither Static Analysis Results
@@ -41,7 +117,6 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
   
   **If this PR has security findings, document them below:**
   ```
-  N/A — documentation-only PR. No contract or runtime code changed.
   ```
 
 ### Handling Security Findings
@@ -51,7 +126,6 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
 - [ ] Test case added to verify fix
 - [ ] Explain fix below:
   ```
-  N/A
   ```
 
 #### Option B: False Positive 🟡
@@ -62,7 +136,6 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
   - Evidence (code snippet, test case, or reference)
 - [ ] Reference number (e.g., FP-001):
   ```
-  N/A
   ```
 - [ ] Inline suppression added to code:
   ```solidity
@@ -75,7 +148,6 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
 - [ ] Added to Slither exclusions
 - [ ] Explain below:
   ```
-  N/A
   ```
 
 ---
@@ -83,45 +155,40 @@ See [`docs/SECURITY_CHECKLIST.md`](/docs/SECURITY_CHECKLIST.md) for detailed gui
 ## 📝 Testing
 
 ### Functional Testing
-- [x] Unit tests added/updated for changes
-- [x] Integration tests passing
-- [x] Manual testing completed and documented below:
+- [ ] Unit tests added/updated for changes
+- [ ] Integration tests passing
+- [ ] End-to-end (E2E) tests passing
+- [ ] Manual testing completed and documented below:
   ```
-  - Verified all variable names, defaults, and required flags against source files:
-    backend/src/index.ts, rateLimiter.ts, auth.ts, tracing.ts
-  - Cross-checked every .env.example, .env.local.example, .env.production.example
-    in both backend/ and frontend/
-  - Confirmed links in README.md and ENV_QUICK_REFERENCE.md resolve correctly
-  - No runtime code changed; no functional regression possible
   ```
 
 ### Security Testing
 - For state-changing functions:
   - [ ] Reentrancy test (if applicable): Verify re-entry is blocked
   - [ ] Access control test: Verify unauthorized access is rejected
-  - [ ] Boundary test: Verify edge cases are handled
+  - [ ] Boundary / Edge-case test: Verify limits, zero-amounts, and rounding behavior
   
 - For external integrations:
   - [ ] Return value verification test
-  - [ ] Failure scenario test
+  - [ ] Failure / timeout scenario test
 
 ### Test Coverage
-- [x] All new code paths have test coverage
-- [x] Security-critical paths have comprehensive test cases
-- [x] Coverage report: `N/A — documentation only, no executable code added`
+- [ ] All new code paths have test coverage
+- [ ] Security-critical paths have comprehensive test cases
+- [ ] Coverage report:
+  ```
+  ```
 
 ---
 
 ## 🚀 Deployment Notes
 
-No deployment steps required. This PR adds a Markdown file and updates two existing Markdown files only.
-
 ### Mainnet Readiness
 - [ ] This code is ready for production deployment
-- [x] All critical tests pass
+- [ ] All critical tests pass
 - [ ] Security review approved
-- [x] No temporary debug code
-- [x] No TODO comments
+- [ ] No temporary debug code
+- [ ] No TODO comments
 
 ### Breaking Changes
 If this PR introduces breaking changes:
@@ -136,10 +203,9 @@ If this PR introduces breaking changes:
 <!-- GitHub Actions will update this section -->
 
 ### Slither Analysis
-- ✓ Status: N/A — no contract code changed
+- ✓ Status:
 - 🔴 High/Medium findings: 0
 - 🟡 Low/Informational findings: 0
-- 🟢 No issues detected: documentation-only PR
 
 ### Related Documentation
 - [Security Checklist](docs/SECURITY_CHECKLIST.md) — Use for code review
@@ -150,17 +216,19 @@ If this PR introduces breaking changes:
 
 ## ✅ Reviewer Checklist
 
-**For code reviewers** (use this to guide your security-focused review):
+**For code reviewers** (use this to guide your review):
 
-- [x] PR author completed security checklist ✓
-- [x] All findings documented and categorized (fixed/false positive/excluded)
-- [x] Inline security comments are clear and justified
+- [ ] PR author completed Risk Assessment and Rollback Plan ✓
+- [ ] Performance and gas impact evaluated and verified ✓
+- [ ] PR author completed security checklist ✓
+- [ ] All findings documented and categorized (fixed/false positive/excluded)
+- [ ] Inline security comments are clear and justified
 - [ ] Tests cover security-critical code paths
 - [ ] No external calls bypass return value checks
 - [ ] Access control is properly enforced
 - [ ] State updates follow CEI pattern
 - [ ] Input validation is comprehensive
-- [x] Follow-up actions (if any) tracked in issues
+- [ ] Follow-up actions (if any) tracked in issues
 
 ---
 
@@ -176,15 +244,18 @@ If this PR introduces breaking changes:
 
 Before marking PR as ready for review:
 
-- [x] Description is clear and concise
-- [x] All security checklist items checked (✅ or explanation provided)
-- [x] All tests passing locally: `npm test`
-- [x] Linter passing: `npm run lint`
+- [ ] Description, Goal, and Changes are clearly stated
+- [ ] Risk Assessment completed with appropriate risk tier and blast radius
+- [ ] Rollback Plan completed with concrete steps and trigger criteria
+- [ ] Performance Impact assessed with gas / compute benchmarks
+- [ ] All security checklist items checked (✅ or explanation provided)
+- [ ] All tests passing locally: `npm test`
+- [ ] Linter passing: `npm run lint`
 - [ ] Slither passing locally OR findings documented: `slither . --config-file slither.config.json`
-- [x] Code follows project style guide
-- [x] No merge conflicts
-- [x] Commits are clean and well-documented
-- [x] Branch is up-to-date with main/develop
+- [ ] Code follows project style guide
+- [ ] No merge conflicts
+- [ ] Commits are clean and well-documented
+- [ ] Branch is up-to-date with main/develop
 - [ ] For **release PRs**: `docs/RELEASE_READINESS_CHECKLIST.md` completed and linked in PR description
 
 ---

@@ -307,7 +307,10 @@ export function cacheMiddleware(options: CacheOptions) {
 
 // ── Invalidation ─────────────────────────────────────────────────────────────
 
-type InvalidationHook = (eventType: string, metadata?: Record<string, unknown>) => string[];
+type InvalidationHook = (
+  eventType: string,
+  metadata?: Record<string, unknown>,
+) => string[] | Promise<string[]> | Promise<void>;
 
 const invalidationHooks: InvalidationHook[] = [];
 
@@ -316,6 +319,9 @@ const invalidationHooks: InvalidationHook[] = [];
  * Hooks receive the event type and optional metadata and return an array of cache key patterns.
  */
 export function registerInvalidationHook(hook: InvalidationHook): void {
+  if (typeof hook !== 'function') {
+    throw new TypeError('Invalidation hook must be a function');
+  }
   invalidationHooks.push(hook);
 }
 
@@ -333,6 +339,23 @@ export function triggerCacheInvalidation(
     try {
       const hookPatterns = hook(eventType, metadata);
       // Validate and sanitize hook return value
+      if (hookPatterns instanceof Promise) {
+        void hookPatterns.catch((err) => {
+          console.error(
+            JSON.stringify({
+              level: 'error',
+              event: 'invalidation_hook_error',
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
+        continue;
+      }
+
+      if (!Array.isArray(hookPatterns)) {
+        throw new TypeError('invalidation hook must return an array of patterns');
+      }
+
       if (!Array.isArray(hookPatterns)) {
         console.error(
           JSON.stringify({
@@ -340,11 +363,14 @@ export function triggerCacheInvalidation(
             event: 'invalidation_hook_error',
             error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
             eventType,
+            event: 'invalidation_hook_invalid_return',
+            error: 'Invalidation hook must return an array of cache key patterns',
           }),
         );
         continue;
       }
       patterns.push(...hookPatterns);
+      patterns.push(...hookPatterns.filter((pattern): pattern is string => typeof pattern === 'string'));
     } catch (err) {
       console.error(
         JSON.stringify({

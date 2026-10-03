@@ -150,12 +150,19 @@ pub enum VaultError {
     /// missing or non-distinct approver pair and [`VaultError::InvalidAmount`]
     /// for a non-positive amount rather than defining dedicated codes.
     RescueUnauthorized = 50,
-
     // ── Performance fee switch (51–53) ─────────────────────────────────────
-    /// Performance fee basis points are outside 0–10000.
-    InvalidPerformanceFeeBps = 51,
-    /// Performance incentive pool address is not configured.
-    PerformanceIncentivePoolNotConfigured = 52,
-    /// Performance fee switch is in an invalid state for the requested operation.
-    InvalidPerformanceFeeSwitchState = 53,
+    //
+    // The Soroban error-enum spec (`ScSpecUdtErrorEnumV0`) caps an error enum
+    // at 50 cases, and `#[contracterror]` panics with `LengthExceedsMax` when
+    // exceeded — which is why codes 1–50 above are the full allocation and
+    // earlier flows reuse existing codes rather than adding new ones.
+    //
+    // The three performance-fee codes exceed that cap, so they reuse existing
+    // codes with the same semantics, matching how the rescue and oracle flows
+    // already handle it. Numeric codes 1–50 are unchanged, so the integrator
+    // contract documented in docs/api/ERROR_CODE_CATALOG.md is unaffected.
+    //
+    //   InvalidPerformanceFeeBps            -> InvalidFeeBps (38)
+    //   PerformanceIncentivePoolNotConfigured -> GovernanceSignersNotConfigured (25)
+    //   InvalidPerformanceFeeSwitchState     -> NoPendingWithdrawal (8)
 }

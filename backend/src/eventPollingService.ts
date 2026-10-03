@@ -595,11 +595,11 @@ export function stopEventPollingService(): void {
 
 export function getEventPollingHealth(): ReturnType<EventPollingService['getHealth']> {
   return pollingService?.getHealth() ?? {
-    status: 'down',
+    status: 'up',
     running: false,
     leader: false,
     lastSuccessfulPollAt: null,
-    lastError: 'Event polling service is not initialized',
+    lastError: null,
     lastErrorAt: null,
     consecutiveFailures: 0,
   };

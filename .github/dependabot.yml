@@ -1,15 +1,32 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/frontend"
+    directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
     open-pull-requests-limit: 10
     security-updates: true
     rebase-strategy: auto
     labels:
       - "dependencies"
       - "security"
+      - "general"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 10
+    security-updates: true
+    rebase-strategy: auto
+    labels:
+      - "dependencies"
+      - "security"
+      - "general"
 
   - package-ecosystem: "npm"
     directory: "/backend"
@@ -21,6 +38,7 @@ updates:
     labels:
       - "dependencies"
       - "security"
+      - "general"
 
   - package-ecosystem: "cargo"
     directory: "/"
@@ -32,6 +50,7 @@ updates:
     labels:
       - "dependencies"
       - "security"
+      - "general"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -42,3 +61,4 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+      - "general"

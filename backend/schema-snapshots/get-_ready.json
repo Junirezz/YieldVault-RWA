@@ -21,13 +21,43 @@
         },
         "prisma": {
           "type": "boolean"
+        },
+        "indexer": {
+          "type": "boolean"
+        },
+        "redis": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "optional": {
+              "type": "boolean"
+            },
+            "latencyMs": {
+              "type": "number"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
         "cache",
         "stellarRpc",
         "database",
-        "prisma"
+        "prisma",
+        "indexer",
+        "redis"
       ],
       "additionalProperties": false
     }

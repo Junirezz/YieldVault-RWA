@@ -1,6 +1,6 @@
 # cargo-deny configuration for supply-chain security checks (CI: rust-security.yml).
 #
-# Only the `advisories` check is run in CI today. Entries below are ignored
+# Advisories and licenses checks are run in CI. Entries below are ignored
 # only after triage; see contracts/.false-positives.md for the rationale and
 # docs/FALSE_POSITIVE_HANDLING.md for the process.
 [advisories]
@@ -9,3 +9,21 @@ ignore = [
     "RUSTSEC-2024-0388", # derivative: unmaintained (informational), no known exploit
     "RUSTSEC-2024-0436", # paste: unmaintained (informational), no known exploit
 ]
+
+[licenses]
+version = 2
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+exceptions = []

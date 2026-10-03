@@ -20,7 +20,11 @@
 
 # Editor
 .idea
-.vscode
+# Ignore personal editor state, but track the shared recommendations/settings
+# so every contributor and Codespace gets the same setup.
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 *.swp
 
 # Agents

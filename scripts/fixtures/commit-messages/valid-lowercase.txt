@@ -1,0 +1,8 @@
+fix: correct rounding on share price accrual
+feat: add vesting schedule to dashboard
+chore: bump soroban-sdk to 22.0.0
+docs: document the recovery runbook
+test: cover fee clawback branch
+refactor: extract ledger entry mapper
+ci: run cargo audit on pull requests
+style: apply repo formatting

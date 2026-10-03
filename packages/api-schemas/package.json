@@ -1,6 +1,7 @@
 {
   "name": "@yieldvault/api-schemas",
   "version": "1.0.0",
+  "license": "MIT",
   "private": true,
   "description": "Shared Zod request/response schemas for YieldVault API consumers",
   "main": "./dist/index.js",

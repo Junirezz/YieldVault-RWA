@@ -29,9 +29,14 @@ git clone https://github.com/yourusername/YieldVault-RWA.git
 cd YieldVault-RWA
 
 # Install dependencies
-npm ci               # Backend
-cd frontend && npm ci # Frontend
+pnpm install
+
+# Build shared packages (required before backend type-checking or building)
+npm run build:schemas   # Or: cd packages/api-schemas && npm run build
 ```
+
+> **Important (Build Order):** The `@yieldvault/api-schemas` package must be built prior to running TypeScript (`tsc`), local type-checking, or building the backend. Running `npm run build` or `npm run dev` in the backend will automatically execute `build:schemas` via `prebuild`/`predev` hooks, but manual `tsc --noEmit` invocations require `dist` in `packages/api-schemas` to be generated first.
+
 
 ### Environment Configuration
 
@@ -122,21 +127,48 @@ All code changes require tests. We use:
 
 ### Running Tests Locally
 
+YieldVault-RWA is organized as a pnpm workspace monorepo. Tests can be run at the root workspace level or inside individual packages:
+
+#### Monorepo Root Commands: `pnpm test` vs `pnpm -r test`
+
+- **`pnpm test`** (Root Workspace Pipeline): Runs the orchestrated test pipeline across all workspace packages with explicit production flags:
+  ```bash
+  pnpm test
+  # Executes: pnpm --filter backend test -- --runInBand --coverage && pnpm --filter frontend test --run
+  ```
+  - **Backend**: Runs Jest with `--runInBand` (serial worker execution to prevent concurrency collisions on SQLite) and collects coverage reports in `backend/coverage/`.
+  - **Frontend**: Runs Vitest with `--run` in deterministic single-pass mode.
+
+- **`pnpm -r test`** (Recursive Package Run): Executes the `test` lifecycle script defined in each package (`backend`, `frontend`, `packages/api-schemas`) recursively in topological dependency order:
+  ```bash
+  pnpm -r test
+  ```
+  Package-level test scripts are aligned so that running recursively executes with the proper flags (`jest --runInBand --coverage` in backend and `vitest run` in frontend), guaranteeing that backend coverage artifacts are generated and frontend tests run non-interactively without hanging.
+
+#### Running Tests in Individual Packages
+
 ```bash
-# Backend unit tests
-cd backend && npm run test
+# Backend tests (runs Jest with --runInBand and --coverage)
+cd backend && pnpm test
+# Or from root:
+pnpm --filter backend test
 
-# Backend integration tests
-npm run test:integration
+# Frontend unit & component tests (runs Vitest in single-run mode)
+cd frontend && pnpm test
+# Or from root:
+pnpm --filter frontend test
 
-# Frontend unit tests
-cd frontend && npm run test
+# Frontend watch mode (for active local development)
+cd frontend && pnpm test:watch
 
-# E2E tests (requires running services)
-npm run test:e2e
+# Frontend E2E tests (Playwright)
+cd frontend && pnpm test:e2e
 
-# All tests
-npm run test:all
+# Cypress smoke tests
+cd frontend && pnpm test:cypress
+
+# Soroban smart contract tests
+cargo test -p vault
 ```
 
 ### Test Coverage Expectations
@@ -158,6 +190,35 @@ npm run format
 ```
 
 Code must pass linting before PR approval.
+
+### Commit Messages
+
+Commit messages must use [Conventional Commits](https://www.conventionalcommits.org/) with a **lower-case** type drawn from this list:
+
+`fix` · `feat` · `chore` · `docs` · `test` · `refactor`
+
+```bash
+# Valid
+fix: correct rounding on share price accrual
+feat(frontend): add vesting schedule to dashboard
+
+# Rejected — the type must be lower-case
+Fix: correct rounding on share price accrual
+FEAT: add vesting schedule to dashboard
+```
+
+The lower-case requirement is enforced by `commitlint.config.js` through the
+`.husky/commit-msg` hook, so an upper-case type is rejected at commit time. It
+also keeps the changelog correct: `cliff.toml` sets `conventional_commits = true`
+and groups release notes by parsed type, and git-cliff's parser accepts both
+cases. Without this rule `Fix:` would be parsed as its own type and split into a
+separate changelog group from `fix:`.
+
+To check a message without committing:
+
+```bash
+echo "Fix: something" | npx commitlint
+```
 
 ## Pull Request Process
 

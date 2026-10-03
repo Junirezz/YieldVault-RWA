@@ -46,6 +46,28 @@ describe('#711 API contract schema snapshots', () => {
     expect(issues.some((issue) => issue.message === 'field removed')).toBe(true);
   });
 
+  it('detects newly added required fields as breaking changes', () => {
+    // diffSchemaShapes(baseline, current) compares a committed snapshot against
+    // the live schema, so the shape that is missing the field is the baseline
+    // and the shape carrying it is `current`.
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
+    // Simulate an older snapshot that is missing the 'indexer' field
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
+    // Simulate an older snapshot that is missing the 'indexer' field, so the
+    // live schema now has a required field the committed snapshot does not know
+    // about. `baseline` is the committed snapshot and `current` is the live
+    // schema, so the deletion has to happen on the baseline.
+    delete baseline.properties?.checks?.properties?.indexer;
+    baseline.properties!.checks!.required = (baseline.properties!.checks!.required ?? []).filter(
+      (k: string) => k !== 'indexer',
+    );
+
+    const issues = diffSchemaShapes(baseline, current, 'GET /health');
+    expect(issues.some((issue) => issue.message.includes('now required'))).toBe(true);
+  });
+
   it('validates a conforming health payload', () => {
     const result = validateResponseAgainstSchema('GET /health', {
       status: 'healthy',
@@ -136,5 +158,22 @@ describe('#711 API contract schema snapshots', () => {
       const second = generateSnapshotFor(endpoint);
       expect(first).toEqual(second);
     }
+  });
+
+  it('detects orphaned required references in baseline snapshot', () => {
+    const baseline = JSON.parse(JSON.stringify(zodToJsonShape(HealthResponseSchema))) as JsonSchemaShape;
+    delete baseline.properties?.checks.properties?.api;
+    const current = zodToJsonShape(HealthResponseSchema);
+    const issues = diffSchemaShapes(baseline, current, 'GET /health');
+    expect(issues.some((issue) => issue.message === 'required field missing from snapshot properties (orphaned reference)' && issue.path === 'GET /health.checks.api')).toBe(true);
+  });
+
+  it('detects new fields added to live schema', () => {
+    const baseline = zodToJsonShape(HealthResponseSchema);
+    const current = JSON.parse(JSON.stringify(baseline)) as JsonSchemaShape;
+    if (!current.properties) current.properties = {};
+    current.properties.newField = { type: 'string' };
+    const issues = diffSchemaShapes(baseline, current, 'GET /health');
+    expect(issues.some((issue) => issue.message === 'new field added to live schema (snapshot drift)' && issue.path === 'GET /health.newField')).toBe(true);
   });
 });

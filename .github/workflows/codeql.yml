@@ -60,10 +60,15 @@ jobs:
               - exclude:
                   id: rust/unsafe-cast
 
+      # The trailing `|| true` used to swallow every build failure, which is how
+      # a non-compiling vault reached main unnoticed. The wasm32 build is
+      # expected to fail for the vault (blocked upstream by DataKey
+      # contracttype limits), so fall back to the host build -- and let that
+      # failure fail the job, as a genuine compile error should.
       - name: Build Rust contracts
         run: |
-          cargo build --release --target wasm32-unknown-unknown -p vault 2>&1 || \
-          cargo build --release -p vault 2>&1 || true
+          cargo build --release --target wasm32-unknown-unknown -p mock-strategy || \
+          cargo build --release -p vault
         working-directory: contracts
         env:
           RUSTFLAGS: "-C link-arg=-s"
