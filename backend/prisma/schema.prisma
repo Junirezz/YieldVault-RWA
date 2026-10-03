@@ -50,6 +50,9 @@ model Transaction {
   tenantId      String?
   latencyMs     Int?
   failureReason String?
+  // Soft-delete marker used by the tenant boundary guard so revoked rows are
+  // never returned to a tenant-scoped read.
+  deletedAt     DateTime?
   timestamp     DateTime @default(now())
 
   // Issue #895 – query optimisation indices
@@ -61,6 +64,8 @@ model Transaction {
   @@index([user, type, timestamp(sort: Desc)])
   @@index([user, status, timestamp(sort: Desc)])
   @@index([vaultId, tenantId, timestamp(sort: Desc)])
+  @@index([tenantId])
+  @@index([deletedAt])
 }
 
 model Referral {
@@ -136,6 +141,23 @@ model AdminAuditLog {
   @@index([createdAt])
   @@index([action])
   @@index([actor])
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  tenantId   String
+  hashedKey  String    @unique
+  scopes     String    // JSON-serialised string[]
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  revoked    Boolean   @default(false)
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([hashedKey])
+  @@index([expiresAt])
 }
 
 model ApiKeyAuditEvent {
@@ -221,6 +243,8 @@ model WebhookEndpoint {
   challengeExpiresAt    DateTime?
   verifiedAt            DateTime?
   lastVerificationError String?
+  // Owning tenant, used by the tenant boundary guard for cross-account reads.
+  tenantId              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   deletedAt             DateTime?
@@ -231,6 +255,7 @@ model WebhookEndpoint {
   @@index([createdAt])
   @@index([deletedAt])
   @@index([verificationStatus])
+  @@index([tenantId])
 }
 
 model WebhookDelivery {
@@ -615,8 +640,11 @@ model WriteAheadAuditEntry {
 model Vault {
   id        String    @id @default(uuid())
   tenantId  String
+  name      String
+  symbol    String
   aum       Float     @default(0)
   tvlUsd    String?
+  metadataURI String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -625,6 +653,20 @@ model Vault {
 
   @@index([tenantId])
   @@index([deletedAt])
+}
+
+model VaultMetadataPin {
+  id        String    @id @default(uuid())
+  vaultId   String    @unique
+  cid       String
+  pinnedAt  DateTime  @default(now())
+  unpinnedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([cid])
+  @@index([pinnedAt])
+  @@index([unpinnedAt])
 }
 
 model Strategy {
@@ -641,14 +683,23 @@ model Allocation {
   vaultId    String
   strategyId String
   amount     Float    @default(0)
+  /// Target share of the vault's AUM, as a percentage. The per-vault
+  /// invariant is `sum(weight) = 100`; `rebalanceVaultAllocations`
+  /// (backend/src/services/allocation.ts) is the only writer.
+  weight     Float    @default(0)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   vault    Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
   strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
+  // One row per (vault, strategy). Without this a concurrent rebalance can
+  // insert a second row for the same pair, which is exactly the phantom read
+  // the serializable rebalance transaction exists to prevent (Issue #1433).
+  @@unique([vaultId, strategyId])
   @@index([vaultId])
   @@index([strategyId])
+  @@index([vaultId, weight])
 }
 
 model ExposureBreach {
@@ -694,4 +745,28 @@ model IdempotencyKey {
 
   @@unique([keyId, tenantId])
   @@index([expiresAt])
+}
+
+// ─── Session Audit ────────────────────────────────────────────────────────────
+
+/// Append-only trail of session lifecycle events (login, refresh, logout,
+/// expiry) written by `sessionAudit.ts`. Powers incident investigation and
+/// the anomaly heuristics in `detectSuspiciousActivity`.
+model SessionAuditLog {
+  id            String   @id @default(uuid())
+  walletAddress String
+  eventType     String // created | refreshed | revoked | expired | failed
+  reason        String // user_logout | token_rotation | token_expiration | ...
+  sessionId     String
+  ipAddress     String?
+  userAgent     String?
+  /// JSON-serialised context attached to the event.
+  metadata      String?
+  correlationId String?
+  traceId       String?
+  timestamp     DateTime @default(now())
+
+  @@index([walletAddress, timestamp(sort: Desc)])
+  @@index([eventType])
+  @@index([timestamp(sort: Desc)])
 }

@@ -3,7 +3,8 @@ import { assertCriticalEntityMutationAllowed } from './criticalEntityPolicy';
 import { invalidateVaultCountAfterMutation } from './vaultCountCache';
 
 const QUERY_TIMEOUT_MS = parsePositiveInt(process.env.PRISMA_QUERY_TIMEOUT_MS, 5000);
-const POOL_MAX = parsePositiveInt(process.env.PRISMA_POOL_MAX, 10);
+const POOL_MAX_MS = parsePositiveInt(process.env.PRISMA_POOL_MAX,
+ 10);
 const POOL_TIMEOUT_MS = parsePositiveInt(process.env.PRISMA_POOL_TIMEOUT_MS, 10000);
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
@@ -44,6 +45,7 @@ function buildDatasourceUrl(): string | undefined {
 }
 
 const prismaClient = new PrismaClient({
+  // Optional datasource override for SQLite/file URLs.
   ...(buildDatasourceUrl()
     ? {
         datasources: {

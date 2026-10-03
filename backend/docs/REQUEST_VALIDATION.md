@@ -36,6 +36,9 @@ webhook register/update reject unknown keys).
 | `backend/src/middleware/validate.ts` | Auth, alias, webhook register schemas + middleware |
 | `packages/api-schemas` | Shared vault deposit/withdrawal contracts |
 
+> **Build Order:** The `@yieldvault/api-schemas` package must be built (`npm run build:schemas` or `npm run build` in backend) before TypeScript typechecking (`tsc --noEmit`) can resolve types imported by `backend/src/middleware/validate.ts`.
+
+
 ## Common rules
 
 - **Stellar addresses** on login/nonce: checksummed `G…` public keys.

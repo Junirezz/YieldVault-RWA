@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "aum": {
+            "type": "number"
+          },
+          "tvlUsd": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "aum",
+          "tvlUsd",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        },
+        "nextCursor": {
+          "type": "string"
+        },
+        "prevCursor": {
+          "type": "string"
+        },
+        "currentPage": {
+          "type": "number"
+        },
+        "totalPages": {
+          "type": "number"
+        },
+        "hasNextPage": {
+          "type": "boolean"
+        },
+        "hasPrevPage": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "limit",
+        "total",
+        "nextCursor",
+        "prevCursor",
+        "currentPage",
+        "totalPages",
+        "hasNextPage",
+        "hasPrevPage"
+      ],
+      "additionalProperties": false
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "data",
+    "pagination",
+    "timestamp"
+  ],
+  "additionalProperties": false
+}

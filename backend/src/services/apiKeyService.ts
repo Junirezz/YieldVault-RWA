@@ -15,6 +15,7 @@ export interface ApiKeyRecord {
   scopes: string[];
   createdAt: Date;
   expiresAt?: Date | null;
+  lastUsedAt?: Date | null;
   isActive: boolean;
   deletedAt?: Date | null;
   deletedBy?: string | null;
@@ -50,6 +51,7 @@ function toApiKeyRecord(r: {
   scopes: unknown;
   createdAt: Date;
   expiresAt: Date | null;
+  lastUsedAt?: Date | null;
   isActive: boolean;
   deletedAt: Date | null;
   deletedBy: string | null;
@@ -63,6 +65,7 @@ function toApiKeyRecord(r: {
     scopes: deserializeScopes(r.scopes),
     createdAt: r.createdAt,
     expiresAt: r.expiresAt ?? undefined,
+    lastUsedAt: r.lastUsedAt ?? undefined,
     isActive: r.isActive,
     deletedAt: r.deletedAt ?? undefined,
     deletedBy: r.deletedBy ?? undefined,
@@ -141,13 +144,15 @@ export async function restoreApiKey(
 export async function rotateApiKey(
   id: string,
   newPlainKey: string,
-  newScopes?: string[]
+  newScopes?: string[],
+  newExpiresAt?: Date | null
 ): Promise<ApiKeyRecord | null> {
   const hashedKey = hashApiKey(newPlainKey);
   const updateData: Record<string, unknown> = {
     hashedKey,
   };
   if (newScopes) updateData.scopes = serializeScopes(newScopes);
+  if (newExpiresAt !== undefined) updateData.expiresAt = newExpiresAt;
   const record = await prisma.$transaction(async (tx) => {
     const updated = await tx.apiKey.updateMany({
       where: {
@@ -174,4 +179,15 @@ export async function listApiKeys(
     },
   });
   return records.map((r) => toApiKeyRecord(r));
+}
+
+export async function touchApiKeyLastUsed(hashed: string): Promise<void> {
+  try {
+    await prisma.apiKey.update({
+      where: { hashedKey: hashed },
+      data: { lastUsedAt: new Date() },
+    });
+  } catch {
+    // best-effort audit tracking only
+  }
 }

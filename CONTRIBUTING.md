@@ -29,9 +29,14 @@ git clone https://github.com/yourusername/YieldVault-RWA.git
 cd YieldVault-RWA
 
 # Install dependencies
-npm ci               # Backend
-cd frontend && npm ci # Frontend
+pnpm install
+
+# Build shared packages (required before backend type-checking or building)
+npm run build:schemas   # Or: cd packages/api-schemas && npm run build
 ```
+
+> **Important (Build Order):** The `@yieldvault/api-schemas` package must be built prior to running TypeScript (`tsc`), local type-checking, or building the backend. Running `npm run build` or `npm run dev` in the backend will automatically execute `build:schemas` via `prebuild`/`predev` hooks, but manual `tsc --noEmit` invocations require `dist` in `packages/api-schemas` to be generated first.
+
 
 ### Environment Configuration
 

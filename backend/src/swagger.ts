@@ -1,6 +1,14 @@
 import type { Express } from 'express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE as VAULT_LIST_MAX_PAGE,
+  MAX_PAGE_SIZE as VAULT_LIST_MAX_LIMIT,
+} from './middleware/paginationGuard';
+import { CLOCK_SKEW_TOLERANCE_SECONDS } from './auth';
+
+const VAULT_LIST_DEFAULT_LIMIT = DEFAULT_PAGE_SIZE;
 
 /**
  * OpenAPI 3.1 definition for the YieldVault Stellar RWA backend.
@@ -11,6 +19,7 @@ import swaggerUi from 'swagger-ui-express';
  * It documents:
  *  - authentication (JWT bearer + API key)
  *  - rate limiting behaviour
+ *  - pagination ceilings for database-backed list routes (Issue #1430)
  *  - request/response examples for every public + admin endpoint
  */
 const RATE_LIMIT_NOTE =
@@ -51,7 +60,14 @@ const options: swaggerJsdoc.Options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'JWT issued by POST /auth/login or POST /auth/refresh.',
+          description:
+            'JWT issued by POST /auth/login or POST /auth/refresh. ' +
+            '`exp` is enforced with **zero** clock tolerance — a token is rejected the ' +
+            'moment it expires. Only `nbf`/`iat` get a ' +
+            `${CLOCK_SKEW_TOLERANCE_SECONDS}s tolerance for clock skew. ` +
+            'The revocation list is checked on every authenticated request, so a token ' +
+            'presented after `POST /auth/logout` (401 `TOKEN_REVOKED`) or after ' +
+            '`POST /auth/logout-all` is refused immediately rather than at expiry.',
         },
         apiKeyAuth: {
           type: 'apiKey',
@@ -75,6 +91,40 @@ const options: swaggerJsdoc.Options = {
             'Optional client-supplied correlation id. If omitted, the server generates one ' +
             'and echoes it back in the response header for distributed tracing.',
           schema: { type: 'string', format: 'uuid' },
+        },
+        /**
+         * `limit` for every database-backed list route that enforces a hard
+         * ceiling (Issue #1430). Documented once here and `$ref`-ed from the
+         * paths below so the published contract, the implementation constants
+         * and the snapshot test can never drift apart silently.
+         */
+        pageSize: {
+          name: 'limit',
+          in: 'query',
+          required: false,
+          description:
+            'Maximum number of items to return. ' +
+            `Hard ceiling is ${VAULT_LIST_MAX_LIMIT} (default ${VAULT_LIST_DEFAULT_LIMIT}). ` +
+            'A larger value is **rejected**, not clamped, with `400` and ' +
+            '`code: "LIMIT_EXCEEDED"` — the response body repeats the ceiling so ' +
+            'clients can self-correct. Use `page` (clamped to 1..1000) to walk the rest.',
+          schema: {
+            type: 'integer',
+            minimum: 1,
+            maximum: VAULT_LIST_MAX_LIMIT,
+            default: VAULT_LIST_DEFAULT_LIMIT,
+            example: VAULT_LIST_DEFAULT_LIMIT,
+          },
+        },
+        pageNumber: {
+          name: 'page',
+          in: 'query',
+          required: false,
+          description:
+            '1-based page number for offset pagination. Values outside 1..1000 are ' +
+            'clamped rather than rejected, and the effective page is echoed back in ' +
+            '`pagination.currentPage`.',
+          schema: { type: 'integer', minimum: 1, maximum: VAULT_LIST_MAX_PAGE, default: 1 },
         },
       },
       schemas: {
@@ -104,13 +154,34 @@ const options: swaggerJsdoc.Options = {
           type: 'object',
           properties: {
             count: { type: 'integer' },
+            limit: { type: 'integer', maximum: VAULT_LIST_MAX_LIMIT },
             total: { type: 'integer' },
             nextCursor: { type: 'string', nullable: true },
             prevCursor: { type: 'string', nullable: true },
-            currentPage: { type: 'integer' },
+            currentPage: { type: 'integer', minimum: 1, maximum: VAULT_LIST_MAX_PAGE },
             totalPages: { type: 'integer' },
             hasNextPage: { type: 'boolean' },
             hasPrevPage: { type: 'boolean' },
+          },
+        },
+        Vault: {
+          type: 'object',
+          required: ['id', 'aum', 'tvlUsd', 'createdAt', 'updatedAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            aum: { type: 'number', example: 0 },
+            tvlUsd: { type: 'string', nullable: true, example: '1250000.00' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        VaultListResponse: {
+          type: 'object',
+          required: ['data', 'pagination', 'timestamp'],
+          properties: {
+            data: { type: 'array', items: { $ref: '#/components/schemas/Vault' } },
+            pagination: { $ref: '#/components/schemas/PaginationMeta' },
+            timestamp: { type: 'string', format: 'date-time' },
           },
         },
         VaultSummary: {
@@ -318,6 +389,129 @@ const options: swaggerJsdoc.Options = {
           description: 'Returns TVL, share price, and APY summary for the vault.',
           responses: {
             '200': { description: 'Summary', content: { 'application/json': { schema: { $ref: '#/components/schemas/VaultSummary' } } } },
+          },
+        },
+      },
+      '/api/v1/vaults/{id}/apy': {
+        get: {
+          tags: ['Vault'],
+          summary: 'Vault APY',
+          description:
+            "Returns the annualised APY for the specified vault. Returns `apy: null` with " +
+            "`apyStatus: 'insufficient_data'` when the vault has zero shares or fewer than two " +
+            'price snapshots (e.g. a newly created vault).',
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              description: 'Vault identifier',
+            },
+          ],
+          responses: {
+            '200': {
+              description: 'Vault APY result',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    required: ['apy', 'apyStatus', 'timestamp'],
+                    properties: {
+                      apy: {
+                        type: ['number', 'null'],
+                        example: 8.45,
+                        description:
+                          'Annualised APY as a decimal percentage. null when insufficient data.',
+                      },
+                      apyStatus: {
+                        type: 'string',
+                        enum: ['ok', 'insufficient_data'],
+                        example: 'ok',
+                      },
+                      timestamp: { type: 'string', format: 'date-time' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/v1/vaults': {
+        get: {
+          tags: ['Vault'],
+          summary: 'List vaults',
+          description:
+            'Paginated listing of active (non-deleted) vaults. ' +
+            '`limit` is capped at ' +
+            VAULT_LIST_MAX_LIMIT +
+            ' and `page` at ' +
+            VAULT_LIST_MAX_PAGE +
+            '; exceeding `limit` fails fast with `400` / `LIMIT_EXCEEDED` instead of ' +
+            'silently clamping, so a client that asks for an oversized page is never ' +
+            'handed a response that looks complete. ' +
+            RATE_LIMIT_NOTE,
+          parameters: [
+            { $ref: '#/components/parameters/pageSize' },
+            { $ref: '#/components/parameters/pageNumber' },
+            { $ref: '#/components/parameters/correlationId' },
+          ],
+          responses: {
+            '200': {
+              description: 'One page of vaults',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/VaultListResponse' },
+                  example: {
+                    data: [
+                      {
+                        id: '0f1b3a2c-6d4e-4a1b-9f0e-2c5d7e8b9a01',
+                        aum: 1250000,
+                        tvlUsd: '1250000.00',
+                        createdAt: '2026-01-01T00:00:00.000Z',
+                        updatedAt: '2026-01-02T00:00:00.000Z',
+                      },
+                    ],
+                    pagination: {
+                      count: 1,
+                      limit: 20,
+                      total: 1,
+                      nextCursor: null,
+                      prevCursor: null,
+                      currentPage: 1,
+                      totalPages: 1,
+                      hasNextPage: false,
+                      hasPrevPage: false,
+                    },
+                    timestamp: '2026-01-01T00:00:00.000Z',
+                  },
+                },
+              },
+            },
+            '400': {
+              description: '`limit` above the published ceiling',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+                  example: {
+                    error: 'Bad Request',
+                    status: 400,
+                    code: 'LIMIT_EXCEEDED',
+                    message: `limit must not exceed ${VAULT_LIST_MAX_LIMIT} (received 100000).`,
+                    retryable: false,
+                    details: {
+                      field: 'limit',
+                      requested: 100000,
+                      maxLimit: VAULT_LIST_MAX_LIMIT,
+                      defaultLimit: VAULT_LIST_DEFAULT_LIMIT,
+                      maxPage: VAULT_LIST_MAX_PAGE,
+                    },
+                  },
+                },
+              },
+            },
+            '429': { description: 'Rate limited', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } },
           },
         },
       },

@@ -22,11 +22,23 @@ export const stellarWalletAddressField = z
 
 export const walletAddressField = z.string().trim().min(1, 'walletAddress is required');
 
+/**
+ * Pagination params are validated for *shape* only. Numeric ranges are
+ * deliberately not enforced here: `parsePaginationQuery` already clamps every
+ * out-of-range value gracefully (non-numeric / <=0 `page` -> 1, non-numeric /
+ * <=0 `limit` -> default, `limit` above the endpoint max -> max), and contract
+ * tests require those inputs to resolve to a 200 first page rather than a 400.
+ * Rejecting them at the schema layer made the two disagree for the same input.
+ */
 export const PaginationQuerySchema = z
   .object({
-    limit: z.string().regex(/^\d+$/, 'limit must be a positive integer').optional(),
+    limit: z.string().optional(),
     cursor: z.string().optional(),
-    page: z.string().regex(/^\d+$/, 'page must be a positive integer').optional(),
+    page: z.string().optional(),
+    // Signed so an out-of-range page (`page=-1`, `page=1000000`) reaches
+    // `parsePaginationQuery`, which clamps it into `1..maxPage`, instead of
+    // being rejected outright (Issue #1430).
+    page: z.string().regex(/^-?\d+$/, 'page must be an integer').optional(),
     sortBy: z.string().optional(),
     sortOrder: z.string().optional(),
     dryRun: z.enum(['true', 'false', '1', '0']).optional(),
@@ -284,4 +296,30 @@ export const VaultStrategyBodySchema = z
     return { ...val, weights: result.ok ? result.data : val.weights };
   });
 
+/**
+ * POST /admin/vaults request body.
+ *
+ * - name: trimmed, 1–50 characters.
+ * - symbol: trimmed, 1–10 uppercase alphanumeric characters.
+ * - tenantId: required, non-empty string.
+ *
+ * `.trim()` runs before `.min(1)` so a whitespace-only value (e.g. " ")
+ * fails validation here and never reaches the database layer.
+ */
+export const CreateVaultBodySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '`name` must not be empty')
+    .max(50, '`name` must be 50 characters or fewer'),
+  symbol: z
+    .string()
+    .trim()
+    .min(1, '`symbol` must not be empty')
+    .max(10, '`symbol` must be 10 characters or fewer')
+    .regex(/^[A-Z0-9]+$/, '`symbol` must contain only uppercase letters and digits'),
+  tenantId: z.string().min(1, '`tenantId` is required'),
+});
+
 export const EmptyBodySchema = z.object({}).passthrough();
+

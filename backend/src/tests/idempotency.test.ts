@@ -17,7 +17,7 @@ import type { Request, Response } from 'express';
 describe('Idempotency', () => {
   describe('validateIdempotencyKey', () => {
     it('should accept UUID v4 format', () => {
-      const uuid = '550e8400-e29b-41d4-a716-446655440000';
+      const uuid = '550e8400-e9b9-41d4-a716-446655440000';
       expect(validateIdempotencyKey(uuid)).toBe(true);
     });
 
@@ -42,7 +42,7 @@ describe('Idempotency', () => {
     });
 
     it('should reject invalid characters', () => {
-      const invalid = 'key-with-invalid-chars-@#$%';
+      const invalid = 'key-with-invalid-chars-@#$-';
       expect(validateIdempotencyKey(invalid)).toBe(false);
     });
 
@@ -168,7 +168,8 @@ describe('Idempotency', () => {
 
     it('should reject invalid Idempotency-Key format', () => {
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? 'invalid' : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? 'invalid' : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();
@@ -178,16 +179,17 @@ describe('Idempotency', () => {
 
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
+        expect.objectContaining( {
           code: 'INVALID_IDEMPOTENCY_KEY_FORMAT',
         })
       );
     });
 
     it('should accept valid UUID format', () => {
-      const validUuid = '550e8400-e29b-41d4-a716-446655440000';
+      const validUuid = '550e8400-e9b9-41d4-a716-446655440000';
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? validUuid : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? validUuid : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();
@@ -202,7 +204,8 @@ describe('Idempotency', () => {
     it('should accept valid hex nonce', () => {
       const validHex = 'a'.repeat(32);
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? validHex : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? validHex : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();
@@ -294,7 +297,7 @@ describe('Idempotency', () => {
       expect(DEFAULT_IDEMPOTENCY_TTL_MS).toBe(24 * 60 * 60 * 1000);
     });
 
-    it('should respect custom TTL values', () => {
+    it('should respect custom TLL values', () => {
       const customTtl = 3600000; // 1 hour
       expect(customTtl).toBeLessThan(DEFAULT_IDEMPOTENCY_TTL_MS);
     });
