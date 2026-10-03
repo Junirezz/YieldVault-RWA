@@ -159,6 +159,28 @@
           }
         }
       },
+      "SystemHealthSummary": {
+        "type": "object",
+        "properties": {
+          "vaultCount": {
+            "type": "integer",
+            "example": 3
+          },
+          "activeVaults": {
+            "type": "integer",
+            "example": 2
+          },
+          "totalTvlUsd": {
+            "type": "string",
+            "format": "decimal",
+            "example": "0.60"
+          },
+          "totalUsers": {
+            "type": "integer",
+            "example": 10
+          }
+        }
+      },
       "DepositRequest": {
         "type": "object",
         "required": [
@@ -338,6 +360,154 @@
     }
   ],
   "paths": {
+    "/api/v1/vaults": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List vaults with a cached total count",
+        "description": "Send Authorization: ApiKey <key>. Non-admin keys are restricted to their tenant; admin keys may filter tenantId or list all tenants. Excludes soft-deleted vaults. Rows are fresh; totals use a process-local 500-entry LRU for five seconds, invalidated on successful Prisma vault writes. Also available at /api/vaults and /vaults. Rate limited: global 100 req / 15 min per IP; authenticated APIs 30 req / min per key. `429` responses follow the standard error envelope with a `retryAfter` detail.",
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "updatedAt",
+                "id",
+                "aum"
+              ],
+              "default": "createdAt"
+            }
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated vault records (offset pagination only)",
+            "headers": {
+              "X-Cache": {
+                "description": "Whether the total count was reused",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "HIT",
+                    "MISS"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "tenantId": {
+                            "type": "string"
+                          },
+                          "aum": {
+                            "type": "number"
+                          },
+                          "tvlUsd": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "deletedAt": {
+                            "type": "null"
+                          }
+                        }
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or unsupported cursor pagination"
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "Missing or mismatched authenticated tenant"
+          },
+          "500": {
+            "description": "Database query failed"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -671,6 +841,7 @@
           {
             "name": "cursor",
             "in": "query",
+            "description": "Preferred pagination. Opaque cursor in the form `<timestamp>_<id>` returned as `meta.nextCursor`. Rows are ordered by `timestamp` desc then `id` desc and filtered to `(timestamp, id) < cursor`, so newly inserted transactions do not cause skipped or duplicated rows.",
             "schema": {
               "type": "string"
             }
@@ -678,6 +849,8 @@
           {
             "name": "page",
             "in": "query",
+            "deprecated": true,
+            "description": "Deprecated offset-based pagination (`skip: (page-1)*limit`). Kept for backward compatibility only; may skip or duplicate rows when new transactions are inserted between fetches. Use `cursor` instead.",
             "schema": {
               "type": "integer"
             }
@@ -700,7 +873,9 @@
                   "meta": {
                     "count": 0,
                     "total": 0,
-                    "hasNextPage": false
+                    "hasNextPage": false,
+                    "nextCursor": null,
+                    "prevCursor": null
                   }
                 }
               }

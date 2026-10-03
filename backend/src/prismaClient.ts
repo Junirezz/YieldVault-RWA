@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { assertCriticalEntityMutationAllowed } from './criticalEntityPolicy';
 import { logger } from './middleware/structuredLogging';
 import { recordQueryPerformance } from './queryBudgets';
+import { invalidateVaultCountAfterMutation } from './vaultCountCache';
 
 let prismaClientInstance: PrismaClient | null = null;
 let queryInstrumentationAttached = false;
@@ -67,7 +68,9 @@ function attachQueryInstrumentation(client: PrismaClient): void {
     const startedAt = process.hrtime.bigint();
 
     try {
-      return await next(params);
+      const result = await next(params);
+      invalidateVaultCountAfterMutation(params.model, params.action);
+      return result;
     } finally {
       const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
       const model = params.model || 'raw';

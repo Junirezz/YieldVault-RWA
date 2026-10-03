@@ -46,14 +46,34 @@ export function getIdempotencyRetentionMetrics(): IdempotencyRetentionMetrics {
   };
 }
 
+export interface IdempotencyRetentionSweepResult {
+  /** Total entries pruned (or, in dry-run mode, that would be pruned). */
+  pruned: number;
+  localPruned: number;
+  redisPruned: number;
+  dryRun: boolean;
+}
+
+/**
+ * Runs a retention sweep. With `dryRun`, reports what would be pruned without
+ * deleting entries or updating the sweep metrics, so it is safe to rehearse
+ * against production.
+ */
 export async function pruneStaleIdempotencyRecords(
   dryRun = false,
-): Promise<{ pruned: number; dryRun: boolean }> {
+): Promise<IdempotencyRetentionSweepResult> {
   const startedAt = Date.now();
   const policy = getIdempotencyRetentionPolicy();
   const result = await idempotencyStore.pruneStaleKeys(policy.retentionMs, dryRun);
 
-  if (!dryRun) {
+  if (dryRun) {
+    logger.log('info', 'Idempotency retention dry-run completed', {
+      wouldPrune: result.pruned,
+      localPruned: result.localPruned,
+      redisPruned: result.redisPruned,
+      retentionMs: policy.retentionMs,
+    });
+  } else {
     retentionState.totalPruned += result.pruned;
     retentionState.lastPrunedCount = result.pruned;
     retentionState.lastSweepAt = new Date().toISOString();
@@ -68,7 +88,12 @@ export async function pruneStaleIdempotencyRecords(
     }
   }
 
-  return { pruned: result.pruned, dryRun };
+  return {
+    pruned: result.pruned,
+    localPruned: result.localPruned,
+    redisPruned: result.redisPruned,
+    dryRun,
+  };
 }
 
 export function startIdempotencyRetentionScheduler(): () => void {

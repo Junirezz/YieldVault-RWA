@@ -19,6 +19,8 @@ On failure the middleware returns **400** with:
 | `status` | `400` |
 | `code` | `VALIDATION_ERROR` |
 | `message` | Human-readable summary of all issues |
+| `summary` | Always `Request validation failed` |
+| `errors[]` | `{ code, field, message }` per issue (frontend compatibility) |
 | `details[]` | `{ code, field, message }` per issue |
 | `retryable` | `false` |
 
