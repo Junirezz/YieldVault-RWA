@@ -37,6 +37,7 @@ function makeOutboxInput(overrides: Partial<OutboxWriteInput> = {}): OutboxWrite
     aggregateType: 'transaction',
     aggregateId: 'tx-test-001',
     maxAttempts: 3,
+    vaultId: 'vault-test-001',
     ...overrides,
   };
 }
@@ -87,6 +88,7 @@ describe('EventOutboxService', () => {
       expect(record.maxAttempts).toBe(3);
       expect(record.aggregateType).toBe('transaction');
       expect(record.aggregateId).toBe('tx-test-001');
+      expect(record.vaultId).toBe('vault-test-001');
       expect(record.lockedAt).toBeNull();
       expect(record.lockedBy).toBeNull();
       expect(record.relayedAt).toBeNull();
@@ -478,6 +480,111 @@ describe('EventOutboxService', () => {
       await flushAsync();
 
       expect(result.relayed).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ─── per-vault ordering ─────────────────────────────────────────────────
+
+  describe('per-vault ordering', () => {
+    it('assigns a monotonic sequence that increments by 1 per vault', async () => {
+      const vaultA = 'vault-seq-a';
+      const vaultB = 'vault-seq-b';
+
+      const a1 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-1' }),
+      );
+      const a2 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-2' }),
+      );
+      const a3 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-3' }),
+      );
+
+      const b1 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vaultB, aggregateId: 'b-1' }),
+      );
+      const b2 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vaultB, aggregateId: 'b-2' }),
+      );
+
+      expect(a1.sequence).toBe(1);
+      expect(a2.sequence).toBe(2);
+      expect(a3.sequence).toBe(3);
+
+      expect(b1.sequence).toBe(1);
+      expect(b2.sequence).toBe(2);
+
+      // Sequences are independent per vault
+      expect(a1.sequence).not.toBe(b1.sequence);
+    });
+
+    it('preserves per-vault order when events for vault A and B are interleaved', async () => {
+      const delivered: Array<{ vaultId: string; sequence: number }> = [];
+
+      global.fetch = jest.fn(async (_url, init) => {
+        if (init?.body && String(init.body).includes('webhook.verification')) {
+          const body = JSON.parse(String(init.body));
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            json: async () => ({ challenge: body.challenge }),
+          } as Response;
+        }
+        if (init?.body) {
+          const body = JSON.parse(String(init.body));
+          const data = body.data ?? body;
+          if (data && data.vaultId && typeof data.sequence === 'number') {
+            delivered.push({ vaultId: data.vaultId, sequence: data.sequence });
+          }
+        }
+        return { ok: true, status: 200 } as Response;
+      }) as typeof fetch;
+
+      createTestWebhookEndpoint(global.fetch as jest.Mock);
+      await flushAsync();
+
+      const vaultA = 'vault-order-a';
+      const vaultB = 'vault-order-b';
+
+      // Interleave writes: A1, B1, A2, B2, A3, B3
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-1' }));
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultB, aggregateId: 'b-1' }));
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-2' }));
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultB, aggregateId: 'b-2' }));
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultA, aggregateId: 'a-3' }));
+      await eventOutboxService.writeEvent(makeOutboxInput({ vaultId: vaultB, aggregateId: 'b-3' }));
+
+      await eventOutboxService.processOutbox(100);
+      await flushAsync();
+
+      const aSeqs = delivered.filter((d) => d.vaultId === vaultA).map((d) => d.sequence);
+      const bSeqs = delivered.filter((d) => d.vaultId === vaultB).map((d) => d.sequence);
+
+      // Per-vault order must be strictly increasing (1, 2, 3)
+      expect(aSeqs).toEqual([1, 2, 3]);
+      expect(bSeqs).toEqual([1, 2, 3]);
+    });
+
+    it('does not regress single-vault ordering', async () => {
+      const vault = 'vault-single';
+      const r1 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vault, aggregateId: 's-1' }),
+      );
+      const r2 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vault, aggregateId: 's-2' }),
+      );
+      const r3 = await eventOutboxService.writeEvent(
+        makeOutboxInput({ vaultId: vault, aggregateId: 's-3' }),
+      );
+
+      expect(r1.sequence).toBe(1);
+      expect(r2.sequence).toBe(2);
+      expect(r3.sequence).toBe(3);
+
+      const entries = await eventOutboxService.listEntries({ vaultId: vault });
+      const seqs = entries.map((e) => e.sequence);
+      expect(seqs).toEqual([1, 2, 3]);
     });
   });
 
