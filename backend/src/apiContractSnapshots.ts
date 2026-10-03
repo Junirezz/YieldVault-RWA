@@ -59,6 +59,12 @@ export const ReadyResponseSchema = z
       database: z.boolean(),
       prisma: z.boolean(),
       indexer: z.boolean(),
+      redis: z.object({
+        status: z.enum(['up', 'down']),
+        optional: z.boolean().optional(),
+        latencyMs: z.number().optional(),
+        error: z.string().optional(),
+      }),
     }),
   })
   .strict();
@@ -273,11 +279,7 @@ export function diffSchemaShapes(
     }
 
     for (const key of baselineRequired) {
-      // `in` binds tighter than `??`, so the parentheses are required: without
-      // them this reads as `(key in baseline.properties) ?? {}` and throws a
-      // TypeError whenever a committed snapshot has no `properties` object.
       if (!(key in baselineProps)) {
-      if (!(key in (baseline.properties ?? {}))) {
         issues.push({ path: at(key), message: 'required field missing from snapshot properties (orphaned reference)' });
       }
       if (!(key in currentProps)) {
@@ -288,7 +290,7 @@ export function diffSchemaShapes(
     }
 
     for (const key of currentRequired) {
-      if (!(key in (current.properties ?? {}))) {
+      if (!(key in currentProps)) {
         issues.push({ path: at(key), message: 'required field missing from live schema properties (invalid schema)' });
         continue;
       }

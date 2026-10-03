@@ -66,8 +66,7 @@
           "type": "number"
         },
         "nextCursor": {
-          "type": "string",
-          "nullable": true
+          "type": "string"
         },
         "prevCursor": {
           "type": "string"
