@@ -36,7 +36,9 @@
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:status": "prisma migrate status --schema prisma/schema.prisma",
-    "prisma:rollback": "node scripts/prisma-rollback.js"
+    "prisma:rollback": "node scripts/prisma-rollback.js",
+    "seed": "tsx prisma/seed.ts",
+    "seed:reset": "tsx prisma/seed.ts --reset"
   },
   "keywords": [
     "stellar",
