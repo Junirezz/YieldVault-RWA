@@ -22,6 +22,7 @@ export interface AuditLogEntry {
   statusCode: number;
   durationMs: number;
   ip: string;
+  userAgent?: string;
   correlationId?: string;
   metadata?: Record<string, unknown>;
 }
@@ -40,6 +41,25 @@ interface AuditLogFilters {
 const entries: AuditLogEntry[] = [];
 const entryLimit = parseInt(process.env.AUDIT_LOG_RETENTION || '500', 10);
 
+/**
+ * Hash IP address with daily salt for privacy if AUDIT_HASH_IP=true
+ */
+function hashIpIfNeeded(ip: string): string {
+  if (process.env.AUDIT_HASH_IP !== 'true') {
+    return ip;
+  }
+
+  // Daily salt changes every 24 hours based on date
+  const today = new Date().toISOString().split('T')[0];
+  const salt = `audit-ip-${today}`;
+  const hash = crypto
+    .createHash('sha256')
+    .update(`${ip}:${salt}`)
+    .digest('hex');
+
+  return `sha256:${hash.slice(0, 16)}`;
+}
+
 export function createAdminAuditMiddleware() {
   return (req: Request, res: Response, next: NextFunction): void => {
     const startedAt = Date.now();
@@ -47,6 +67,7 @@ export function createAdminAuditMiddleware() {
     res.on('finish', () => {
       const actor = resolveActor(req);
       const now = new Date().toISOString();
+      const rawIp = req.ip || 'unknown';
       const entry: AuditLogEntry = {
         id: `audit_${crypto.randomBytes(8).toString('hex')}`,
         timestamp: now,
@@ -56,7 +77,8 @@ export function createAdminAuditMiddleware() {
         action: buildAction(req),
         statusCode: res.statusCode,
         durationMs: Date.now() - startedAt,
-        ip: req.ip || 'unknown',
+        ip: hashIpIfNeeded(rawIp),
+        userAgent: req.get('user-agent') || undefined,
         correlationId: req.header('x-correlation-id') || undefined,
         metadata: req.adminAuditMetadata
           ? redactSensitiveAttributes(req.adminAuditMetadata)

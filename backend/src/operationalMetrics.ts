@@ -13,6 +13,7 @@
  *   ✓ Keep metrics understandable for non-developer operators
  */
 
+import Decimal from 'decimal.js';
 import { Gauge, Counter, Histogram } from 'prom-client';
 import { register } from './metrics';
 import { prisma } from './prisma';
@@ -126,7 +127,7 @@ export interface SystemHealthSummary {
   status: 'healthy' | 'degraded' | 'critical';
   vaultCount: number;
   activeVaults: number;
-  totalTvlUsd: number;
+  totalTvlUsd: string;
   totalUsers: number;
   dependencies: Record<string, 'up' | 'down'>;
   failingEndpoints: string[];
@@ -247,6 +248,16 @@ export async function collectVaultActivityMetrics(
 }
 
 /**
+ * Sums vault TVL values with arbitrary-precision decimals (no float drift)
+ * and returns the total as a string with 2 decimal places.
+ */
+export function aggregateTvl(vaults: ReadonlyArray<{ tvlUsd?: string | null }>): string {
+  return vaults
+    .reduce((acc, vault) => acc.add(new Decimal(vault.tvlUsd ?? '0')), new Decimal(0))
+    .toFixed(2);
+}
+
+/**
  * Collects system-wide health summary.
  */
 export async function collectSystemHealthSummary(): Promise<SystemHealthSummary> {
@@ -274,10 +285,7 @@ export async function collectSystemHealthSummary(): Promise<SystemHealthSummary>
     select: { id: true },
   });
 
-  const totalTvl = vaults.reduce(
-    (sum, v) => sum + parseFloat(v.tvlUsd || '0'),
-    0
-  );
+  const totalTvl = aggregateTvl(vaults);
 
   // Determine overall health
   const failureRate = vaults.length > 0

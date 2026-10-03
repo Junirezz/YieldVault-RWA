@@ -17,6 +17,7 @@ export const CRITICAL_ENDPOINTS = [
   'GET /ready',
   'GET /api/v1/vault/summary',
   'GET /api/v1/transactions',
+  'GET /api/v1/vaults',
 ] as const;
 
 export type CriticalEndpoint = (typeof CRITICAL_ENDPOINTS)[number];
@@ -110,11 +111,34 @@ export const TransactionsListResponseSchema = z
   })
   .strict();
 
+/**
+ * Public projection of a vault row. `tenantId` is intentionally absent — the
+ * list route never exposes it (Issue #1430).
+ */
+export const VaultItemSchema = z
+  .object({
+    id: z.string(),
+    aum: z.number(),
+    tvlUsd: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
+export const VaultListResponseSchema = z
+  .object({
+    data: z.array(VaultItemSchema),
+    pagination: PaginationMetaSchema,
+    timestamp: z.string(),
+  })
+  .strict();
+
 export const ENDPOINT_SCHEMAS: Record<CriticalEndpoint, z.ZodTypeAny> = {
   'GET /health': HealthResponseSchema,
   'GET /ready': ReadyResponseSchema,
   'GET /api/v1/vault/summary': VaultSummaryResponseSchema,
   'GET /api/v1/transactions': TransactionsListResponseSchema,
+  'GET /api/v1/vaults': VaultListResponseSchema,
 };
 
 export function endpointToFilename(endpoint: CriticalEndpoint): string {
@@ -252,6 +276,7 @@ export function diffSchemaShapes(
       // `in` binds tighter than `??`, so the parentheses are required: without
       // them this reads as `(key in baseline.properties) ?? {}` and throws a
       // TypeError whenever a committed snapshot has no `properties` object.
+      if (!(key in baselineProps)) {
       if (!(key in (baseline.properties ?? {}))) {
         issues.push({ path: at(key), message: 'required field missing from snapshot properties (orphaned reference)' });
       }
@@ -265,6 +290,7 @@ export function diffSchemaShapes(
     for (const key of currentRequired) {
       if (!(key in (current.properties ?? {}))) {
         issues.push({ path: at(key), message: 'required field missing from live schema properties (invalid schema)' });
+        continue;
       }
       if (!baselineRequired.has(key)) {
         issues.push({ path: at(key), message: 'field is now required — regenerate snapshots with npm run snapshots:write' });

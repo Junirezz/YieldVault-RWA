@@ -1,11 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
-import {
-  WEBHOOK_EVENT_TYPES,
-  WEBHOOK_HEADERS,
-  type WebhookEventType,
-} from './types/webhooks';
+import { WEBHOOK_EVENT_TYPES, WEBHOOK_HEADERS, type WebhookEventType } from './types/webhooks';
 
 export type TransactionEventType = WebhookEventType;
 export { WEBHOOK_EVENT_TYPES, WEBHOOK_HEADERS };
@@ -23,6 +19,12 @@ export interface TransactionEventPayload {
   vaultId?: string;
   strategyId?: string;
   previousStrategyId?: string;
+  metadata?: {
+    trace?: {
+      traceId: string;
+      spanId: string;
+    };
+  };
 }
 
 export type WebhookVerificationStatus = 'pending' | 'verified' | 'failed';
@@ -127,7 +129,10 @@ const jitterMaxMs = parseInt(process.env.WEBHOOK_JITTER_MAX_MS || '30000', 10);
 
 const verificationTimeoutMs = parseInt(process.env.WEBHOOK_VERIFICATION_TIMEOUT_MS || '5000', 10);
 const challengeTtlMs = parseInt(process.env.WEBHOOK_CHALLENGE_TTL_SECONDS || '900', 10) * 1000;
-const webhookSignatureMaxSkewMs = parseInt(process.env.WEBHOOK_SIGNATURE_MAX_SKEW_MS || '300000', 10);
+const webhookSignatureMaxSkewMs = parseInt(
+  process.env.WEBHOOK_SIGNATURE_MAX_SKEW_MS || '300000',
+  10
+);
 const isUnverifiedDeliveryAllowed = (): boolean => {
   if (process.env.WEBHOOK_ALLOW_UNVERIFIED !== undefined) {
     return process.env.WEBHOOK_ALLOW_UNVERIFIED === 'true';
@@ -143,7 +148,9 @@ function hashChallengeToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-export async function probeWebhookVerification(endpoint: InternalWebhookEndpoint): Promise<boolean> {
+export async function probeWebhookVerification(
+  endpoint: InternalWebhookEndpoint
+): Promise<boolean> {
   if (!endpoint.challengeToken) {
     return false;
   }
@@ -186,7 +193,7 @@ export async function probeWebhookVerification(endpoint: InternalWebhookEndpoint
       return true;
     }
 
-    const responseBody = await response.json().catch(() => null) as { challenge?: string } | null;
+    const responseBody = (await response.json().catch(() => null)) as { challenge?: string } | null;
     return responseBody?.challenge === endpoint.challengeToken;
   } finally {
     clearTimeout(timeout);
@@ -199,10 +206,7 @@ export async function verifyWebhookEndpoint(id: string): Promise<WebhookEndpoint
     return null;
   }
 
-  if (
-    existing.challengeExpiresAt &&
-    Date.parse(existing.challengeExpiresAt) <= Date.now()
-  ) {
+  if (existing.challengeExpiresAt && Date.parse(existing.challengeExpiresAt) <= Date.now()) {
     const expired: InternalWebhookEndpoint = {
       ...existing,
       verificationStatus: 'failed',
@@ -261,9 +265,10 @@ export function registerWebhookEndpoint(input: RegisterWebhookInput): WebhookEnd
   const endpoint: InternalWebhookEndpoint = {
     id: `wh_${crypto.randomBytes(6).toString('hex')}`,
     url: input.url,
-    eventTypes: input.eventTypes && input.eventTypes.length > 0
-      ? input.eventTypes
-      : DEFAULT_WEBHOOK_EVENT_TYPES,
+    eventTypes:
+      input.eventTypes && input.eventTypes.length > 0
+        ? input.eventTypes
+        : DEFAULT_WEBHOOK_EVENT_TYPES,
     enabled: input.enabled ?? isUnverifiedDeliveryAllowed(),
     secret: input.secret,
     secretHash: input.secret ? hashWebhookSecret(input.secret) : undefined,
@@ -281,7 +286,10 @@ export function registerWebhookEndpoint(input: RegisterWebhookInput): WebhookEnd
   return sanitizeWebhookEndpoint(endpoint);
 }
 
-export function updateWebhookEndpoint(id: string, input: UpdateWebhookInput): WebhookEndpoint | null {
+export function updateWebhookEndpoint(
+  id: string,
+  input: UpdateWebhookInput
+): WebhookEndpoint | null {
   const existing = endpoints.get(id);
   if (!existing || existing.deletedAt) {
     return null;
@@ -297,9 +305,7 @@ export function updateWebhookEndpoint(id: string, input: UpdateWebhookInput): We
     eventTypes: input.eventTypes ?? existing.eventTypes,
     secret: input.secret ?? existing.secret,
     secretHash:
-      typeof input.secret === 'string'
-        ? hashWebhookSecret(input.secret)
-        : existing.secretHash,
+      typeof input.secret === 'string' ? hashWebhookSecret(input.secret) : existing.secretHash,
     updatedAt: new Date().toISOString(),
   };
 
@@ -355,7 +361,9 @@ export function listWebhookDeliveries(limit = 100): WebhookDeliveryRecord[] {
   return listWebhookDeliveryPage({ limit }).deliveries;
 }
 
-export function listWebhookDeliveryPage(input: { limit?: number; cursor?: string } = {}): WebhookDeliveryPage {
+export function listWebhookDeliveryPage(
+  input: { limit?: number; cursor?: string } = {}
+): WebhookDeliveryPage {
   const normalizedLimit = Math.max(1, Math.min(input.limit ?? 100, 500));
   const sorted = [...deliveries].sort((a, b) => {
     const createdComparison = b.createdAt.localeCompare(a.createdAt);
@@ -370,7 +378,7 @@ export function listWebhookDeliveryPage(input: { limit?: number; cursor?: string
   if (input.cursor) {
     const cursor = decodeDeliveryCursor(input.cursor);
     const cursorIndex = sorted.findIndex(
-      (delivery) => delivery.createdAt === cursor.createdAt && delivery.id === cursor.id,
+      (delivery) => delivery.createdAt === cursor.createdAt && delivery.id === cursor.id
     );
 
     if (cursorIndex === -1) {
@@ -387,7 +395,10 @@ export function listWebhookDeliveryPage(input: { limit?: number; cursor?: string
   return {
     deliveries: deliveriesPage,
     hasNextPage,
-    nextCursor: hasNextPage && deliveriesPage.length > 0 ? encodeDeliveryCursor(deliveriesPage[deliveriesPage.length - 1]) : undefined,
+    nextCursor:
+      hasNextPage && deliveriesPage.length > 0
+        ? encodeDeliveryCursor(deliveriesPage[deliveriesPage.length - 1])
+        : undefined,
   };
 }
 
@@ -428,13 +439,15 @@ export function resetWebhookState(): void {
   void clearPersistedWebhookEndpoints();
 }
 
-export function listWebhookDeadLetters(filters: {
-  endpointId?: string;
-  eventType?: TransactionEventType;
-  start?: string;
-  end?: string;
-  limit?: number;
-} = {}): WebhookDeadLetterRecord[] {
+export function listWebhookDeadLetters(
+  filters: {
+    endpointId?: string;
+    eventType?: TransactionEventType;
+    start?: string;
+    end?: string;
+    limit?: number;
+  } = {}
+): WebhookDeadLetterRecord[] {
   const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
   return deadLetters
     .filter((entry) => {
@@ -503,7 +516,7 @@ export async function retryWebhookDeadLetter(id: string): Promise<WebhookDeadLet
 
 async function persistWebhookDeadLetter(
   entry: WebhookDeadLetterRecord,
-  envelope: { eventType: TransactionEventType; sentAt: string; payload: TransactionEventPayload },
+  envelope: { eventType: TransactionEventType; sentAt: string; payload: TransactionEventPayload }
 ): Promise<void> {
   try {
     await prisma.webhookDeadLetter.create({
@@ -525,10 +538,7 @@ async function persistWebhookDeadLetter(
 }
 
 export function createWebhookSignature(secret: string, payload: unknown): string {
-  return crypto
-    .createHmac('sha256', secret)
-    .update(JSON.stringify(payload))
-    .digest('hex');
+  return crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
 }
 
 export interface WebhookSignedEnvelope {
@@ -564,7 +574,11 @@ function pruneWebhookReplayCache(now = Date.now()): void {
   }
 }
 
-export function markWebhookDeliverySeen(endpointId: string, deliveryId: string, sentAt: string): boolean {
+export function markWebhookDeliverySeen(
+  endpointId: string,
+  deliveryId: string,
+  sentAt: string
+): boolean {
   pruneWebhookReplayCache();
 
   const sentAtMs = Date.parse(sentAt);
@@ -588,7 +602,7 @@ export function markWebhookDeliverySeen(endpointId: string, deliveryId: string, 
 
 export function buildWebhookSignedEnvelope(
   delivery: WebhookDeliveryRecord,
-  payload: TransactionEventPayload,
+  payload: TransactionEventPayload
 ): WebhookSignedEnvelope {
   return {
     schemaVersion: WEBHOOK_SCHEMA_VERSION,
@@ -602,7 +616,7 @@ export function buildWebhookSignedEnvelope(
 export function verifyWebhookSignature(
   secret: string,
   payload: unknown,
-  signature: string,
+  signature: string
 ): boolean {
   const expected = createWebhookSignature(secret, payload);
   const providedBuffer = Buffer.from(signature, 'utf8');
@@ -617,7 +631,7 @@ export function verifyWebhookSignature(
 export function verifyIncomingWebhookPayload(
   endpointId: string,
   envelope: unknown,
-  signature: unknown,
+  signature: unknown
 ): IncomingWebhookVerificationResult {
   const endpoint = endpoints.get(endpointId);
   if (!endpoint || endpoint.deletedAt) {
@@ -653,10 +667,7 @@ export function verifyIncomingWebhookPayload(
   }
 
   const sentAtMs = Date.parse(candidate.sentAt);
-  if (
-    Number.isNaN(sentAtMs) ||
-    Math.abs(Date.now() - sentAtMs) > webhookSignatureMaxSkewMs
-  ) {
+  if (Number.isNaN(sentAtMs) || Math.abs(Date.now() - sentAtMs) > webhookSignatureMaxSkewMs) {
     return { verified: false, reason: 'stale-event' };
   }
 
@@ -668,7 +679,9 @@ export function verifyIncomingWebhookPayload(
 }
 
 function encodeDeliveryCursor(delivery: WebhookDeliveryRecord): string {
-  return Buffer.from(JSON.stringify({ createdAt: delivery.createdAt, id: delivery.id })).toString('base64url');
+  return Buffer.from(JSON.stringify({ createdAt: delivery.createdAt, id: delivery.id })).toString(
+    'base64url'
+  );
 }
 
 function decodeDeliveryCursor(cursor: string): { createdAt: string; id: string } {
@@ -687,14 +700,14 @@ function decodeDeliveryCursor(cursor: string): { createdAt: string; id: string }
 
 export async function emitTransactionEvent(
   eventType: TransactionEventType,
-  payload: TransactionEventPayload,
+  payload: TransactionEventPayload
 ): Promise<number> {
   const activeEndpoints = Array.from(endpoints.values()).filter(
     (endpoint) =>
       !endpoint.deletedAt &&
       endpoint.enabled &&
       endpoint.eventTypes.includes(eventType) &&
-      (isUnverifiedDeliveryAllowed() || endpoint.verificationStatus === 'verified'),
+      (isUnverifiedDeliveryAllowed() || endpoint.verificationStatus === 'verified')
   );
 
   for (const endpoint of activeEndpoints) {
@@ -738,7 +751,7 @@ async function deliverWithRetry(
   endpoint: InternalWebhookEndpoint,
   delivery: WebhookDeliveryRecord,
   payload: TransactionEventPayload,
-  attempt: number,
+  attempt: number
 ): Promise<void> {
   delivery.attempts = attempt;
   delivery.updatedAt = new Date().toISOString();
@@ -838,13 +851,23 @@ async function deliverWithRetry(
     };
     deadLetters.unshift(deadLetter);
     void persistWebhookDeadLetter(deadLetter, envelope);
-    void sendWebhookDeadLetterAlert(endpoint.url, delivery.eventType, delivery.attempts, delivery.lastError || 'Unknown error');
+    void sendWebhookDeadLetterAlert(
+      endpoint.url,
+      delivery.eventType,
+      delivery.attempts,
+      delivery.lastError || 'Unknown error'
+    );
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function sendWebhookDeadLetterAlert(endpointUrl: string, eventType: string, attempts: number, error: string): Promise<void> {
+async function sendWebhookDeadLetterAlert(
+  endpointUrl: string,
+  eventType: string,
+  attempts: number,
+  error: string
+): Promise<void> {
   const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
   if (!webhookUrl) return;
 
@@ -853,14 +876,14 @@ async function sendWebhookDeadLetterAlert(endpointUrl: string, eventType: string
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: `:rotating_light: *YieldVault Webhook Dead-Lettered*\nFailed to deliver \`${eventType}\` to \`${endpointUrl}\` after ${attempts} attempts.\nLatest error: \`${error}\``
-      })
+        text: `:rotating_light: *YieldVault Webhook Dead-Lettered*\nFailed to deliver \`${eventType}\` to \`${endpointUrl}\` after ${attempts} attempts.\nLatest error: \`${error}\``,
+      }),
     });
   } catch (err) {
     logger.log('error', 'Failed to send webhook dead-letter alert', {
       error: err instanceof Error ? err.message : String(err),
       endpointUrl,
-      eventType
+      eventType,
     });
   }
 }
@@ -966,7 +989,7 @@ export async function initializeWebhookEndpoints(): Promise<void> {
   try {
     await ensureWebhookPersistenceTable();
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT id, url, eventTypes, enabled, secretHash, createdAt, updatedAt, deletedAt, deletedBy FROM WebhookEndpoint',
+      'SELECT id, url, eventTypes, enabled, secretHash, createdAt, updatedAt, deletedAt, deletedBy FROM WebhookEndpoint'
     );
 
     for (const row of rows) {

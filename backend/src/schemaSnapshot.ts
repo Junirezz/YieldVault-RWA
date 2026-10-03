@@ -74,7 +74,7 @@ export function extractSchemaFromZod(zodSchema: z.ZodType<any>): SchemaDefinitio
 
   // Handle object schemas
   if (zodSchema instanceof z.ZodObject) {
-    const shape = (zodSchema as z.ZodObject<any>)._shape;
+    const shape = (zodSchema as z.ZodObject<any>).shape;
     const properties: Record<string, PropertyDefinition> = {};
     const required: string[] = [];
 

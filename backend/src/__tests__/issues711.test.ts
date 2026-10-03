@@ -53,6 +53,12 @@ describe('#711 API contract schema snapshots', () => {
     const current = zodToJsonShape(HealthResponseSchema);
     const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
     // Simulate an older snapshot that is missing the 'indexer' field
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
+    // Simulate an older snapshot that is missing the 'indexer' field, so the
+    // live schema now has a required field the committed snapshot does not know
+    // about. `baseline` is the committed snapshot and `current` is the live
+    // schema, so the deletion has to happen on the baseline.
     delete baseline.properties?.checks?.properties?.indexer;
     baseline.properties!.checks!.required = (baseline.properties!.checks!.required ?? []).filter(
       (k: string) => k !== 'indexer',

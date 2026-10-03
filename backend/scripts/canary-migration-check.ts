@@ -10,6 +10,8 @@
  *   # or from check:migrations:canary npm script
  *
  * Annotation opt-outs (add as a SQL comment in the migration file):
+ *   -- migration-safety: allow-api-key-auth
+ *   -- migration-safety: allow-tenant-scoped-auth
  *   -- migration-safety: allow-not-null-add
  *   -- migration-safety: allow-nonconcurrent-indexes
  *   -- migration-safety: allow-drop
@@ -208,6 +210,64 @@ const rules: Array<{
   },
 ];
 
+// ── API key / tenant scoping rules (Issue: cross-tenant replay) ──────────────
+
+const apiKeyRules: Array<{
+  id: string;
+  severity: 'error' | 'warning';
+  annotation?: string;
+  description: string;
+  check: (content: string, lower: string) => Array<{ message: string; index: number }>;
+}> = [
+  {
+    id: 'api-key-tenant-scope',
+    severity: 'error',
+    annotation: 'allow-api-key-auth',
+    description:
+      'apiKey table must be scoped per tenantId with hashedKey, scopes, expiresAt, lastUsedAt ' +
+      'to prevent cross-tenant replay and enable per-tenant rotation.',
+    check: (_, lower) => {
+      const matches: Array<{ message: string; index: number }> = [];
+      const re = /\bcreate\s+table\b[^;]{0,200}\bapi[_]?key\b/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(lower)) !== null) {
+        const statementEnd = lower.indexOf(';', m.index);
+        const windowEnd =
+          statementEnd === -1 ? m.index + 800 : Math.min(statementEnd, m.index + 800);
+        const slice = lower.slice(m.index, windowEnd);
+        const required = ['tenant_id', 'hashed_key', 'scopes', 'expires_at', 'last_used_at'];
+        const missing = required.filter((col) => !slice.includes(col));
+        if (missing.length > 0) {
+          matches.push({
+            message: `apiKey table missing tenant-scoped columns: ${missing.join(', ')} — cross-tenant replay risk`,
+            index: m.index,
+          });
+        }
+      }
+      return matches;
+    },
+  },
+  {
+    id: 'no-global-api-key-env',
+    severity: 'warning',
+    annotation: 'allow-tenant-scoped-auth',
+    description:
+      'Single global API_KEY env var allows cross-tenant replay; migrate to per-tenant keys with fallback deprecation log.',
+    check: (_, lower) => {
+      const matches: Array<{ message: string; index: number }> = [];
+      const re = /\bapi_key\b\s*=\s*['"`]/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(lower)) !== null) {
+        matches.push({
+          message: `Hard-coded global API_KEY detected — use per-tenant hashedKey with fallback env var + deprecation log`,
+          index: m.index,
+        });
+      }
+      return matches;
+    },
+  },
+];
+
 // ── Main checker ─────────────────────────────────────────────────────────────
 
 /**
@@ -235,6 +295,22 @@ export function checkMigrationFile(filePath: string): MigrationCheckResult {
 
   const lower = content.toLowerCase();
   const issues: MigrationIssue[] = [];
+
+  for (const rule of apiKeyRules) {
+    if (rule.annotation && hasAnnotation(content, rule.annotation)) {
+      continue;
+    }
+
+    const findings = rule.check(content, lower);
+    for (const finding of findings) {
+      issues.push({
+        severity: rule.severity,
+        rule: rule.id,
+        message: finding.message,
+        line: findLineNumber(content, finding.index),
+      });
+    }
+  }
 
   for (const rule of rules) {
     // Check annotation opt-out

@@ -28,6 +28,22 @@ import { redisClientManager } from './rateLimiter';
 import { logger } from './middleware/structuredLogging';
 import type { Request, Response, NextFunction } from 'express';
 
+/**
+ * The replay cache used by money-moving operations (deposits, withdrawals,
+ * transfers) lives in `idempotencyStore.ts`; it is re-exported here so callers
+ * keep a single import surface for the whole idempotency feature.
+ */
+export {
+  idempotencyStore,
+  IdempotencyStore,
+  IdempotencyConflictError,
+  buildIdempotencyFingerprint,
+  getIdempotencyHashThreshold,
+  type IdempotentOperationResult,
+  type IdempotencyKeyInfo,
+  type IdempotencyMetrics,
+} from './idempotencyStore';
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface IdempotencyRecord {
@@ -437,6 +453,13 @@ export function startIdempotencyCleanupTask(intervalMs = 3600000): NodeJS.Timer 
 // until those call sites are migrated. Restoring this store is what keeps
 // `idempotencyStore`, `IdempotencyStore` and `IdempotencyConflictError`
 // resolvable for those consumers.
+// ─── Response Store (Redis + NodeCache) ─────────────────────────────────────
+//
+// Shared response store used by vault endpoints and the transfer orchestrator.
+// Completed responses are persisted to Redis (when available) with a NodeCache
+// in-process fallback. Retention sweeps live in idempotencyRetention.ts.
+
+// ─── Public Types ─────────────────────────────────────────────────────────────
 
 export interface IdempotentOperationResult<T> {
   statusCode: number;
@@ -445,6 +468,7 @@ export interface IdempotentOperationResult<T> {
 
 /** Metadata attached to every idempotency key entry. */
 export interface IdempotencyEntryMetadata {
+export interface IdempotencyStoreKeyMetadata {
   /** ISO-8601 timestamp when the key was first stored. */
   createdAt: string;
   /** ISO-8601 timestamp of the most recent access (read or write). */
@@ -459,6 +483,7 @@ export interface IdempotencyEntryMetadata {
 export interface IdempotencyKeyInfo {
   key: string;
   metadata: IdempotencyEntryMetadata;
+  metadata: IdempotencyStoreKeyMetadata;
 }
 
 /** Snapshot of store-wide observability counters. */
@@ -473,6 +498,11 @@ export interface IdempotencyMetrics {
 interface StoredResponse<T> extends IdempotentOperationResult<T> {
   fingerprint: string;
   metadata: IdempotencyEntryMetadata;
+// ─── Internal Types ───────────────────────────────────────────────────────────
+
+interface StoredResponse<T> extends IdempotentOperationResult<T> {
+  fingerprint: string;
+  metadata: IdempotencyStoreKeyMetadata;
 }
 
 interface PendingOperation<T> {
@@ -480,6 +510,11 @@ interface PendingOperation<T> {
   promise: Promise<StoredResponse<T>>;
   metadata: IdempotencyEntryMetadata;
 }
+
+  metadata: IdempotencyStoreKeyMetadata;
+}
+
+// ─── Errors ───────────────────────────────────────────────────────────────────
 
 export class IdempotencyConflictError extends Error {
   constructor(message = 'Idempotency key already used for a different request body') {
@@ -489,6 +524,12 @@ export class IdempotencyConflictError extends Error {
 }
 
 const REDIS_PREFIX = 'idempotency:';
+
+// ─── Redis key prefix ─────────────────────────────────────────────────────────
+
+const REDIS_PREFIX = 'idempotency:';
+
+// ─── Store ────────────────────────────────────────────────────────────────────
 
 export class IdempotencyStore {
   /** Fallback in-process store used when Redis is unavailable. */
@@ -594,6 +635,7 @@ export class IdempotencyStore {
 
     // 3. First execution
     const metadata: IdempotencyEntryMetadata = { createdAt: now, lastAccessedAt: now, replayCount: 0, status: 'pending' };
+    const metadata: IdempotencyStoreKeyMetadata = { createdAt: now, lastAccessedAt: now, replayCount: 0, status: 'pending' };
 
     const operationPromise = (async () => {
       const result = await operation();
@@ -678,6 +720,16 @@ export class IdempotencyStore {
     retentionMs: number,
     dryRun = false,
   ): Promise<{ pruned: number; localPruned: number; redisPruned: number }> {
+  /**
+   * Removes entries older than `retentionMs` from the local cache and Redis.
+   * With `dryRun`, only counts the entries that would be removed: nothing is
+   * deleted and the eviction counter is left untouched (Issue #1375).
+   */
+
+  async pruneStaleKeys(
+    retentionMs: number,
+    dryRun = false,
+  ): Promise<{ pruned: number; localPruned: number; redisPruned: number; dryRun: boolean }> {
     const cutoff = Date.now() - retentionMs;
     let localPruned = 0;
     let redisPruned = 0;
@@ -726,6 +778,7 @@ export class IdempotencyStore {
     }
 
     return { pruned: localPruned + redisPruned, localPruned, redisPruned };
+    return { pruned: localPruned + redisPruned, localPruned, redisPruned, dryRun };
   }
 }
 
@@ -764,3 +817,4 @@ function stableStringify(value: unknown): string {
   const serialized = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
   return `{${serialized.join(',')}}`;
 }
+

@@ -153,7 +153,12 @@ cd YieldVault-RWA
 
 # Install root-level dependencies (Husky git hooks, etc.)
 npm install
+
+# Build shared packages (build order requirement before backend typecheck or dev)
+npm run build:schemas
 ```
+
+> **Build Order Requirement:** `@yieldvault/api-schemas` must be built before local typechecking or starting the backend. Without this step, `tsc --noEmit` fails because `backend/src/middleware/validate.ts` imports `@yieldvault/api-schemas`.
 
 ### Verify Git Hooks
 
@@ -171,7 +176,7 @@ ls .husky/pre-commit
 ```bash
 cd backend
 
-# Install dependencies
+# Install dependencies (prebuild/predev will build api-schemas automatically)
 npm install
 
 # Create environment file from template

@@ -54,3 +54,5 @@ Examples include:
 | [ADR-002](ADR-002-write-ahead-audit-log.md) | Write-Ahead Audit Log for Admin Configuration Changes | 2024-03-10 | Accepted |
 | [ADR-003](ADR-003-api-contract-schema-snapshots.md) | API Contract Schema Snapshots for Backward-Compatibility Enforcement | 2024-04-20 | Accepted |
 | [ADR-004](ADR-004-soroban-vault-contracts.md) | Multi-Tenant Vault Isolation via Soroban Smart Contracts | 2024-05-05 | Accepted |
+| [ADR-005](ADR-005-soc2-audit-log-traceability.md) | SOC2 Audit Log Traceability with IP and User-Agent Capture | 2026-09-29 | Accepted |
+| [ADR-006](ADR-006-driftless-scheduler-for-critical-jobs.md) | Driftless Scheduler for Critical Hourly Jobs Using setTimeout with Recalculation | 2026-09-29 | Accepted |

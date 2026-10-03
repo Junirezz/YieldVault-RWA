@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 
-export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot';
+export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot' | 'vaultRebalance';
 
-export type DeadLetterStatus = 'dead-letter' | 'processing' | 'resolved' | 'requeued' | 'discarded';
+export type DeadLetterStatus = 'dead-letter' | 'processing' | 'resolved' | 'requeued' | 'discarded' | 'needs_retry';
 
 export interface JobPolicy {
   maxAttempts: number;
@@ -71,6 +71,15 @@ export const JOB_POLICIES: Record<JobName, JobPolicy> = {
     baseDelayMs: 1000,
     backoffMultiplier: 2,
     deadLetterThreshold: 3,
+  },
+  // vaultRebalance uses a generous retry policy because timeouts are transient
+  // under load and a successful rebalance requires all allocation rows to commit
+  // atomically. See: .kiro/specs/prisma-rebalance-timeout/design.md
+  vaultRebalance: {
+    maxAttempts: 3,
+    baseDelayMs: 5000,
+    backoffMultiplier: 2,
+    deadLetterThreshold: 2,
   },
 };
 

@@ -315,6 +315,29 @@ class RedisCacheClient {
   }
 
   /**
+   * Ping the Redis server with a hard timeout.
+   * Returns 'PONG' when Redis responds in time, otherwise null.
+   * Used by the /ready health check to fail fast when Redis is unreachable.
+   */
+  async pingWithTimeout(timeoutMs: number): Promise<string | null> {
+    if (!this.client) return null;
+
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const pingPromise = this.client.ping();
+      const timeoutPromise = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      });
+      const result = await Promise.race([pingPromise, timeoutPromise]);
+      return result;
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Gracefully close the Redis connection.
    * Called during graceful shutdown.
    */
@@ -442,4 +465,26 @@ export async function getRedisCacheHealth(): Promise<'up' | 'degraded'> {
 
   const pong = await redisCacheClient.ping();
   return pong === 'PONG' ? 'up' : 'degraded';
+}
+
+/**
+ * Health check for the Redis cache layer, suitable for the /ready endpoint.
+ *
+ * Returns an object describing the Redis check:
+ *   - When REDIS_URL is not configured: { status: 'up', optional: true }
+ *   - When Redis responds to PING within the timeout: { status: 'up' }
+ *   - When Redis is configured but unreachable / times out:
+ *       { status: 'down' }
+ *
+ * The default timeout is 500ms per the /ready acceptance criteria.
+ */
+export async function getRedisReadyCheck(
+  timeoutMs: number = 500,
+): Promise<{ status: 'up' | 'down'; optional?: boolean }> {
+  if (!redisCacheClient.isConfigured) {
+    return { status: 'up', optional: true };
+  }
+
+  const pong = await redisCacheClient.pingWithTimeout(timeoutMs);
+  return pong === 'PONG' ? { status: 'up' } : { status: 'down' };
 }
