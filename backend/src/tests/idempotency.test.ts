@@ -131,13 +131,13 @@ describe('Idempotency', () => {
   });
 
   describe('enforceIdempotency middleware', () => {
-    function createMockRequest(overrides?: Partial<Request>): Partial<Request> {
+    function createMockRequest(overrides: Record<string, unknown> = {}): Partial<Request> {
       return {
         get: (header: string) => undefined,
         tenantId: 'tenant-123',
         body: { amount: '1000' },
         ...overrides,
-      };
+      } as unknown as Partial<Request>;
     }
 
     function createMockResponse(): Partial<Response> {

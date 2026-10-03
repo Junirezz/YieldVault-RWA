@@ -10,6 +10,8 @@ export interface ApiErrorOptions {
   retryable?: boolean;
   retryAfterSeconds?: number | null;
   error?: string;
+  summary?: string;
+  errors?: unknown;
 }
 
 export function sendApiError(
@@ -30,6 +32,8 @@ export function sendApiError(
     code: options.code,
     message: options.message,
     retryable: options.retryable ?? options.status >= 500,
+    ...(options.summary !== undefined ? { summary: options.summary } : {}),
+    ...(options.errors !== undefined ? { errors: options.errors } : {}),
     ...(options.details !== undefined ? { details: options.details } : {}),
     ...(correlationId ? { correlationId } : {}),
     ...(traceId ? { traceId } : {}),

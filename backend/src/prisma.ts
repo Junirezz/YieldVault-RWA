@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { assertCriticalEntityMutationAllowed } from './criticalEntityPolicy';
+import { invalidateVaultCountAfterMutation } from './vaultCountCache';
 
 const QUERY_TIMEOUT_MS = parsePositiveInt(process.env.PRISMA_QUERY_TIMEOUT_MS, 5000);
 const POOL_MAX = parsePositiveInt(process.env.PRISMA_POOL_MAX, 10);
@@ -63,7 +64,9 @@ export const prisma = prismaClient.$extends({
     $allModels: {
       async $allOperations({ model, operation, args, query }) {
         assertCriticalEntityMutationAllowed(model, operation);
-        return runWithTimeout(query(args), QUERY_TIMEOUT_MS, `${model}.${operation}`);
+        const result = await runWithTimeout(query(args), QUERY_TIMEOUT_MS, `${model}.${operation}`);
+        invalidateVaultCountAfterMutation(model, operation);
+        return result;
       },
     },
   },

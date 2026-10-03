@@ -109,6 +109,9 @@ class EventOutboxService {
   private pollTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private instanceId: string;
+  private inFlight: Promise<unknown> | null = null;
+  private abortCleanup: (() => void) | null = null;
+  private signal: AbortSignal | undefined;
 
   constructor() {
     this.instanceId = getInstanceId();
@@ -148,7 +151,7 @@ class EventOutboxService {
    * Uses instance-level locking to prevent duplicate processing in multi-pod deployments.
    * Can be called on a schedule or manually.
    */
-  async processOutbox(batchSize?: number): Promise<OutboxRelayResult> {
+  async processOutbox(batchSize?: number, signal?: AbortSignal): Promise<OutboxRelayResult> {
     const limit = batchSize ?? getBatchSize();
     const now = new Date();
     const lockExpiry = new Date(now.getTime() - getLockTimeoutMs());
@@ -211,6 +214,9 @@ class EventOutboxService {
 
       // 4. Relay each entry
       for (const entry of entries) {
+        // Stop claiming work once shutdown begins; unprocessed entries stay
+        // locked until the lock timeout expires and are picked up on restart.
+        if (signal?.aborted) break;
         try {
           const payload = JSON.parse(entry.payload) as TransactionEventPayload;
           // emitTransactionEvent schedules webhook deliveries asynchronously.
@@ -223,6 +229,10 @@ class EventOutboxService {
             entry.eventType as TransactionEventType,
             payload,
           );
+
+          // Do not write the mark-as-sent update after abort; the event will be
+          // re-relayed after restart (at-least-once delivery).
+          if (signal?.aborted) break;
 
           await prisma.eventOutbox.update({
             where: { id: entry.id },
@@ -247,6 +257,8 @@ class EventOutboxService {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const nextAttempt = entry.attemptCount + 1;
+
+          if (signal?.aborted) break;
 
           if (nextAttempt >= entry.maxAttempts) {
             // Exhausted retries — move to dead_letter
@@ -407,13 +419,20 @@ class EventOutboxService {
    * Starts the background outbox processor.
    * Polls for pending events on a configured interval and relays them.
    */
-  start(): void {
+  start(options: { signal?: AbortSignal } = {}): void {
     if (this.isRunning) {
       logger.log('warn', 'Outbox processor is already running');
       return;
     }
 
+    const { signal } = options;
+    if (signal?.aborted) {
+      logger.log('warn', 'Outbox processor not started: signal already aborted');
+      return;
+    }
+
     this.isRunning = true;
+    this.signal = signal;
     const intervalMs = getPollIntervalMs();
 
     logger.log('info', 'Starting outbox processor', {
@@ -422,19 +441,19 @@ class EventOutboxService {
       instanceId: this.instanceId,
     });
 
+    if (signal) {
+      const onAbort = () => {
+        void this.stop();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.abortCleanup = () => signal.removeEventListener('abort', onAbort);
+    }
+
     // Process immediately on start, then poll on interval
-    this.processOutbox().catch((err) => {
-      logger.log('error', 'Outbox processor initial run failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    this.runCycle('initial run');
 
     this.pollTimer = setInterval(() => {
-      this.processOutbox().catch((err) => {
-        logger.log('error', 'Outbox processor poll cycle failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      this.runCycle('poll cycle');
     }, intervalMs);
 
     // Unref so the timer doesn't keep the process alive
@@ -447,22 +466,48 @@ class EventOutboxService {
   }
 
   /**
-   * Stops the background outbox processor.
+   * Stops the background outbox processor: clears timers and resolves once
+   * any in-flight polling cycle has finished.
    */
-  stop(): void {
-    if (!this.isRunning) return;
+  async stop(): Promise<void> {
+    if (this.isRunning) {
+      this.isRunning = false;
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+      if (this.cleanupTimer) {
+        clearInterval(this.cleanupTimer);
+        this.cleanupTimer = null;
+      }
+      this.abortCleanup?.();
+      this.abortCleanup = null;
+      this.signal = undefined;
 
-    this.isRunning = false;
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+      logger.log('info', 'Outbox processor stopped');
     }
 
-    logger.log('info', 'Outbox processor stopped');
+    if (this.inFlight) {
+      await this.inFlight;
+    }
+  }
+
+  /**
+   * Runs one polling cycle unless stopped/aborted or a cycle is already running.
+   */
+  private runCycle(label: string): void {
+    if (!this.isRunning || this.signal?.aborted || this.inFlight) return;
+
+    const cycle = this.processOutbox(undefined, this.signal)
+      .catch((err) => {
+        logger.log('error', `Outbox processor ${label} failed`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        if (this.inFlight === cycle) this.inFlight = null;
+      });
+    this.inFlight = cycle;
   }
 
   /**

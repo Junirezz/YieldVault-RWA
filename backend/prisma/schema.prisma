@@ -675,6 +675,8 @@ model WalletTenantAssociation {
 
   @@index([walletAddress, tenantId])
   @@index([tenantId])
+}
+
 model IdempotencyKey {
   id            String    @id @default(uuid())
   keyId         String

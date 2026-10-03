@@ -122,6 +122,15 @@ const options: swaggerJsdoc.Options = {
             timestamp: { type: 'string', format: 'date-time' },
           },
         },
+        SystemHealthSummary: {
+          type: 'object',
+          properties: {
+            vaultCount: { type: 'integer', example: 3 },
+            activeVaults: { type: 'integer', example: 2 },
+            totalTvlUsd: { type: 'string', format: 'decimal', example: '0.60' },
+            totalUsers: { type: 'integer', example: 10 },
+          },
+        },
         DepositRequest: {
           type: 'object',
           required: ['amount', 'asset', 'walletAddress'],
@@ -173,6 +182,62 @@ const options: swaggerJsdoc.Options = {
       { name: 'Admin', description: 'Operational/admin endpoints (API key required)' },
     ],
     paths: {
+      '/api/v1/vaults': {
+        get: {
+          tags: ['Vault'],
+          summary: 'List vaults with a cached total count',
+          description:
+            'Send Authorization: ApiKey <key>. Non-admin keys are restricted to their tenant; ' +
+            'admin keys may filter tenantId or list all tenants. Excludes soft-deleted vaults. ' +
+            'Rows are fresh; totals use a process-local 500-entry LRU for five seconds, ' +
+            'invalidated on successful Prisma vault writes. Also available at /api/vaults and /vaults. ' +
+            RATE_LIMIT_NOTE,
+          security: [{ apiKeyAuth: [] }],
+          parameters: [
+            { name: 'tenantId', in: 'query', schema: { type: 'string', minLength: 1 } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+            { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+            { name: 'sortBy', in: 'query', schema: { type: 'string', enum: ['createdAt', 'updatedAt', 'id', 'aum'], default: 'createdAt' } },
+            { name: 'sortOrder', in: 'query', schema: { type: 'string', enum: ['asc', 'desc'], default: 'desc' } },
+          ],
+          responses: {
+            '200': {
+              description: 'Paginated vault records (offset pagination only)',
+              headers: {
+                'X-Cache': { description: 'Whether the total count was reused', schema: { type: 'string', enum: ['HIT', 'MISS'] } },
+              },
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' }, tenantId: { type: 'string' },
+                            aum: { type: 'number' }, tvlUsd: { type: ['string', 'null'] },
+                            createdAt: { type: 'string', format: 'date-time' },
+                            updatedAt: { type: 'string', format: 'date-time' },
+                            deletedAt: { type: 'null' },
+                          },
+                        },
+                      },
+                      pagination: { $ref: '#/components/schemas/PaginationMeta' },
+                      timestamp: { type: 'string', format: 'date-time' },
+                    },
+                  },
+                },
+              },
+            },
+            '400': { description: 'Invalid query or unsupported cursor pagination' },
+            '401': { description: 'Missing or invalid API key' },
+            '403': { description: 'Missing or mismatched authenticated tenant' },
+            '500': { description: 'Database query failed' },
+          },
+        },
+      },
       '/health': {
         get: {
           tags: ['System'],
@@ -190,7 +255,6 @@ const options: swaggerJsdoc.Options = {
                     timestamp: '2024-01-01T00:00:00.000Z',
                     uptime: 123.4,
                     environment: 'production',
-                    checks: { api: 'up', cache: 'up', stellarRpc: 'up', indexer: 'up' },
                     lastIndexedLedger: 12345678,
                     checks: { api: 'up', cache: 'up', stellarRpc: 'up', databasePrimary: 'up', databaseReplica: 'up', prisma: 'up', jobs: 'up', indexer: 'up' },
                     sorobanCircuitBreaker: { state: 'closed', failures: 0, retryAfterMs: 0 },

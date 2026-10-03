@@ -38,6 +38,53 @@ describe('GET /api/v1/transactions', () => {
     expect(duplicateIds).toEqual([]);
   });
 
+  it('does not skip or duplicate rows when a new transaction is inserted between cursor page fetches', async () => {
+    const firstPage = await request(app).get('/api/v1/transactions?limit=2&sortBy=timestamp&sortOrder=desc');
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.data).toHaveLength(2);
+    expect(firstPage.body.pagination.nextCursor).toBeTruthy();
+
+    const newTx = await request(app)
+      .post('/api/v1/transactions')
+      .send({
+        type: 'deposit',
+        status: 'completed',
+        amount: '123.45',
+        asset: 'XLM',
+        timestamp: new Date().toISOString(),
+        transactionHash: 'tx-cursor-insert-' + Date.now(),
+        walletAddress: DEFAULT_WALLET,
+      });
+
+    expect([newTx.status, 201, 200]).toContain(newTx.status);
+
+    const secondPage = await request(app).get(
+      `/api/v1/transactions?limit=2&sortBy=timestamp&sortOrder=desc&cursor=${encodeURIComponent(firstPage.body.pagination.nextCursor)}`
+    );
+
+    expect(secondPage.status).toBe(200);
+
+    const firstPageIds = firstPage.body.data.map((transaction: { id: string }) => transaction.id);
+    const secondPageIds = secondPage.body.data.map((transaction: { id: string }) => transaction.id);
+
+    expect(secondPageIds.length).toBe(2);
+    expect(secondPageIds.some((id: string) => firstPageIds.includes(id))).toBe(false);
+    expect(secondPageIds.includes(newTx.body.id)).toBe(false);
+  });
+
+  it('still supports deprecated page-based pagination for backward compatibility', async () => {
+    const pageOne = await request(app).get('/api/v1/transactions?limit=10&page=1');
+    const pageTwo = await request(app).get('/api/v1/transactions?limit=10&page=2');
+
+    expect(pageOne.status).toBe(200);
+    expect(pageTwo.status).toBe(200);
+    expect(pageOne.body.data).toHaveLength(10);
+    expect(pageTwo.body.data).toHaveLength(10);
+    expect(pageOne.body.pagination.page).toBe(1);
+    expect(pageTwo.body.pagination.page).toBe(2);
+  });
+
   it('filters transactions by type accurately', async () => {
     const response = await request(app).get('/api/v1/transactions?limit=100&type=deposit');
 

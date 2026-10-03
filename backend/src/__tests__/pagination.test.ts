@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../index';
 import { ensurePaginationFixtureTransactions } from './setup';
+import { prisma } from '../lib/prisma';
 
 describe('Pagination', () => {
   beforeAll(async () => {
@@ -55,6 +56,45 @@ describe('Pagination', () => {
       const secondPageIds = secondPage.body.data.map((tx: any) => tx.id);
       const intersection = firstPageIds.filter((id: string) => secondPageIds.includes(id));
       expect(intersection.length).toBe(0);
+    });
+
+    it('should not skip or duplicate rows when a new tx is inserted between cursor pages', async () => {
+      // Fetch page 1 with limit 2
+      const firstPage = await request(app).get('/api/transactions?limit=2');
+      expect(firstPage.status).toBe(200);
+      expect(firstPage.body.data.length).toBe(2);
+      expect(firstPage.body.pagination.nextCursor).toBeDefined();
+
+      const firstPageIds = firstPage.body.data.map((tx: any) => tx.id);
+
+      // Insert a new transaction that would appear at the top of the ordering
+      await prisma.transaction.create({
+        data: {
+          id: 'tx-cursor-inserted',
+          type: 'deposit',
+          amount: '1.0000000',
+          asset: 'XLM',
+          timestamp: new Date(),
+          transactionHash: 'hash-cursor-inserted',
+          walletAddress: 'fixture-pagination',
+        },
+      });
+
+      // Fetch page 2 via cursor
+      const secondPage = await request(app).get(
+        `/api/transactions?limit=2&cursor=${firstPage.body.pagination.nextCursor}`
+      );
+      expect(secondPage.status).toBe(200);
+      expect(secondPage.body.data.length).toBeGreaterThan(0);
+
+      const secondPageIds = secondPage.body.data.map((tx: any) => tx.id);
+
+      // No duplicates between pages
+      const intersection = firstPageIds.filter((id: string) => secondPageIds.includes(id));
+      expect(intersection.length).toBe(0);
+
+      // The newly inserted tx must not appear on page 2 (it sorts before the cursor)
+      expect(secondPageIds).not.toContain('tx-cursor-inserted');
     });
 
     it('should support offset-based pagination', async () => {
@@ -142,6 +182,18 @@ describe('Pagination', () => {
       expect(response.status).toBe(200);
       expect(response.body.data).toEqual([]);
       expect(response.body.pagination.hasNextPage).toBe(false);
+    });
+
+    it('should include nextCursor in pagination snapshot', async () => {
+      const response = await request(app).get('/api/transactions?limit=5');
+
+      expect(response.status).toBe(200);
+      expect(response.body.pagination).toHaveProperty('nextCursor');
+      if (response.body.pagination.hasNextPage) {
+        expect(response.body.pagination.nextCursor).toBeTruthy();
+      } else {
+        expect(response.body.pagination.nextCursor).toBeNull();
+      }
     });
 
     it('should handle invalid page number gracefully', async () => {
@@ -346,6 +398,7 @@ describe('Pagination', () => {
       expect(pagination).toHaveProperty('count');
       expect(pagination).toHaveProperty('hasNextPage');
       expect(pagination).toHaveProperty('hasPrevPage');
+      expect(pagination).toHaveProperty('nextCursor');
       expect(typeof pagination.count).toBe('number');
       expect(typeof pagination.hasNextPage).toBe('boolean');
       expect(typeof pagination.hasPrevPage).toBe('boolean');
