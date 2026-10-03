@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import { prisma } from './prisma';
 import { resetAuditLogs } from './auditLog';
 import { redactSensitiveLogAttributes } from './auditRedaction';
+import crypto from 'crypto';
 
 type AuditStorageMode = 'memory' | 'prisma' | 'hybrid';
 
@@ -35,6 +36,25 @@ function normalizeStorageMode(raw: string | undefined): AuditStorageMode {
   return 'hybrid';
 }
 
+/**
+ * Hash IP address with daily salt for privacy if AUDIT_HASH_IP=true
+ */
+function hashIpIfNeeded(ip: string): string {
+  if (process.env.AUDIT_HASH_IP !== 'true') {
+    return ip;
+  }
+
+  // Daily salt changes every 24 hours based on date
+  const today = new Date().toISOString().split('T')[0];
+  const salt = `audit-ip-${today}`;
+  const hash = crypto
+    .createHash('sha256')
+    .update(`${ip}:${salt}`)
+    .digest('hex');
+
+  return `sha256:${hash.slice(0, 16)}`;
+}
+
 export async function recordAdminAuditLog(
   req: Request,
   action: string,
@@ -43,6 +63,7 @@ export async function recordAdminAuditLog(
 ): Promise<void> {
   const storageMode = normalizeStorageMode(process.env.ADMIN_AUDIT_LOG_STORAGE);
   const safeMetadata = redactSensitiveLogAttributes(metadata);
+  const rawIp = req.ip || 'unknown';
   const entry: AdminAuditLogRecord = {
     id: createLogId(),
     action,
@@ -51,7 +72,7 @@ export async function recordAdminAuditLog(
     statusCode,
     actor: resolveActor(req),
     apiKeyHash: req.authApiKeyHash || 'unknown',
-    ipAddress: req.ip || 'unknown',
+    ipAddress: hashIpIfNeeded(rawIp),
     userAgent: req.get('user-agent') || 'unknown',
     metadata: safeMetadata,
     createdAt: new Date().toISOString(),

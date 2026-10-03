@@ -1,0 +1,40 @@
+# VCS history (also prevents commit history leaking into the image)
+.git
+.gitignore
+.gitattributes
+.github
+.husky
+
+# Dependencies: always installed inside the image from the lockfile
+**/node_modules
+
+# Build output
+**/dist
+**/.next
+**/coverage
+**/target
+**/build
+
+# Logs
+*.log
+**/*.log
+
+# Local env files (keep the examples)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editor / OS noise
+.vscode
+.DS_Store
+
+# Large files that have nothing to do with the backend image
+*.exe
+docs
+contracts
+frontend
+public-portfolio
+deployments
+monitoring
+tests
+*.md

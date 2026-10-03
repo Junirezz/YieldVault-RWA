@@ -234,6 +234,32 @@ export function syncJobGovernanceMetrics(): void {
   }
 }
 
+// --- Allocation Rebalance Metrics (Issue #1433) ---
+
+/**
+ * Serialization failures retried while rebalancing vault allocations.
+ *
+ * The rebalance runs at Serializable, so a concurrent rebalance over the same
+ * vault is expected to lose the race and retry rather than silently overwrite
+ * the winner's weights. A sustained rise here means rebalances for the same
+ * vault are colliding often enough to need either jitter or coarser locking;
+ * a value that never moves means the isolation level is not doing its job.
+ */
+export const rebalanceSerializationRetryTotal = new Counter({
+  name: 'rebalance_serialization_retry_total',
+  help: 'Allocation rebalance transactions retried after a serialization failure',
+  labelNames: ['operation', 'attempt'],
+  registers: [register],
+});
+
+/** Rebalance transaction outcomes, by terminal result. */
+export const rebalanceTotal = new Counter({
+  name: 'rebalance_total',
+  help: 'Allocation rebalance attempts by terminal outcome',
+  labelNames: ['operation', 'outcome'],
+  registers: [register],
+});
+
 // --- Reconciliation Drift Metrics ---
 
 export const reconciliationDriftTotal = new Counter({

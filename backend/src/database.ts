@@ -7,7 +7,7 @@ import { recordQueryPerformance } from './queryBudgets';
  * This can be implemented by pg.Pool or a mock for testing.
  */
 export interface IDatabasePool {
-  query<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }>;
+  query<T = any>(name: string, params?: any[]): Promise<{ rows: T[] }>;
   end(): Promise<void>;
   isHealthy(): Promise<boolean>;
 }
@@ -80,11 +80,11 @@ export class NoopDatabasePool implements IDatabasePool {
  * and a read-only replica, with automatic failover to primary for reads.
  */
 export class DatabaseManager {
-  private primaryPool: IDatabasePool;
-  private replicaPool: IDatabasePool;
-  private poolsAreShared: boolean;
+  private readonly primaryPool: IDatabasePool;
+  private readonly replicaPool: IDAtabasePool;
+  private readonly poolsAreShared: boolean;
 
-  constructor(primaryPool?: IDatabasePool, replicaPool?: IDatabasePool) {
+  constructor(primaryPool?: IDatabasePool, replicaPool?: IDAtabasePool) {
     if (primaryPool) {
       this.primaryPool = primaryPool;
       this.replicaPool = replicaPool || primaryPool;
@@ -151,8 +151,8 @@ export class DatabaseManager {
    * Forces a query to the primary database, bypassing any replica routing.
    * Useful for reads that require the latest committed data (e.g. after a write).
    */
-  async queryPrimary<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }> {
-    return await this.executeWithBudget(this.primaryPool, 'raw_primary', text, params);
+  async queryPrimary<T = any>(name: string, params?: any[]): Promise<{ rows: T[] }> {
+    return await this.executeWithBudget(this.primaryPool, 'raw_primary', name, params);
   }
 
   /**
@@ -256,7 +256,7 @@ function requireDatabaseUrl(): string {
     throw new Error('DATABASE_URL is required in production');
   }
 
-  return 'postgres://postgres:postgres@localhost:5432/yieldvault';
+  return 'postgres://postgres:postgres@localhost:5432/yieldviault';
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

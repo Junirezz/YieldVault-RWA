@@ -144,6 +144,11 @@ function classifyError(err: Error): TypedErrorResponse | null {
     };
   }
 
+  // Known Prisma request errors: map to client-safe responses. Never expose
+  // err.meta, the raw message, or SQL fragments.
+  const prismaKnown = classifyPrismaKnownRequestError(err);
+  if (prismaKnown) return prismaKnown;
+
   // Prisma / database errors (detect by error code patterns)
   if (isPrismaError(err)) {
     return {
@@ -195,6 +200,39 @@ function classifyError(err: Error): TypedErrorResponse | null {
   }
 
   return null;
+}
+
+function classifyPrismaKnownRequestError(err: Error): TypedErrorResponse | null {
+  if (err.constructor?.name !== 'PrismaClientKnownRequestError') return null;
+
+  switch ((err as { code?: unknown }).code) {
+    case 'P2002':
+      return {
+        error: 'ConflictError',
+        status: 409,
+        code: 'CONFLICT',
+        message: 'Resource already exists',
+        retryable: false,
+      };
+    case 'P2003':
+      return {
+        error: 'InvalidReferenceError',
+        status: 400,
+        code: 'INVALID_REFERENCE',
+        message: 'Referenced resource does not exist',
+        retryable: false,
+      };
+    case 'P2025':
+      return {
+        error: 'NotFoundError',
+        status: 404,
+        code: 'NOT_FOUND',
+        message: 'Resource not found',
+        retryable: false,
+      };
+    default:
+      return null;
+  }
 }
 
 function isPrismaError(err: Error): boolean {

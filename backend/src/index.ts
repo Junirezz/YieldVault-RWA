@@ -10,6 +10,18 @@ initTracing();
 
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import NodeCache from 'node-cache';
+import {
+  loginHandler,
+  nonceHandler,
+  refreshHandler,
+  requireAuth,
+  verifyJwt,
+  revokeAccessToken,
+  revokeAllAccessTokens,
+  revokeCurrentSession,
+  revokeAllSessions,
+} from './auth';
+import vaultListRouter from './routes/vaults';
 import { loginHandler, nonceHandler, refreshHandler, requireAuth, verifyJwt } from './auth';
 import {
   authLimiter,
@@ -61,7 +73,7 @@ import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema } from './middleware/validate';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware, createTimeoutFor } from './middleware/timeoutMiddleware';
@@ -103,6 +115,7 @@ import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
+import vaultsListRouter from './routes/vaults';
 import walletAliasRouter from './walletAliasEndpoints';
 import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
@@ -111,10 +124,15 @@ import {
   buildTransactionExportArtifact,
   buildTransactionsResponse,
   buildVaultHistoryResponse,
+  TRANSACTION_PAGINATION_CONFIG,
 } from './listEndpoints';
 import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
 import listRouter from './listEndpoints';
-import referralRouter from './referralEndpoints';
+import referralRouter, {
+  buildReferralCodeErrorBody,
+  buildReferralStatsErrorBody,
+  buildReferralStatsNotFoundBody,
+} from './referralEndpoints';
 import auditLogRouter from './auditLogEndpoints';
 import { referralService } from './referralService';
 import {
@@ -255,6 +273,11 @@ const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CA
 
 // Configure logger
 logger.configure(logLevel);
+
+// Coordinates SIGTERM/SIGINT: stops new requests immediately, drains
+// in-flight ones, then runs DB/job cleanup — see onShutdown registrations
+// near the bottom of this file.
+const shutdownHandler = new GracefulShutdownHandler(drainTimeout);
 
 void walletAliasMappingService.loadFromDatabase().catch((error) => {
   logger.log('error', 'Failed to warm wallet alias cache', {
@@ -425,30 +448,67 @@ function sendStandardListEnvelope<T>(
 
 async function buildReferralStatsSnapshot(wallet: string) {
   const normalizedWallet = normalizeWalletAddress(wallet);
-  const stats = await referralService.getReferralStats(normalizedWallet);
-  if (!stats) {
+
+  try {
+    const stats = await referralService.getReferralStats(normalizedWallet);
+
+    if (!stats) {
+      // Must be the exact envelope GET /api/v1/referrals/:wallet returns, not
+      // a hand-rolled stand-in — admin impersonation is compared against that
+      // endpoint field-for-field by the governance contract test.
+      return {
+        statusCode: 404,
+        body: buildReferralStatsNotFoundBody(),
+      };
+    }
+
     return {
-      statusCode: 404,
-      body: {
-        error: 'Not Found',
-        status: 404,
-        code: 'ROUTE_NOT_FOUND',
-        message: 'No referral activity found for this wallet',
-        retryable: false,
-      },
+      statusCode: 200,
+      body: stats,
+    };
+  } catch (error) {
+    // Same reasoning as the 404 above. The route reports a failed lookup as a
+    // 500 with the canonical envelope; letting the rejection escape instead
+    // would 500 the entire impersonation response with a different message, so
+    // one broken sub-resource would take the whole snapshot with it (#1319).
+    logger.log('error', 'Error building referral stats snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralStatsErrorBody(),
     };
   }
+}
 
-  return {
-    statusCode: 200,
-    body: stats,
-  };
+async function buildReferralCodeSnapshot(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+
+  try {
+    const code = await referralService.getOrCreateReferralCode(normalizedWallet);
+    return {
+      statusCode: 200,
+      body: { code },
+    };
+  } catch (error) {
+    logger.log('error', 'Error building referral code snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralCodeErrorBody(),
+    };
+  }
 }
 
 async function buildWalletTransactionsSnapshot(wallet: string) {
   const normalizedWallet = normalizeWalletAddress(wallet);
   const prisma = getPrismaClient();
-  const limit = 20;
+  // Shared with GET /api/v1/transactions so the proxy can never drift to a
+  // different page size than the endpoint it stands in for (#1322).
+  const limit = TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20;
   const where = { user: normalizedWallet };
   const [total, transactions] = await Promise.all([
     prisma.transaction.count({ where }),
@@ -486,10 +546,7 @@ async function buildImpersonatedVaultState(wallet: string) {
     portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: normalizedWallet }),
     vaultHistory: buildVaultHistoryResponse({}),
     referralStats: await buildReferralStatsSnapshot(normalizedWallet),
-    referralCode: {
-      statusCode: 200,
-      body: { code: await referralService.getOrCreateReferralCode(normalizedWallet) },
-    },
+    referralCode: await buildReferralCodeSnapshot(normalizedWallet),
   };
 }
 
@@ -717,6 +774,25 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// ─── Shutdown Gate ───────────────────────────────────────────────────────────
+// Once SIGTERM/SIGINT starts a drain, reject new requests with 503 instead of
+// routing them — the health check stays exempt so liveness probes keep seeing
+// 200 until the process actually exits.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (shutdownHandler.isShuttingDown() && req.path !== '/health') {
+    res.set('Retry-After', '10');
+    res.status(503).json({
+      error: 'Service Unavailable',
+      status: 503,
+      code: 'SHUTTING_DOWN',
+      message: 'Server is shutting down and not accepting new requests',
+      retryable: true,
+    });
+    return;
+  }
+  next();
+});
+
 // Apply the Redis-backed default limiter (reads tier) globally (skip health/ready probes).
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/health' || req.path === '/ready') return next();
@@ -911,6 +987,8 @@ app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);
+apiV1.use('/vaults', vaultsListRouter);
+apiV1.use('/vaults', vaultListRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
@@ -922,6 +1000,8 @@ registerInvalidationHook(invalidateVaultCaches);
 
 // Backward compatibility for legacy unversioned list routes (/api/*)
 app.use('/api', listRouter);
+app.use('/api/vaults', vaultListRouter);
+app.use('/vaults', vaultListRouter);
 
 // â”€â”€â”€ Auth Routes (Issue #377) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Canonical versioned auth endpoints
@@ -979,16 +1059,42 @@ app.use('/admin', validateApiKey, adminRbacMiddleware);
 
 /**
  * POST /api/v1/auth/logout
- * Revokes the current session. Requires Bearer token.
+ *
+ * Revokes the presented access token (`jti`) on the revocation list, so the
+ * very next request with it is rejected 401 `TOKEN_REVOKED` (Issue #1431).
+ * When a `refreshToken` is also supplied the whole refresh family is revoked,
+ * so the session cannot be resurrected by rotation.
  */
-apiV1.post('/auth/logout', readsLimiter, requireAuth, (req: Request, res: Response) => {
+apiV1.post('/auth/logout', readsLimiter, requireAuth, async (req: Request, res: Response) => {
+  const authReq = req as import('./auth').AuthenticatedRequest;
+  const payload = authReq.jwtPayload;
+  const walletAddress = payload?.sub;
+
+  if (!payload || !walletAddress) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: 'Unable to determine authenticated wallet',
+    });
+    return;
+  }
+
   try {
-    const authReq = req as import('./auth').AuthenticatedRequest;
-    const walletAddress = authReq.jwtPayload?.sub;
-    if (!walletAddress) throw new Error('Unable to determine authenticated wallet');
+    await revokeAccessToken(payload, 'logout');
+
+    const refreshToken =
+      typeof (req.body as { refreshToken?: unknown } | undefined)?.refreshToken === 'string'
+        ? ((req.body as { refreshToken: string }).refreshToken)
+        : undefined;
+    if (refreshToken) {
+      await revokeCurrentSession(refreshToken);
+    }
+
     res.status(200).json({
       message: 'Session revoked successfully',
-      walletAddress: walletAddress.slice(0, 8) + 'â€¦',
+      walletAddress: walletAddress.slice(0, 8) + '…',
+      revokedAccessToken: true,
+      refreshSessionRevoked: Boolean(refreshToken),
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
@@ -1002,17 +1108,34 @@ apiV1.post('/auth/logout', readsLimiter, requireAuth, (req: Request, res: Respon
 
 /**
  * POST /api/v1/auth/logout-all
- * Revokes all active sessions for the authenticated wallet.
+ *
+ * Revokes every access token currently issued to the wallet by writing a
+ * wallet-wide high-water mark, so tokens minted before now stop working even
+ * though we hold no list of them (Issue #1431). Also revokes all refresh
+ * families for the wallet.
  */
-apiV1.post('/auth/logout-all', readsLimiter, requireAuth, (req: Request, res: Response) => {
+apiV1.post('/auth/logout-all', readsLimiter, requireAuth, async (req: Request, res: Response) => {
+  const authReq = req as import('./auth').AuthenticatedRequest;
+  const walletAddress = authReq.jwtPayload?.sub;
+
+  if (!walletAddress) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: 'Unable to determine authenticated wallet',
+    });
+    return;
+  }
+
   try {
-    const authReq = req as import('./auth').AuthenticatedRequest;
-    const walletAddress = authReq.jwtPayload?.sub;
-    if (!walletAddress) throw new Error('Unable to determine authenticated wallet');
+    const revokedAccessTokens = await revokeAllAccessTokens(walletAddress, 'logout');
+    const revokedRefreshTokens = await revokeAllSessions(walletAddress);
+
     res.status(200).json({
       message: 'All sessions revoked successfully',
-      walletAddress: walletAddress.slice(0, 8) + 'â€¦',
-      revokedCount: 1,
+      walletAddress: walletAddress.slice(0, 8) + '…',
+      revokedCount: revokedRefreshTokens,
+      revokedAccessTokens,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
@@ -4794,6 +4917,12 @@ if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {
     pollIntervalMs: parseInt(process.env.EVENT_POLL_INTERVAL_MS || '10000', 10),
     batchSize: parseInt(process.env.EVENT_REPLAY_BATCH_SIZE || '100', 10),
   });
+
+  // stopEventPollingService() is a no-op if the service was never started,
+  // so this is safe to register unconditionally alongside the block above.
+  shutdownHandler.onShutdown(async () => {
+    stopEventPollingService();
+  });
 }
 
 // â”€â”€â”€ Outbox Pattern Processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -4810,12 +4939,24 @@ if (process.env.NODE_ENV !== 'test') {
 
   // Register graceful shutdown for the outbox processor so pending events
   // are not abandoned when the process receives a termination signal.
-  process.on('SIGTERM', () => {
+  // Runs only after in-flight HTTP requests have drained (see
+  // GracefulShutdownHandler), so it can't race a request still writing to
+  // the outbox.
+  shutdownHandler.onShutdown(async () => {
     eventOutboxService.stop();
   });
-  process.on('SIGINT', () => {
-    eventOutboxService.stop();
-  });
+  const shutdownController = new AbortController();
+  const shutdownSignal = shutdownController.signal;
+  eventOutboxService.start({ signal: shutdownSignal });
+
+  // Register graceful shutdown for the outbox processor: abort in-flight work
+  // and wait for the poller to drain before the process tears down resources.
+  const stopOutbox = () => {
+    shutdownController.abort();
+    void eventOutboxService.stop();
+  };
+  process.on('SIGTERM', stopOutbox);
+  process.on('SIGINT', stopOutbox);
 }
 
 
@@ -5369,6 +5510,58 @@ if (process.env.NODE_ENV !== 'test') {
   void initializeJobGovernance();
 }
 
+// ─── Vault management ────────────────────────────────────────────────────────
+
+/**
+ * POST /admin/vaults
+ *
+ * Creates a new vault for a tenant.
+ *
+ * Body: { name: string, symbol: string, tenantId: string }
+ *
+ * Validation is handled entirely by CreateVaultBodySchema (which trims
+ * whitespace before checking min/max lengths), so no manual trim() calls
+ * are needed in this handler. A whitespace-only name like " " fails schema
+ * validation and returns 400 before any DB write is attempted.
+ */
+app.post(
+  '/admin/vaults',
+  validateApiKey,
+  validate({ body: CreateVaultBodySchema }),
+  async (req: Request, res: Response) => {
+    const { name, symbol, tenantId } = req.body as {
+      name: string;
+      symbol: string;
+      tenantId: string;
+    };
+
+    const prismaClient = getPrismaClient();
+    const vault = await prismaClient.vault.create({
+      data: { name, symbol, tenantId },
+    });
+
+    void recordAdminAuditLog(req, 'vault.created', 201, {
+      vaultId: vault.id,
+      name: vault.name,
+      symbol: vault.symbol,
+      tenantId: vault.tenantId,
+      actor: resolveActingAdminAddress(req),
+    });
+
+    res.status(201).json({
+      vault: {
+        id: vault.id,
+        name: vault.name,
+        symbol: vault.symbol,
+        tenantId: vault.tenantId,
+        aum: vault.aum,
+        createdAt: vault.createdAt.toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
 // Normalize dependency and unhandled application failures before the 404 route.
 app.use(errorBoundaryMiddleware);
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
@@ -5404,9 +5597,34 @@ app.use((req: Request, res: Response) => {
     status: 404,
     code: 'ROUTE_NOT_FOUND',
     message: `Cannot ${req.method} ${req.originalUrl}`,
+    // `path` is also surfaced at the top level because that is where the
+    // documented not-found envelope puts it; `details.path` stays for callers
+    // that already read the field from there.
+    path: req.originalUrl,
     details: { path: req.originalUrl },
     retryable: false,
   });
 });
 
+// â”€â”€â”€ Server Startup & Graceful Shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Tests import `app` directly via supertest and never bind a real port.
+if (process.env.NODE_ENV !== 'test') {
+  // Disconnect Prisma last, after the HTTP listener has finished draining
+  // in-flight requests (see GracefulShutdownHandler) — this is what stops a
+  // termination signal from severing an open prisma.vault.update transaction
+  // mid-commit and leaving a row locked for the next deploy's migration.
+  shutdownHandler.onShutdown(async () => {
+    await prisma.$disconnect();
+  });
+
+  const server = app.listen(port, () => {
+    logger.log('info', `Server listening on port ${port}`);
+  });
+  shutdownHandler.register(server);
+}
+
+// Exported for tests: lets the shutdown-gate middleware behavior be verified
+// without sending a real process signal (which would also tear down other
+// suites' background jobs sharing this module in the Jest worker).
+export { shutdownHandler };
 export default app;

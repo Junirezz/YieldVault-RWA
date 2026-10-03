@@ -59,7 +59,7 @@ export async function recordSessionEvent(entry: SessionAuditEntry): Promise<void
         sessionId: entry.sessionId,
         ipAddress: entry.ipAddress,
         userAgent: entry.userAgent,
-        metadata: entry.metadata,
+        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
         correlationId,
         traceId,
         timestamp: new Date(),

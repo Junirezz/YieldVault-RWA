@@ -9,6 +9,7 @@ process.env.ADAPTIVE_THROTTLE_SCORE_THRESHOLD = '6';
 import request from 'supertest';
 import app from '../index';
 import { resetAdaptiveThrottleStateForTests } from '../middleware/adaptiveThrottle';
+import redis from '../utils/redis';
 
 describe('Backend API', () => {
   beforeEach(() => {
@@ -63,6 +64,27 @@ describe('Backend API', () => {
       expect(response.body.dependencies).toHaveProperty('stellarRpc');
       expect(typeof response.body.dependencies.cache).toBe('boolean');
       expect(typeof response.body.dependencies.stellarRpc).toBe('boolean');
+    });
+
+    it('should include redis check in dependencies', async () => {
+      const response = await request(app).get('/ready');
+
+      expect(response.body.dependencies).toHaveProperty('redis');
+      expect(response.body.dependencies.redis).toHaveProperty('status');
+    });
+
+    it('should return 503 when redis.ping throws', async () => {
+      const pingSpy = jest
+        .spyOn(redis, 'ping')
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      const response = await request(app).get('/ready');
+
+      expect(response.status).toBe(503);
+      expect(response.body.checks).toHaveProperty('redis');
+      expect(response.body.checks.redis).toMatchObject({ status: 'down' });
+
+      pingSpy.mockRestore();
     });
   });
 

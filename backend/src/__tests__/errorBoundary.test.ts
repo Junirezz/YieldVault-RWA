@@ -121,6 +121,57 @@ describe('errorBoundaryMiddleware', () => {
     expect(res.body.dependency).toBe('database');
   });
 
+  describe('PrismaClientKnownRequestError sanitization', () => {
+    class PrismaClientKnownRequestError extends Error {
+      constructor(
+        message: string,
+        public code: string,
+        public meta?: Record<string, unknown>,
+      ) {
+        super(message);
+        this.name = 'PrismaClientKnownRequestError';
+      }
+    }
+
+    const run = (err: Error) => {
+      const res = mockRes();
+      errorBoundaryMiddleware(err, mockReq(), res, jest.fn());
+      return res;
+    };
+
+    it('maps duplicate vault creation (P2002) to 409 without leaking SQL or meta', () => {
+      const res = run(
+        new PrismaClientKnownRequestError(
+          'Invalid `prisma.vault.create()` invocation: INSERT INTO "Vault" ("id") VALUES ($1) Unique constraint failed on the fields: (`id`)',
+          'P2002',
+          { target: ['id'], modelName: 'Vault' },
+        ),
+      );
+
+      expect(res.statusCode).toBe(409);
+      expect(res.body.code).toBe('CONFLICT');
+      expect(res.body.message).toBe('Resource already exists');
+      expect(res.body.retryable).toBe(false);
+      expect(res.body.meta).toBeUndefined();
+      const serialized = JSON.stringify(res.body);
+      expect(serialized).not.toContain('INSERT');
+      expect(serialized).not.toContain('Vault');
+    });
+
+    it('maps P2003 to 400 INVALID_REFERENCE', () => {
+      const res = run(new PrismaClientKnownRequestError('FK failed', 'P2003', { field_name: 'x' }));
+      expect(res.statusCode).toBe(400);
+      expect(res.body.code).toBe('INVALID_REFERENCE');
+      expect(JSON.stringify(res.body)).not.toContain('field_name');
+    });
+
+    it('maps P2025 to 404', () => {
+      const res = run(new PrismaClientKnownRequestError('No record found', 'P2025'));
+      expect(res.statusCode).toBe(404);
+      expect(res.body.code).toBe('NOT_FOUND');
+    });
+  });
+
   it('handles Prisma query timeout errors', () => {
     const err = new Error('Prisma query timed out after 5000ms (Transaction.findMany)');
     const req = mockReq();

@@ -179,6 +179,39 @@ export function maskWalletAddress(addr: string): string {
   return addr;
 }
 
+// ─── Client IP Resolution ────────────────────────────────────────────────────
+
+const trustProxyWarnedApps = new WeakSet<object>();
+
+/**
+ * Resolves the client IP for rate limiting.
+ * When Express `trust proxy` is enabled, `req.ip` is derived from the
+ * X-Forwarded-For chain according to that setting. Otherwise the header is
+ * unverified and attacker-controlled, so the socket's remote address is used
+ * to prevent bucket rotation via spoofed X-Forwarded-For values.
+ */
+export function resolveClientIp(req: Request): string {
+  const app = req.app;
+  const trustProxy = app && typeof app.get === 'function' ? app.get('trust proxy') : undefined;
+
+  if (trustProxy === undefined && app && !trustProxyWarnedApps.has(app)) {
+    trustProxyWarnedApps.add(app);
+    console.log(
+      JSON.stringify({
+        level: 'warn',
+        event: 'rate_limit_trust_proxy_unset',
+        message:
+          "Rate limiting is active but Express 'trust proxy' is not set; using the socket address and ignoring X-Forwarded-For. Set 'trust proxy' if running behind a reverse proxy.",
+      })
+    );
+  }
+
+  if (trustProxy) {
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+  }
+  return req.socket?.remoteAddress || req.ip || 'unknown';
+}
+
 // ─── Key Extraction ──────────────────────────────────────────────────────────
 
 /**
@@ -200,11 +233,7 @@ export function extractRateLimitKey(req: Request): string {
     return Array.isArray(apiKey) ? apiKey[0] : apiKey;
   }
 
-  if (req.ip) {
-    return req.ip;
-  }
-
-  return 'unknown';
+  return resolveClientIp(req);
 }
 
 /** Returns the authenticated/request wallet identity used for user quotas. */
@@ -223,7 +252,7 @@ export function extractRateLimitUserKey(req: Request): string {
 }
 
 export function extractRateLimitIpKey(req: Request): string {
-  return req.ip || 'unknown';
+  return resolveClientIp(req);
 }
 
 export function extractRateLimitApiKeyKey(req: Request): string {

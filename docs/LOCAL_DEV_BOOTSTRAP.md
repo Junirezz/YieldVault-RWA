@@ -56,12 +56,20 @@ git config core.hooksPath .husky
 Install dependencies for each application separately:
 
 ```bash
+# Build shared API schemas first (required before backend typecheck or build)
+cd packages/api-schemas
+npm install
+npm run build
+cd ..
+
 cd backend
 npm install
 cd ../frontend
 npm install
 cd ..
 ```
+
+> **Note on Build Order:** `@yieldvault/api-schemas` is a workspace package imported by backend middleware (`backend/src/middleware/validate.ts`). Without building `packages/api-schemas` first, TypeScript compilation (`tsc --noEmit`) fails with `Cannot find module '@yieldvault/api-schemas'`. Always ensure `packages/api-schemas` is built first (or use root `npm run build:schemas`).
 
 If a workspace uses a lockfile, prefer the package manager and frozen-lockfile command specified by that lockfile and by CI.
 

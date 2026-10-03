@@ -19,7 +19,7 @@ import {
   parseTypeFilter,
   parseStatusFilter,
 } from './transactionQuery';
-import { buildTransactionsResponse } from './listEndpoints';
+import { buildTransactionsResponse, TRANSACTION_PAGINATION_CONFIG } from './listEndpoints';
 import { cacheMiddleware } from './middleware/cache';
 import { tenantGuard } from './middleware/tenantGuard';
 import { Permission } from './middleware/rbac';
@@ -63,6 +63,12 @@ router.get('/',
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
 
+      // One parser for both branches below. Hand-rolling parseInt here is what
+      // let `limit=abc` through as NaN (Prisma `take: NaN` -> 500) and let
+      // `limit=100000` bypass the endpoint max, both of which the contract
+      // tests require to resolve gracefully to a clamped 200 (#1318).
+      const paginationQuery = parsePaginationQuery(req, TRANSACTION_PAGINATION_CONFIG);
+
       if (!walletAddress) {
         // Validate type filter if provided
         const { error: typeError } = parseTypeFilter(typeof type === 'string' ? type : undefined);
@@ -82,11 +88,7 @@ router.get('/',
 
         try {
           const response = await buildTransactionsResponse({
-            limit: typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined,
-            cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
-            page: typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : undefined,
-            sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
-            sortOrder: req.query.sortOrder === 'asc' ? 'asc' : 'desc',
+            ...paginationQuery,
             type: typeof type === 'string' ? type : undefined,
             status: typeof status === 'string' ? status : undefined,
             from,
@@ -126,13 +128,7 @@ router.get('/',
         return;
       }
 
-      // Parse pagination parameters
-      const paginationQuery = parsePaginationQuery(req, {
-        ...DEFAULT_PAGINATION_CONFIG,
-        defaultSortBy: 'timestamp',
-        defaultSortOrder: 'desc',
-      });
-
+      // Parse pagination parameters (shared with the unscoped branch above)
       // Resolve and validate the requested sort field against the allowlist.
       const sort = resolveTransactionSort(paginationQuery.sortBy, paginationQuery.sortOrder);
       if (!sort.valid) {

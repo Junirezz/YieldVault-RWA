@@ -17,6 +17,7 @@ export const CRITICAL_ENDPOINTS = [
   'GET /ready',
   'GET /api/v1/vault/summary',
   'GET /api/v1/transactions',
+  'GET /api/v1/vaults',
 ] as const;
 
 export type CriticalEndpoint = (typeof CRITICAL_ENDPOINTS)[number];
@@ -58,6 +59,12 @@ export const ReadyResponseSchema = z
       database: z.boolean(),
       prisma: z.boolean(),
       indexer: z.boolean(),
+      redis: z.object({
+        status: z.enum(['up', 'down']),
+        optional: z.boolean().optional(),
+        latencyMs: z.number().optional(),
+        error: z.string().optional(),
+      }),
     }),
   })
   .strict();
@@ -110,11 +117,34 @@ export const TransactionsListResponseSchema = z
   })
   .strict();
 
+/**
+ * Public projection of a vault row. `tenantId` is intentionally absent — the
+ * list route never exposes it (Issue #1430).
+ */
+export const VaultItemSchema = z
+  .object({
+    id: z.string(),
+    aum: z.number(),
+    tvlUsd: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .strict();
+
+export const VaultListResponseSchema = z
+  .object({
+    data: z.array(VaultItemSchema),
+    pagination: PaginationMetaSchema,
+    timestamp: z.string(),
+  })
+  .strict();
+
 export const ENDPOINT_SCHEMAS: Record<CriticalEndpoint, z.ZodTypeAny> = {
   'GET /health': HealthResponseSchema,
   'GET /ready': ReadyResponseSchema,
   'GET /api/v1/vault/summary': VaultSummaryResponseSchema,
   'GET /api/v1/transactions': TransactionsListResponseSchema,
+  'GET /api/v1/vaults': VaultListResponseSchema,
 };
 
 export function endpointToFilename(endpoint: CriticalEndpoint): string {
@@ -249,7 +279,7 @@ export function diffSchemaShapes(
     }
 
     for (const key of baselineRequired) {
-      if (!(key in baseline.properties ?? {})) {
+      if (!(key in baselineProps)) {
         issues.push({ path: at(key), message: 'required field missing from snapshot properties (orphaned reference)' });
       }
       if (!(key in currentProps)) {
@@ -260,8 +290,10 @@ export function diffSchemaShapes(
     }
 
     for (const key of currentRequired) {
-      if (!(key in current.properties ?? {})) {
+      if (!(key in currentProps)) {
         issues.push({ path: at(key), message: 'required field missing from live schema properties (invalid schema)' });
+        continue;
+      }
       if (!baselineRequired.has(key)) {
         issues.push({ path: at(key), message: 'field is now required — regenerate snapshots with npm run snapshots:write' });
       }
