@@ -438,6 +438,21 @@ export function startIdempotencyCleanupTask(intervalMs = 3600000): NodeJS.Timer 
   }, intervalMs);
 }
 
+// ─── In-flight store (Redis + NodeCache) ─────────────────────────────────────
+//
+// Issue #811: multi-instance deployments lost idempotency guarantees on pod
+// recycle because responses were stored only in-process. This revision
+// persists completed responses to Redis using SET … EX so all replicas share
+// the same store, falling back to NodeCache when Redis is unavailable
+// (fail-open, with a warning).
+//
+// The Prisma helpers above (enforceIdempotency / *IdempotencyRecord) are the
+// newer, DB-backed design but are not yet wired into any route. The mutation
+// endpoints (deposit/withdrawal/transfer), the admin key routes and the
+// retention sweeper all still call the store below, so both surfaces live here
+// until those call sites are migrated. Restoring this store is what keeps
+// `idempotencyStore`, `IdempotencyStore` and `IdempotencyConflictError`
+// resolvable for those consumers.
 // ─── Response Store (Redis + NodeCache) ─────────────────────────────────────
 //
 // Shared response store used by vault endpoints and the transfer orchestrator.
@@ -452,6 +467,7 @@ export interface IdempotentOperationResult<T> {
 }
 
 /** Metadata attached to every idempotency key entry. */
+export interface IdempotencyEntryMetadata {
 export interface IdempotencyStoreKeyMetadata {
   /** ISO-8601 timestamp when the key was first stored. */
   createdAt: string;
@@ -466,6 +482,7 @@ export interface IdempotencyStoreKeyMetadata {
 /** Summary returned by GET /admin/idempotency/keys. */
 export interface IdempotencyKeyInfo {
   key: string;
+  metadata: IdempotencyEntryMetadata;
   metadata: IdempotencyStoreKeyMetadata;
 }
 
@@ -478,6 +495,9 @@ export interface IdempotencyMetrics {
   pendingKeys: number;
 }
 
+interface StoredResponse<T> extends IdempotentOperationResult<T> {
+  fingerprint: string;
+  metadata: IdempotencyEntryMetadata;
 // ─── Internal Types ───────────────────────────────────────────────────────────
 
 interface StoredResponse<T> extends IdempotentOperationResult<T> {
@@ -488,6 +508,9 @@ interface StoredResponse<T> extends IdempotentOperationResult<T> {
 interface PendingOperation<T> {
   fingerprint: string;
   promise: Promise<StoredResponse<T>>;
+  metadata: IdempotencyEntryMetadata;
+}
+
   metadata: IdempotencyStoreKeyMetadata;
 }
 
@@ -499,6 +522,8 @@ export class IdempotencyConflictError extends Error {
     this.name = 'IdempotencyConflictError';
   }
 }
+
+const REDIS_PREFIX = 'idempotency:';
 
 // ─── Redis key prefix ─────────────────────────────────────────────────────────
 
@@ -609,6 +634,7 @@ export class IdempotencyStore {
     }
 
     // 3. First execution
+    const metadata: IdempotencyEntryMetadata = { createdAt: now, lastAccessedAt: now, replayCount: 0, status: 'pending' };
     const metadata: IdempotencyStoreKeyMetadata = { createdAt: now, lastAccessedAt: now, replayCount: 0, status: 'pending' };
 
     const operationPromise = (async () => {
@@ -690,6 +716,10 @@ export class IdempotencyStore {
 
   // ─── Retention cleanup ─────────────────────────────────────────────────────
 
+  async pruneStaleKeys(
+    retentionMs: number,
+    dryRun = false,
+  ): Promise<{ pruned: number; localPruned: number; redisPruned: number }> {
   /**
    * Removes entries older than `retentionMs` from the local cache and Redis.
    * With `dryRun`, only counts the entries that would be removed: nothing is
@@ -747,6 +777,7 @@ export class IdempotencyStore {
       } while (cursor !== '0');
     }
 
+    return { pruned: localPruned + redisPruned, localPruned, redisPruned };
     return { pruned: localPruned + redisPruned, localPruned, redisPruned, dryRun };
   }
 }

@@ -5,10 +5,12 @@ import {
   ApyBackfillBodySchema,
   MaintenanceToggleSchema,
   PaginationQuerySchema,
+  TransactionListQuerySchema,
   WebhookVerifyBodySchema,
   DeadLetterIdsSchema,
 } from '../types/validation';
 import { WEBHOOK_EVENT_TYPES } from '../types/webhooks';
+import { clampLimitNumber, clampPageNumber } from '../pagination';
 import { validate } from '../middleware/validate';
 
 describe('request validation schemas', () => {
@@ -22,9 +24,22 @@ describe('request validation schemas', () => {
     expect(result.enabled).toBe(true);
   });
 
-  it('rejects a non-numeric pagination limit', () => {
-    const result = PaginationQuerySchema.safeParse({ limit: 'abc' });
-    expect(result.success).toBe(false);
+  it('accepts an out-of-range pagination limit for the parser to clamp', () => {
+    // Contract tests require invalid pagination to resolve gracefully (200) via
+    // parsePaginationQuery's clamping, so the schema must not reject it first.
+    for (const limit of ['abc', '-1', '0', '100000']) {
+      expect(PaginationQuerySchema.safeParse({ limit }).success).toBe(true);
+    }
+  });
+
+  it('accepts an out-of-range page for the parser to clamp', () => {
+    for (const page of ['abc', '-1', '0', '1.5']) {
+      expect(PaginationQuerySchema.safeParse({ page }).success).toBe(true);
+    }
+  });
+
+  it('still rejects a non-string pagination value', () => {
+    expect(PaginationQuerySchema.safeParse({ page: ['1', '2'] }).success).toBe(false);
   });
 
   it('accepts negative page numbers so downstream parser can safely clamp', () => {

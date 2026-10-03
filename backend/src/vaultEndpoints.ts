@@ -32,6 +32,7 @@ import crypto from 'crypto';
 // crypto is still used below for generateFingerprint and body.id generation.
 import { tryAcquireWalletLock } from './walletLock';
 import { normalizeWalletAddress } from './walletUtils';
+import { clampLimitNumber, type PaginationConfig } from './pagination';
 import { recordVaultLifecycleEvent } from './vaultAuditLog';
 import { registerWithdrawalPlan, withdrawalRecoveryCoordinator } from './withdrawalRecovery';
 import Decimal from 'decimal.js';
@@ -43,6 +44,12 @@ const router = Router();
 const ZERO = new Decimal(0);
 const DEFAULT_SHARE_PRICE = new Decimal(1);
 const STRATEGY_CACHE_TTL_MS = parseInt(process.env.CACHE_STRATEGY_TTL_MS || '30000', 10);
+
+/** Page size bounds for GET /receipts; see clampLimitNumber for the semantics. */
+const RECEIPTS_PAGINATION_CONFIG: Partial<PaginationConfig> = {
+  defaultLimit: 50,
+  maxLimit: 100,
+};
 
 // Register cache invalidation hooks for transaction state changes
 registerInvalidationHook((eventType) => {
@@ -942,6 +949,13 @@ router.post(
 router.get('/receipts', readsLimiter, async (req: Request, res: Response) => {
   const prisma = getPrismaClient();
   const wallet = req.query.wallet as string | undefined;
+  // Clamp rather than parseInt: `limit=abc` used to become NaN and `limit=-5`
+  // stayed negative, both of which reach Prisma as `take` and 500 the request
+  // instead of serving a valid page (#1318).
+  const limit = clampLimitNumber(
+    req.query.limit === undefined ? undefined : parseInt(req.query.limit as string, 10),
+    RECEIPTS_PAGINATION_CONFIG
+  );
   const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 100);
   const cursor = req.query.cursor as string | undefined;
 
@@ -949,6 +963,9 @@ router.get('/receipts', readsLimiter, async (req: Request, res: Response) => {
 
   const transactions = await prisma.transaction.findMany({
     where,
+    // `Transaction` records their time in `timestamp`; ordering by `createdAt`
+    // made every call fail Prisma's validation, so this endpoint could only
+    // ever answer 500.
     orderBy: { timestamp: 'desc' },
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

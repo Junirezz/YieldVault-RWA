@@ -47,6 +47,12 @@ describe('#711 API contract schema snapshots', () => {
   });
 
   it('detects newly added required fields as breaking changes', () => {
+    // diffSchemaShapes(baseline, current) compares a committed snapshot against
+    // the live schema, so the shape that is missing the field is the baseline
+    // and the shape carrying it is `current`.
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
+    // Simulate an older snapshot that is missing the 'indexer' field
     const current = zodToJsonShape(HealthResponseSchema);
     const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
     // Simulate an older snapshot that is missing the 'indexer' field, so the
@@ -59,12 +65,7 @@ describe('#711 API contract schema snapshots', () => {
     );
 
     const issues = diffSchemaShapes(baseline, current, 'GET /health');
-    expect(
-      issues.some(
-        (issue) =>
-          issue.message.includes('new field added') || issue.message.includes('now required'),
-      ),
-    ).toBe(true);
+    expect(issues.some((issue) => issue.message.includes('now required'))).toBe(true);
   });
 
   it('validates a conforming health payload', () => {

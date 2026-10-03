@@ -182,6 +182,23 @@ describe('Backend governance', () => {
       body: referralCode.body,
     });
 
+    // The proxied referral stats are synthesized in-process, not proxied over
+    // HTTP, so assert the envelope explicitly rather than only via equality —
+    // a partial body must fail on its own merits (#1319, #1322).
+    for (const key of ['error', 'status', 'code', 'message', 'retryable'] as const) {
+      expect(Object.prototype.hasOwnProperty.call(response.body.referralStats.body, key)).toBe(
+        true
+      );
+    }
+    expect(response.body.referralStats.statusCode).toBe(404);
+    expect(response.body.referralStats.body).toMatchObject({
+      error: 'Not Found',
+      status: 404,
+      code: expect.any(String),
+      message: 'No referral activity found for this wallet',
+      retryable: false,
+    });
+
     const auditResponse = await request(app)
       .get('/admin/audit/logs')
       .query({ action: 'admin.impersonate', limit: 5 })

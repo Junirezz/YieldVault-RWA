@@ -22,10 +22,19 @@ export const stellarWalletAddressField = z
 
 export const walletAddressField = z.string().trim().min(1, 'walletAddress is required');
 
+/**
+ * Pagination params are validated for *shape* only. Numeric ranges are
+ * deliberately not enforced here: `parsePaginationQuery` already clamps every
+ * out-of-range value gracefully (non-numeric / <=0 `page` -> 1, non-numeric /
+ * <=0 `limit` -> default, `limit` above the endpoint max -> max), and contract
+ * tests require those inputs to resolve to a 200 first page rather than a 400.
+ * Rejecting them at the schema layer made the two disagree for the same input.
+ */
 export const PaginationQuerySchema = z
   .object({
-    limit: z.string().regex(/^\d+$/, 'limit must be a positive integer').optional(),
+    limit: z.string().optional(),
     cursor: z.string().optional(),
+    page: z.string().optional(),
     // Signed so an out-of-range page (`page=-1`, `page=1000000`) reaches
     // `parsePaginationQuery`, which clamps it into `1..maxPage`, instead of
     // being rejected outright (Issue #1430).
