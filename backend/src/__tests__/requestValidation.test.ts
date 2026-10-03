@@ -27,6 +27,16 @@ describe('request validation schemas', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts negative page numbers so downstream parser can safely clamp', () => {
+    const result = PaginationQuerySchema.safeParse({ page: '-1' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a non-numeric pagination page', () => {
+    const result = PaginationQuerySchema.safeParse({ page: 'abc' });
+    expect(result.success).toBe(false);
+  });
+
   it('requires a webhook verify secret', () => {
     const result = WebhookVerifyBodySchema.safeParse({ payload: { ok: true } });
     expect(result.success).toBe(false);
