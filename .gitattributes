@@ -1,1 +1,10 @@
+# Normalize all text files to LF in the repository and on checkout.
 * text=auto eol=lf
+
+# Generated artifacts are rewritten by tooling, so pin them explicitly to LF.
+# Without this, a CRLF working copy produced by a Windows editor/checkout is
+# preserved by regeneration and shows up as a phantom modification even though
+# the content is identical after normalization (see issue #1374).
+backend/openapi.json text eol=lf
+backend/schema-snapshots/*.json text eol=lf
+docs/schemas/webhooks/*.json text eol=lf

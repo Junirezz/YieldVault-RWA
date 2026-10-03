@@ -24,6 +24,31 @@
         },
         "indexer": {
           "type": "boolean"
+        },
+        "redis": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "optional": {
+              "type": "boolean"
+            },
+            "latencyMs": {
+              "type": "number"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -31,7 +56,8 @@
         "stellarRpc",
         "database",
         "prisma",
-        "indexer"
+        "indexer",
+        "redis"
       ],
       "additionalProperties": false
     }

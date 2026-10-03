@@ -1,3 +1,4 @@
+
 /**
  * @file pagination.ts
  * Pagination utilities and types for consistent list endpoint behavior.
@@ -76,6 +77,12 @@ export interface PaginationConfig {
   defaultLimit: number;
   /** Maximum allowed items per page. */
   maxLimit: number;
+  /**
+   * Highest page number a caller may request (Issue #1430). The effective
+   * offset handed to the database is `(page - 1) * limit`, so an unbounded
+   * page number turns into an unbounded `skip` scan.
+   */
+  maxPage: number;
   /** Whether to include total count in response. */
   includeTotal: boolean;
   /** Default sort field. */
@@ -89,9 +96,12 @@ export interface PaginationConfig {
 export const DEFAULT_PAGINATION_CONFIG: PaginationConfig = {
   defaultLimit: 20,
   maxLimit: 100,
+  maxPage: 1000,
   includeTotal: true,
   defaultSortOrder: 'desc',
 };
+
+export const CURSOR_SEPARATOR = '_';
 
 // ─── Query Parsing ──────────────────────────────────────────────────────────
 
@@ -123,11 +133,11 @@ export function parsePaginationQuery(
     query.cursor = req.query.cursor;
   }
 
-  // Parse page (1-based)
+  // Parse page (1-based, clamped to 1..maxPage — Issue #1430)
   if (req.query.page !== undefined) {
     const page = parseInt(req.query.page as string, 10);
     if (!isNaN(page) && page > 0) {
-      query.page = page;
+      query.page = Math.min(page, mergedConfig.maxPage);
     } else {
       query.page = 1;
     }
@@ -425,4 +435,112 @@ export function encodeCursor(value: string): string {
  */
 export function decodeCursor(cursor: string): string {
   return Buffer.from(cursor, 'base64url').toString('utf-8');
+}
+
+// ─── Composite Cursor Helpers ───────────────────────────────────────────────
+
+/**
+ * Build a composite cursor from a timestamp and id.
+ *
+ * Format: `<timestamp>_<id>` (timestamp is ISO-8601; id is the row id).
+ * This matches the `?cursor=<timestamp>_<id>` contract used by list endpoints
+ * that need stable keyset pagination across inserts.
+ *
+ * @param timestamp - Sort timestamp (Date or ISO string)
+ * @param id - Row identifier
+ * @returns Composite cursor string
+ */
+export function buildCursor(timestamp: Date | string, id: string | number): string {
+  const ts = timestamp instanceof Date ? timestamp.toISOString() : timestamp;
+  return `${ts}${CURSOR_SEPARATOR}${id}`;
+}
+
+/**
+ * Parse a composite cursor of the form `<timestamp>_<id>`.
+ *
+ * Returns `null` when the cursor is malformed so callers can fall back to
+ * offset pagination or return an empty page.
+ *
+ * @param cursor - Composite cursor string
+ * @returns Parsed `{ timestamp, id }` or null when invalid
+ */
+export function parseCursor(
+  cursor: string
+): { timestamp: Date; id: string } | null {
+  if (typeof cursor !== 'string' || cursor.length === 0) {
+    return null;
+  }
+
+  const separatorIndex = cursor.lastIndexOf(CURSOR_SEPARATOR);
+  if (separatorIndex <= 0 || separatorIndex === cursor.length - 1) {
+    return null;
+  }
+
+  const rawTimestamp = cursor.slice(0, separatorIndex);
+  const rawId = cursor.slice(separatorIndex + 1);
+  const timestamp = new Date(rawTimestamp);
+
+  if (Number.isNaN(timestamp.getTime()) || rawId.length === 0) {
+    return null;
+  }
+
+  return { timestamp, id: rawId };
+}
+
+/**
+ * Build the Prisma `where` clause for keyset pagination on `(timestamp, id)`.
+ *
+ * Rows strictly "after" the cursor in descending `(timestamp, id)` order are
+ * those with an older timestamp, or the same timestamp and a smaller id.
+ *
+ * @param cursor - Composite cursor string
+ * @returns Prisma where fragment, or `{}` when the cursor is invalid/absent
+ */
+export function buildCursorWhere(
+  cursor: string | undefined
+): Record<string, unknown> {
+  if (!cursor) {
+    return {};
+  }
+
+  const parsed = parseCursor(cursor);
+  if (!parsed) {
+    return {};
+  }
+
+  return {
+    OR: [
+      { timestamp: { lt: parsed.timestamp } },
+      { timestamp: parsed.timestamp, id: { lt: parsed.id } },
+    ],
+  };
+}
+
+/**
+ * Build the Prisma `orderBy` clause for stable keyset pagination.
+ *
+ * Uses `(timestamp desc, id desc)` so that the cursor tuple is unique even
+ * when multiple rows share the same timestamp.
+ *
+ * @returns Prisma orderBy array
+ */
+export function buildCursorOrderBy(): Array<Record<string, 'desc'>> {
+  return [{ timestamp: 'desc' }, { id: 'desc' }];
+}
+
+/**
+ * Extract the `nextCursor` value from the last item of a page.
+ *
+ * @param items - Page items (already ordered by `(timestamp desc, id desc)`)
+ * @param hasMore - Whether additional rows exist beyond this page
+ * @returns Composite cursor string or null
+ */
+export function nextCursorFromItems<
+  T extends { timestamp: Date | string; id: string | number }
+>(items: T[], hasMore: boolean): string | null {
+  if (!hasMore || items.length === 0) {
+    return null;
+  }
+  const last = items[items.length - 1];
+  return buildCursor(last.timestamp, last.id);
 }

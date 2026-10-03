@@ -426,6 +426,43 @@ describe('EventOutboxService', () => {
       eventOutboxService.stop();
     });
 
+    it('does not mark events as sent after the abort signal fires', async () => {
+      const controller = new AbortController();
+      let releaseEmit!: () => void;
+      const emitStarted = new Promise<void>((resolve) => {
+        global.fetch = jest.fn(async () => {
+          resolve();
+          await new Promise<void>((r) => { releaseEmit = r; });
+          return { ok: true, status: 200 } as Response;
+        }) as typeof fetch;
+      });
+      createTestWebhookEndpoint(global.fetch as jest.Mock);
+      await eventOutboxService.writeEvent(makeOutboxInput());
+
+      const updateSpy = jest.spyOn(prisma.eventOutbox, 'update');
+      const processing = eventOutboxService.processOutbox(10, controller.signal);
+
+      await Promise.race([emitStarted, flushAsync()]);
+      controller.abort();
+      releaseEmit?.();
+      const result = await processing;
+
+      expect(result.relayed).toBe(0);
+      expect(updateSpy).not.toHaveBeenCalled();
+      updateSpy.mockRestore();
+    });
+
+    it('stops polling and awaits stop() when the signal aborts', async () => {
+      const controller = new AbortController();
+      eventOutboxService.start({ signal: controller.signal });
+      expect(eventOutboxService.isActive).toBe(true);
+
+      controller.abort();
+      await eventOutboxService.stop();
+
+      expect(eventOutboxService.isActive).toBe(false);
+    });
+
     it('processes events when running', async () => {
       global.fetch = jest.fn(async () => {
         return { ok: true, status: 200 } as Response;

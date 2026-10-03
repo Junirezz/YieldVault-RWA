@@ -47,11 +47,14 @@ describe('#711 API contract schema snapshots', () => {
   });
 
   it('detects newly added required fields as breaking changes', () => {
-    const baseline = zodToJsonShape(HealthResponseSchema);
-    const current = JSON.parse(JSON.stringify(baseline)) as typeof baseline;
-    // Simulate an older snapshot that is missing the 'indexer' field
-    delete current.properties?.checks?.properties?.indexer;
-    current.properties!.checks!.required = (current.properties!.checks!.required ?? []).filter(
+    const current = zodToJsonShape(HealthResponseSchema);
+    const baseline = JSON.parse(JSON.stringify(current)) as typeof current;
+    // Simulate an older snapshot that is missing the 'indexer' field, so the
+    // live schema now has a required field the committed snapshot does not know
+    // about. `baseline` is the committed snapshot and `current` is the live
+    // schema, so the deletion has to happen on the baseline.
+    delete baseline.properties?.checks?.properties?.indexer;
+    baseline.properties!.checks!.required = (baseline.properties!.checks!.required ?? []).filter(
       (k: string) => k !== 'indexer',
     );
 

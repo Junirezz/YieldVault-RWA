@@ -131,13 +131,13 @@ describe('Idempotency', () => {
   });
 
   describe('enforceIdempotency middleware', () => {
-    function createMockRequest(overrides?: Partial<Request>): Partial<Request> {
+    function createMockRequest(overrides: Record<string, unknown> = {}): Partial<Request> {
       return {
         get: (header: string) => undefined,
         tenantId: 'tenant-123',
         body: { amount: '1000' },
         ...overrides,
-      };
+      } as unknown as Partial<Request>;
     }
 
     function createMockResponse(): Partial<Response> {
@@ -168,7 +168,8 @@ describe('Idempotency', () => {
 
     it('should reject invalid Idempotency-Key format', () => {
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? 'invalid' : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? 'invalid' : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();
@@ -187,7 +188,8 @@ describe('Idempotency', () => {
     it('should accept valid UUID format', () => {
       const validUuid = '550e8400-e9b9-41d4-a716-446655440000';
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? validUuid : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? validUuid : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();
@@ -202,7 +204,8 @@ describe('Idempotency', () => {
     it('should accept valid hex nonce', () => {
       const validHex = 'a'.repeat(32);
       const req = createMockRequest({
-        get: (header: string) => (header === 'Idempotency-Key' ? validHex : undefined),
+        get: ((header: string) =>
+          header === 'Idempotency-Key' ? validHex : undefined) as Request['get'],
       });
       const res = createMockResponse();
       const next = jest.fn();

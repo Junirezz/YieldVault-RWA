@@ -13,6 +13,54 @@ const searchRoots = [
   path.join(repoRoot, 'contracts', 'mock-strategy', 'migrations'),
 ];
 
+// ─── API key per-tenant migration safety rules ───────────────────────────────
+//
+// The apiKey table stores per-tenant credentials with hashedKey, scopes,
+// expiresAt and lastUsedAt.  Migrations that touch this table must not
+// introduce a NOT NULL column without a DEFAULT (breaks the legacy single-key
+// fallback during canary rollout) and must not drop the legacy API_KEY env
+// fallback column in the same migration that adds the new one.
+const API_KEY_TABLE_PATTERN = /\bapi_?key\b/i;
+const API_KEY_REQUIRED_COLUMNS = ['hashedkey', 'scopes', 'expiresat', 'lastusedat'];
+
+function checkApiKeyMigration(content, file) {
+  const results = [];
+  const lowered = content.toLowerCase();
+
+  if (!API_KEY_TABLE_PATTERN.test(lowered)) {
+    return results;
+  }
+
+  // The migration must declare the per-tenant credential columns.
+  const missing = API_KEY_REQUIRED_COLUMNS.filter((col) => !lowered.includes(col));
+  if (missing.length > 0) {
+    results.push({
+      file,
+      severity: 'error',
+      message:
+        `apiKey migration is missing required column(s): ${missing.join(', ')}. ` +
+        'Per-tenant keys need hashedKey, scopes[], expiresAt and lastUsedAt for rotation and audit.',
+    });
+  }
+
+  // Dropping the legacy fallback in the same migration removes the env-var
+  // fallback path and breaks existing single-key deployments.
+  const dropsLegacyFallback =
+    /\bdrop\s+column\b[^;]{0,120}\b(api_?key|legacy_?key|env_?key)\b/i.test(content);
+  if (dropsLegacyFallback) {
+    results.push({
+      file,
+      severity: 'error',
+      message:
+        'Dropping the legacy API_KEY fallback column in the same migration that adds per-tenant keys ' +
+        'breaks existing single-key deployments. Keep the fallback until all tenants have migrated.',
+    });
+  }
+
+  return results;
+}
+
+
 const files = searchRoots.flatMap((root) => findMigrationFiles(root));
 
 if (files.length === 0) {
@@ -147,6 +195,9 @@ function checkFile(file) {
       results.push({ file, severity: rule.severity, message: rule.label });
     }
   }
+
+  // ── 5b. API key per-tenant migration safety ───────────────────────────────
+  results.push(...checkApiKeyMigration(content, file));
 
   // ── 6. Schema change references indexed columns but declares no index ──────
   const addsIndexedColumns = /(_id|status|created_at|updated_at|tenant_id)/i.test(content);

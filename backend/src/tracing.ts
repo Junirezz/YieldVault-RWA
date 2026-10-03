@@ -8,9 +8,10 @@
  *   OTEL_ENABLED                 - Set to "false" to disable (default: true)
  */
 
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import { NodeSDK, type NodeSDKConfiguration } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { resourceFromAttributes } from '@opentelemetry/resources';
+import * as otelResources from '@opentelemetry/resources';
+import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
@@ -27,6 +28,26 @@ const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || 'yieldvault-backend';
 const OTLP_ENDPOINT =
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
+
+/**
+ * Builds the SDK resource from a flat attribute bag.
+ *
+ * `@opentelemetry/resources` renamed its factory between the v1 and v2 lines
+ * (`new Resource(attributes)` → `resourceFromAttributes(attributes)`), and the
+ * two OpenTelemetry major lines coexist in this workspace's lockfile. Resolve
+ * whichever factory the installed version exposes so the SDK boots on both.
+ */
+function buildResource(attributes: Record<string, unknown>): NodeSDKConfiguration['resource'] {
+  const resources = otelResources as unknown as {
+    resourceFromAttributes?: (attrs: Record<string, unknown>) => unknown;
+    Resource: new (attrs: Record<string, unknown>) => unknown;
+  };
+
+  if (typeof resources.resourceFromAttributes === 'function') {
+    return resources.resourceFromAttributes(attributes) as NodeSDKConfiguration['resource'];
+  }
+  return new resources.Resource(attributes) as NodeSDKConfiguration['resource'];
+}
 
 let sdk: NodeSDK | null = null;
 
@@ -62,7 +83,8 @@ export function initTracing(): void {
   const exporter = new OTLPTraceExporter({ url: `${OTLP_ENDPOINT}/v1/traces` });
 
   sdk = new NodeSDK({
-    resource: resourceFromAttributes({
+    resource: buildResource({
+    resource: new Resource({
       [ATTR_SERVICE_NAME]: SERVICE_NAME,
       [ATTR_SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
     }),

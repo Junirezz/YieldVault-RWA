@@ -15,13 +15,39 @@
  */
 
 import crypto from 'crypto';
-import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 import {
   emitTransactionEvent,
   type TransactionEventType,
   type TransactionEventPayload,
 } from './webhookDelivery';
+
+// ─── Prisma Access ───────────────────────────────────────────────────────────
+
+/**
+ * Lazily resolves the Prisma client and its `eventOutbox` delegate.
+ *
+ * Importing `prisma` at module load time is fragile: depending on the runtime
+ * path (e.g. test harnesses, hot-reload, or a partially initialized client),
+ * the imported binding can be undefined or lack the `eventOutbox` delegate,
+ * causing `prisma.eventOutbox.create` to throw
+ * "Cannot read properties of undefined (reading 'create')".
+ *
+ * Resolving the delegate at call time (with a clear error if unavailable)
+ * makes the failure mode explicit and robust across runtime paths.
+ */
+function getEventOutboxDelegate() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prisma } = require('./prisma') as typeof import('./prisma');
+  const delegate = prisma?.eventOutbox;
+  if (!delegate) {
+    throw new Error(
+      'Prisma client is not initialized or missing the `eventOutbox` delegate. ' +
+        'Ensure `prisma generate` has run and the client is instantiated before use.',
+    );
+  }
+  return delegate;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +128,21 @@ function getInstanceId(): string {
   return process.env.OUTBOX_INSTANCE_ID || `instance-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/**
+ * Throws if the Prisma client has no `eventOutbox` model delegate (e.g. a stale
+ * generated client or a mocked client missing the model). Without this guard
+ * the failure surfaces as a `Cannot read properties of undefined` TypeError
+ * deep inside fire-and-forget writes, where callers only log it.
+ */
+export function assertEventOutboxModelAvailable(client: unknown = prisma): void {
+  const delegate = (client as { eventOutbox?: { create?: unknown } } | null | undefined)?.eventOutbox;
+  if (!delegate || typeof delegate.create !== 'function') {
+    throw new Error(
+      'Prisma client is missing the eventOutbox model. Run `prisma generate` and ensure the EventOutbox migration is applied.',
+    );
+  }
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 class EventOutboxService {
@@ -109,6 +150,9 @@ class EventOutboxService {
   private pollTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private instanceId: string;
+  private inFlight: Promise<unknown> | null = null;
+  private abortCleanup: (() => void) | null = null;
+  private signal: AbortSignal | undefined;
 
   constructor() {
     this.instanceId = getInstanceId();
@@ -124,8 +168,9 @@ class EventOutboxService {
    * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
+    assertEventOutboxModelAvailable();
     const now = new Date();
-    const record = await prisma.eventOutbox.create({
+    const record = await getEventOutboxDelegate().create({
       data: {
         id: `obx-${crypto.randomUUID()}`,
         eventType: input.eventType,
@@ -148,7 +193,7 @@ class EventOutboxService {
    * Uses instance-level locking to prevent duplicate processing in multi-pod deployments.
    * Can be called on a schedule or manually.
    */
-  async processOutbox(batchSize?: number): Promise<OutboxRelayResult> {
+  async processOutbox(batchSize?: number, signal?: AbortSignal): Promise<OutboxRelayResult> {
     const limit = batchSize ?? getBatchSize();
     const now = new Date();
     const lockExpiry = new Date(now.getTime() - getLockTimeoutMs());
@@ -162,7 +207,7 @@ class EventOutboxService {
 
     try {
       // 1. Find eligible entries: pending or failed entries whose lock is expired
-      const candidates = await prisma.eventOutbox.findMany({
+      const candidates = await getEventOutboxDelegate().findMany({
         where: {
           status: { in: ['pending', 'failed'] },
           OR: [
@@ -180,7 +225,7 @@ class EventOutboxService {
 
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
       const candidateIds = candidates.map((e) => e.id);
-      await prisma.eventOutbox.updateMany({
+      await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
           OR: [
@@ -196,7 +241,7 @@ class EventOutboxService {
 
       // 3. Re-fetch the entries we successfully locked (some may have been
       //    concurrently claimed by another instance)
-      const entries = await prisma.eventOutbox.findMany({
+      const entries = await getEventOutboxDelegate().findMany({
         where: {
           id: { in: candidateIds },
           lockedBy: this.instanceId,
@@ -211,6 +256,9 @@ class EventOutboxService {
 
       // 4. Relay each entry
       for (const entry of entries) {
+        // Stop claiming work once shutdown begins; unprocessed entries stay
+        // locked until the lock timeout expires and are picked up on restart.
+        if (signal?.aborted) break;
         try {
           const payload = JSON.parse(entry.payload) as TransactionEventPayload;
           // emitTransactionEvent schedules webhook deliveries asynchronously.
@@ -223,6 +271,11 @@ class EventOutboxService {
             entry.eventType as TransactionEventType,
             payload,
           );
+
+          await getEventOutboxDelegate().update({
+          // Do not write the mark-as-sent update after abort; the event will be
+          // re-relayed after restart (at-least-once delivery).
+          if (signal?.aborted) break;
 
           await prisma.eventOutbox.update({
             where: { id: entry.id },
@@ -248,9 +301,11 @@ class EventOutboxService {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const nextAttempt = entry.attemptCount + 1;
 
+          if (signal?.aborted) break;
+
           if (nextAttempt >= entry.maxAttempts) {
             // Exhausted retries — move to dead_letter
-            await prisma.eventOutbox.update({
+            await getEventOutboxDelegate().update({
               where: { id: entry.id },
               data: {
                 status: 'dead_letter',
@@ -273,7 +328,7 @@ class EventOutboxService {
             void this.sendDeadLetterAlert(entry.id, entry.eventType, nextAttempt, errorMessage);
           } else {
             // Mark as failed for retry
-            await prisma.eventOutbox.update({
+            await getEventOutboxDelegate().update({
               where: { id: entry.id },
               data: {
                 status: 'failed',
@@ -333,12 +388,12 @@ class EventOutboxService {
    * Retries a specific dead-lettered event by resetting its status to pending.
    */
   async retryDeadLetter(outboxId: string): Promise<EventOutboxRecord | null> {
-    const entry = await prisma.eventOutbox.findUnique({ where: { id: outboxId } });
+    const entry = await getEventOutboxDelegate().findUnique({ where: { id: outboxId } });
     if (!entry || entry.status !== 'dead_letter') {
       return null;
     }
 
-    const updated = await prisma.eventOutbox.update({
+    const updated = await getEventOutboxDelegate().update({
       where: { id: outboxId },
       data: {
         status: 'pending',
@@ -363,7 +418,7 @@ class EventOutboxService {
   async cleanup(maxAgeMs?: number): Promise<number> {
     const cutoff = new Date(Date.now() - (maxAgeMs ?? getRetentionMs()));
 
-    const result = await prisma.eventOutbox.deleteMany({
+    const result = await getEventOutboxDelegate().deleteMany({
       where: {
         createdAt: { lt: cutoff },
         status: { in: ['relayed', 'dead_letter'] },
@@ -385,7 +440,9 @@ class EventOutboxService {
    * Used to recover any events that were written but not relayed before a crash.
    */
   async replayOnStartup(): Promise<OutboxRelayResult> {
+    assertEventOutboxModelAvailable();
     const pendingCount = await prisma.eventOutbox.count({
+    const pendingCount = await getEventOutboxDelegate().count({
       where: { status: { in: ['pending', 'failed'] } },
     });
 
@@ -407,13 +464,23 @@ class EventOutboxService {
    * Starts the background outbox processor.
    * Polls for pending events on a configured interval and relays them.
    */
-  start(): void {
+  start(options: { signal?: AbortSignal } = {}): void {
     if (this.isRunning) {
       logger.log('warn', 'Outbox processor is already running');
       return;
     }
 
+    const { signal } = options;
+    if (signal?.aborted) {
+      logger.log('warn', 'Outbox processor not started: signal already aborted');
+      return;
+    }
+
+    // Fail fast at initialization rather than logging on every poll cycle.
+    assertEventOutboxModelAvailable();
+
     this.isRunning = true;
+    this.signal = signal;
     const intervalMs = getPollIntervalMs();
 
     logger.log('info', 'Starting outbox processor', {
@@ -422,19 +489,19 @@ class EventOutboxService {
       instanceId: this.instanceId,
     });
 
+    if (signal) {
+      const onAbort = () => {
+        void this.stop();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.abortCleanup = () => signal.removeEventListener('abort', onAbort);
+    }
+
     // Process immediately on start, then poll on interval
-    this.processOutbox().catch((err) => {
-      logger.log('error', 'Outbox processor initial run failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    this.runCycle('initial run');
 
     this.pollTimer = setInterval(() => {
-      this.processOutbox().catch((err) => {
-        logger.log('error', 'Outbox processor poll cycle failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      this.runCycle('poll cycle');
     }, intervalMs);
 
     // Unref so the timer doesn't keep the process alive
@@ -447,22 +514,48 @@ class EventOutboxService {
   }
 
   /**
-   * Stops the background outbox processor.
+   * Stops the background outbox processor: clears timers and resolves once
+   * any in-flight polling cycle has finished.
    */
-  stop(): void {
-    if (!this.isRunning) return;
+  async stop(): Promise<void> {
+    if (this.isRunning) {
+      this.isRunning = false;
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+      if (this.cleanupTimer) {
+        clearInterval(this.cleanupTimer);
+        this.cleanupTimer = null;
+      }
+      this.abortCleanup?.();
+      this.abortCleanup = null;
+      this.signal = undefined;
 
-    this.isRunning = false;
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
+      logger.log('info', 'Outbox processor stopped');
     }
 
-    logger.log('info', 'Outbox processor stopped');
+    if (this.inFlight) {
+      await this.inFlight;
+    }
+  }
+
+  /**
+   * Runs one polling cycle unless stopped/aborted or a cycle is already running.
+   */
+  private runCycle(label: string): void {
+    if (!this.isRunning || this.signal?.aborted || this.inFlight) return;
+
+    const cycle = this.processOutbox(undefined, this.signal)
+      .catch((err) => {
+        logger.log('error', `Outbox processor ${label} failed`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        if (this.inFlight === cycle) this.inFlight = null;
+      });
+    this.inFlight = cycle;
   }
 
   /**
@@ -479,17 +572,17 @@ class EventOutboxService {
    */
   async getMetrics(): Promise<OutboxMetrics> {
     const [pending, relayed, failed, deadLettered, locked, total] = await Promise.all([
-      prisma.eventOutbox.count({ where: { status: 'pending' } }),
-      prisma.eventOutbox.count({ where: { status: 'relayed' } }),
-      prisma.eventOutbox.count({ where: { status: 'failed' } }),
-      prisma.eventOutbox.count({ where: { status: 'dead_letter' } }),
-      prisma.eventOutbox.count({
+      getEventOutboxDelegate().count({ where: { status: 'pending' } }),
+      getEventOutboxDelegate().count({ where: { status: 'relayed' } }),
+      getEventOutboxDelegate().count({ where: { status: 'failed' } }),
+      getEventOutboxDelegate().count({ where: { status: 'dead_letter' } }),
+      getEventOutboxDelegate().count({
         where: {
           status: { in: ['pending', 'failed'] },
           lockedAt: { not: null },
         },
       }),
-      prisma.eventOutbox.count(),
+      getEventOutboxDelegate().count(),
     ]);
 
     return { pending, relayed, failed, deadLettered, locked, total };
@@ -519,7 +612,7 @@ class EventOutboxService {
       where.aggregateId = filters.aggregateId;
     }
 
-    const rows = await prisma.eventOutbox.findMany({
+    const rows = await getEventOutboxDelegate().findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: filters.limit ?? 100,

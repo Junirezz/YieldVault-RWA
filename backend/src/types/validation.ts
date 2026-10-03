@@ -26,7 +26,10 @@ export const PaginationQuerySchema = z
   .object({
     limit: z.string().regex(/^\d+$/, 'limit must be a positive integer').optional(),
     cursor: z.string().optional(),
-    page: z.string().regex(/^\d+$/, 'page must be a positive integer').optional(),
+    // Signed so an out-of-range page (`page=-1`, `page=1000000`) reaches
+    // `parsePaginationQuery`, which clamps it into `1..maxPage`, instead of
+    // being rejected outright (Issue #1430).
+    page: z.string().regex(/^-?\d+$/, 'page must be an integer').optional(),
     sortBy: z.string().optional(),
     sortOrder: z.string().optional(),
     dryRun: z.enum(['true', 'false', '1', '0']).optional(),
@@ -199,10 +202,115 @@ export const ScopedTokenCreateSchema = z.object({
   expiresInSeconds: z.number().int().positive().optional(),
 });
 
-export const VaultStrategyBodySchema = z.object({
-  strategyId: z.string().min(1).optional(),
-  previousStrategyId: z.string().optional(),
-  walletAddress: z.string().optional(),
+/**
+ * Validates and normalises the `weights` map on a strategy request.
+ *
+ * Two modes are accepted:
+ *
+ * **Basis-point mode** – every value is a non-negative integer and at least one
+ * value is > 1.  The sum must equal 10 000 exactly.
+ *
+ *   { vaultA: 3333, vaultB: 3333, vaultC: 3334 }   ✓
+ *
+ * **Float mode** – values are in the [0, 1] range.  The sum must be within
+ * 1 × 10⁻⁹ of 1.0 to accommodate 0.333 + 0.333 + 0.334 = 0.999999…
+ * The schema output normalises floats to integer bps so the Soroban contract
+ * always receives whole numbers that sum to exactly 10 000.
+ *
+ *   { vaultA: 0.333, vaultB: 0.333, vaultC: 0.334 }  ✓  →  3330 / 3330 / 3340
+ */
+const _weightsRawSchema = z.record(z.string().min(1), z.number().nonnegative());
+
+function _validateAndNormalizeBps(
+  raw: Record<string, number>,
+): { ok: true; data: Record<string, number> } | { ok: false; message: string } {
+  const entries = Object.entries(raw);
+  if (entries.length === 0) {
+    return { ok: false, message: 'weights must contain at least one entry' };
+  }
+
+  const values = entries.map(([, v]) => v);
+  const allIntegers = values.every((v) => Number.isInteger(v));
+  const anyAboveOne = values.some((v) => v > 1);
+  const isBpsMode = allIntegers && anyAboveOne;
+
+  if (isBpsMode) {
+    const sum = values.reduce((acc, v) => acc + v, 0);
+    if (sum !== 10_000) {
+      return { ok: false, message: `weights in basis-point mode must sum to 10000, got ${sum}` };
+    }
+    return { ok: true, data: raw };
+  }
+
+  // Float mode: all values must be in [0, 1]
+  if (values.some((v) => v > 1)) {
+    return { ok: false, message: 'weights in float mode must be between 0 and 1' };
+  }
+
+  const sum = values.reduce((acc, v) => acc + v, 0);
+  if (Math.abs(sum - 1) >= 1e-9) {
+    return { ok: false, message: `weights in float mode must sum to 1, got ${sum}` };
+  }
+
+  // Normalise to bps; last entry absorbs any rounding remainder
+  const bps: Record<string, number> = {};
+  let allocated = 0;
+  for (let i = 0; i < entries.length - 1; i++) {
+    const [key, v] = entries[i];
+    const rounded = Math.round(v * 10_000);
+    bps[key] = rounded;
+    allocated += rounded;
+  }
+  const [lastKey] = entries[entries.length - 1];
+  bps[lastKey] = 10_000 - allocated;
+
+  return { ok: true, data: bps };
+}
+
+export const VaultStrategyBodySchema = z
+  .object({
+    strategyId: z.string().min(1).optional(),
+    previousStrategyId: z.string().optional(),
+    walletAddress: z.string().optional(),
+    weights: _weightsRawSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.weights === undefined) return;
+    const result = _validateAndNormalizeBps(val.weights);
+    if (!result.ok) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: result.message, path: ['weights'] });
+    }
+  })
+  .transform((val) => {
+    if (val.weights === undefined) return val;
+    const result = _validateAndNormalizeBps(val.weights);
+    return { ...val, weights: result.ok ? result.data : val.weights };
+  });
+
+/**
+ * POST /admin/vaults request body.
+ *
+ * - name: trimmed, 1–50 characters.
+ * - symbol: trimmed, 1–10 uppercase alphanumeric characters.
+ * - tenantId: required, non-empty string.
+ *
+ * `.trim()` runs before `.min(1)` so a whitespace-only value (e.g. " ")
+ * fails validation here and never reaches the database layer.
+ */
+export const CreateVaultBodySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '`name` must not be empty')
+    .max(50, '`name` must be 50 characters or fewer'),
+  symbol: z
+    .string()
+    .trim()
+    .min(1, '`symbol` must not be empty')
+    .max(10, '`symbol` must be 10 characters or fewer')
+    .regex(/^[A-Z0-9]+$/, '`symbol` must contain only uppercase letters and digits'),
+  tenantId: z.string().min(1, '`tenantId` is required'),
 });
 
 export const EmptyBodySchema = z.object({}).passthrough();
+

@@ -3,7 +3,7 @@ import { emailService } from './emailService';
 import { logger } from './middleware/structuredLogging';
 import { allowlistMiddleware } from './middleware/allowlist';
 import { triggerCacheInvalidation, registerInvalidationHook } from './middleware/cache';
-import { depositsLimiter, depositsUserLimiter } from './rateLimiter';
+import { depositsLimiter, depositsUserLimiter, readsLimiter } from './rateLimiter';
 import { cacheMiddleware } from './middleware/cache';
 import {
   idempotencyStore,
@@ -12,6 +12,7 @@ import {
 } from './idempotency';
 import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { withSpan, getCurrentTraceId } from './tracing';
+import { context, propagation, trace } from '@opentelemetry/api';
 import { submitVaultOperation, SorobanSimulationError } from './sorobanClient';
 import { requireFlag } from './featureFlags';
 import { referralService } from './referralService';
@@ -32,13 +33,11 @@ import crypto from 'crypto';
 import { tryAcquireWalletLock } from './walletLock';
 import { normalizeWalletAddress } from './walletUtils';
 import { recordVaultLifecycleEvent } from './vaultAuditLog';
-import {
-  registerWithdrawalPlan,
-  withdrawalRecoveryCoordinator,
-} from './withdrawalRecovery';
+import { registerWithdrawalPlan, withdrawalRecoveryCoordinator } from './withdrawalRecovery';
 import Decimal from 'decimal.js';
 
-const EXPLORER_BASE_URL = process.env.STELLAR_EXPLORER_URL || 'https://stellar.expert/explorer/testnet/tx';
+const EXPLORER_BASE_URL =
+  process.env.STELLAR_EXPLORER_URL || 'https://stellar.expert/explorer/testnet/tx';
 
 const router = Router();
 const ZERO = new Decimal(0);
@@ -48,11 +47,7 @@ const STRATEGY_CACHE_TTL_MS = parseInt(process.env.CACHE_STRATEGY_TTL_MS || '300
 // Register cache invalidation hooks for transaction state changes
 registerInvalidationHook((eventType) => {
   if (eventType.startsWith('transaction.')) {
-    return [
-      'GET:/api/v1/vault',
-      'GET:/api/v1/transactions',
-      'GET:/api/v1/portfolio',
-    ];
+    return ['GET:/api/v1/vault', 'GET:/api/v1/transactions', 'GET:/api/v1/portfolio'];
   }
   return [];
 });
@@ -80,16 +75,16 @@ async function submitSorobanTx(type: string, payload: Record<string, unknown>): 
         type as 'deposit' | 'withdrawal',
         String(payload.walletAddress),
         String(payload.amount),
-        String(payload.asset),
+        String(payload.asset)
       );
-    }),
+    })
   );
 }
 
 async function updateVaultStateAndSnapshot(
   type: 'deposit' | 'withdrawal',
   amountRaw: string,
-  recordedAt: Date,
+  recordedAt: Date
 ): Promise<void> {
   const prisma = getPrismaClient();
   const amount = new Decimal(amountRaw);
@@ -98,9 +93,10 @@ async function updateVaultStateAndSnapshot(
     const existing = await tx.vaultState.findUnique({ where: { id: 1 } });
     const currentAssets = existing ? new Decimal(existing.totalAssets) : ZERO;
     const currentShares = existing ? new Decimal(existing.totalShares) : ZERO;
-    const currentSharePrice = currentAssets.gt(0) && currentShares.gt(0)
-      ? currentAssets.div(currentShares)
-      : DEFAULT_SHARE_PRICE;
+    const currentSharePrice =
+      currentAssets.gt(0) && currentShares.gt(0)
+        ? currentAssets.div(currentShares)
+        : DEFAULT_SHARE_PRICE;
 
     let nextAssets = currentAssets;
     let nextShares = currentShares;
@@ -128,9 +124,8 @@ async function updateVaultStateAndSnapshot(
       },
     });
 
-    const resultingSharePrice = nextAssets.gt(0) && nextShares.gt(0)
-      ? nextAssets.div(nextShares)
-      : DEFAULT_SHARE_PRICE;
+    const resultingSharePrice =
+      nextAssets.gt(0) && nextShares.gt(0) ? nextAssets.div(nextShares) : DEFAULT_SHARE_PRICE;
 
     await tx.sharePriceSnapshot.create({
       data: {
@@ -248,7 +243,7 @@ registerWithdrawalPlan(WITHDRAWAL_PLAN, [
 async function handleVaultOperation(
   req: Request,
   res: Response,
-  type: 'deposit' | 'withdrawal',
+  type: 'deposit' | 'withdrawal'
 ): Promise<Response> {
   // Task 3: read Idempotency-Key header (spec-compliant name)
   const idempotencyKey =
@@ -323,9 +318,7 @@ async function handleVaultOperation(
             // is false. Acknowledge the withdrawal and hand back a recovery
             // handle instead.
             const sagaTxHash =
-              typeof outcome.saga.state.txHash === 'string'
-                ? outcome.saga.state.txHash
-                : undefined;
+              typeof outcome.saga.state.txHash === 'string' ? outcome.saga.state.txHash : undefined;
 
             recordVaultLifecycleEvent({
               operation: 'withdrawal',
@@ -461,6 +454,16 @@ async function handleVaultOperation(
         type === 'deposit' ? 'transaction.deposit.created' : 'transaction.withdrawal.created';
       const vaultEventType: TransactionEventType =
         type === 'deposit' ? 'vault.deposit.created' : 'vault.withdrawal.created';
+      const activeContext = context.active();
+      const carrier: Record<string, string> = {};
+      propagation.inject(activeContext, carrier);
+      const spanContext = trace.getSpan(activeContext)?.spanContext();
+      const traceMetadata =
+        spanContext &&
+        spanContext.traceId !== '00000000000000000000000000000000' &&
+        spanContext.spanId !== '0000000000000000'
+          ? { trace: { traceId: spanContext.traceId, spanId: spanContext.spanId } }
+          : undefined;
       const webhookPayload = {
         transactionId: body.id,
         amount: String(body.amount),
@@ -470,44 +473,54 @@ async function handleVaultOperation(
         status: String(body.status),
         timestamp: String(body.timestamp),
         vaultId: 'primary',
+        ...(traceMetadata ? { metadata: traceMetadata } : {}),
       };
-      void eventOutboxService.writeEvent({
-        eventType,
-        payload: webhookPayload,
-        aggregateType: 'transaction',
-        aggregateId: body.id,
-      }).catch((error) => {
-        logger.log('error', 'Failed to write event to outbox', {
-          error: error instanceof Error ? error.message : String(error),
-          eventType,
-          transactionId: body.id,
+      void context
+        .with(activeContext, () =>
+          eventOutboxService.writeEvent({
+            eventType,
+            payload: webhookPayload,
+            aggregateType: 'transaction',
+            aggregateId: body.id,
+          })
+        )
+        .catch((error) => {
+          logger.log('error', 'Failed to write event to outbox', {
+            error: error instanceof Error ? error.message : String(error),
+            eventType,
+            transactionId: body.id,
+          });
         });
-      });
-      void eventOutboxService.writeEvent({
-        eventType: vaultEventType,
-        payload: webhookPayload,
-        aggregateType: 'vault',
-        aggregateId: 'primary',
-      }).catch((error) => {
-        logger.log('error', 'Failed to write vault event to outbox', {
-          error: error instanceof Error ? error.message : String(error),
-          eventType: vaultEventType,
-          transactionId: body.id,
+      void context
+        .with(activeContext, () =>
+          eventOutboxService.writeEvent({
+            eventType: vaultEventType,
+            payload: webhookPayload,
+            aggregateType: 'vault',
+            aggregateId: 'primary',
+          })
+        )
+        .catch((error) => {
+          logger.log('error', 'Failed to write vault event to outbox', {
+            error: error instanceof Error ? error.message : String(error),
+            eventType: vaultEventType,
+            transactionId: body.id,
+          });
         });
-      });
 
       span.setAttributes({ 'vault.txHash': txHash });
 
       // Post-confirmation email (fire-and-forget)
-      const schedulePostConfirmation = process.env.NODE_ENV === 'test'
-        ? (fn: () => Promise<void>) => {
-            void fn();
-          }
-        : (fn: () => Promise<void>) => {
-            setTimeout(() => {
+      const schedulePostConfirmation =
+        process.env.NODE_ENV === 'test'
+          ? (fn: () => Promise<void>) => {
               void fn();
-            }, 100);
-          };
+            }
+          : (fn: () => Promise<void>) => {
+              setTimeout(() => {
+                void fn();
+              }, 100);
+            };
 
       schedulePostConfirmation(async () => {
         try {
@@ -552,7 +565,7 @@ async function handleVaultOperation(
       const { result, replayed } = await idempotencyStore.execute(
         idempotencyKey,
         fingerprint,
-        operation,
+        operation
       );
       if (replayed) res.setHeader('idempotency-status', 'replayed');
       // Trigger adaptive cache invalidation via hooks
@@ -650,7 +663,7 @@ router.post(
   allowlistMiddleware,
   validate({ body: VaultDepositBodySchema }),
   createTimeoutFor.write(),
-  (req: Request, res: Response) => handleVaultOperation(req, res, 'deposit'),
+  (req: Request, res: Response) => handleVaultOperation(req, res, 'deposit')
 );
 
 /**
@@ -668,7 +681,7 @@ router.post(
   validate({ body: VaultWithdrawalBodySchema }),
   withdrawalDailyLimitMiddleware(),
   createTimeoutFor.write(),
-  (req: Request, res: Response) => handleVaultOperation(req, res, 'withdrawal'),
+  (req: Request, res: Response) => handleVaultOperation(req, res, 'withdrawal')
 );
 
 // ─── Feature-flagged v2 endpoints ────────────────────────────────────────────
@@ -686,19 +699,23 @@ router.post(
   depositsUserLimiter,
   requireFlag('deposit-v2'),
   validate({ body: VaultDepositBodySchema }),
-  (req: Request, res: Response) => handleVaultOperation(req, res, 'deposit'),
+  (req: Request, res: Response) => handleVaultOperation(req, res, 'deposit')
 );
 
 /**
  * POST /api/v1/vault/strategy
  * Gated behind the "strategy-selection" feature flag.
  */
-router.get('/strategy', cacheMiddleware({ ttl: STRATEGY_CACHE_TTL_MS }), (_req: Request, res: Response) => {
-  res.status(200).json({
-    message: 'Strategy selection endpoint (v2 preview)',
-    timestamp: new Date().toISOString(),
-  });
-});
+router.get(
+  '/strategy',
+  cacheMiddleware({ ttl: STRATEGY_CACHE_TTL_MS }),
+  (_req: Request, res: Response) => {
+    res.status(200).json({
+      message: 'Strategy selection endpoint (v2 preview)',
+      timestamp: new Date().toISOString(),
+    });
+  }
+);
 
 router.get('/strategy/cooldown', cacheMiddleware({ ttl: 5000 }), (_req: Request, res: Response) => {
   const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
@@ -717,6 +734,31 @@ router.get('/strategy/cooldown', cacheMiddleware({ ttl: 5000 }), (_req: Request,
   });
 });
 
+router.post(
+  '/strategy',
+  depositsLimiter,
+  requireFlag('strategy-selection'),
+  validate({ body: VaultStrategyBodySchema }),
+  (req: Request, res: Response) => {
+    const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
+    const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
+    const now = Date.now();
+    const lastSwitchMs = lastSwitchIso ? new Date(lastSwitchIso).getTime() : 0;
+
+    if (cooldownSec > 0 && lastSwitchMs > 0) {
+      const elapsed = Math.floor((now - lastSwitchMs) / 1000);
+      if (elapsed < cooldownSec) {
+        const retryAfter = cooldownSec - elapsed;
+        res.setHeader('Retry-After', String(retryAfter));
+        return res.status(429).json({
+          error: 'Too Many Requests',
+          status: 429,
+          code: 'STRATEGY_COOLDOWN_ACTIVE',
+          message: `Strategy switch cooldown active. Retry in ${retryAfter}s.`,
+          cooldownRemaining: retryAfter,
+          cooldownTotal: cooldownSec,
+        });
+      }
 router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), validate({ body: VaultStrategyBodySchema }), (req: Request, res: Response) => {
   const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
   const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
@@ -728,7 +770,7 @@ router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), val
     if (elapsed < cooldownSec) {
       const retryAfter = cooldownSec - elapsed;
       res.setHeader('Retry-After', String(retryAfter));
-      return res.status(429).json({
+      res.status(429).json({
         error: 'Too Many Requests',
         status: 429,
         code: 'STRATEGY_COOLDOWN_ACTIVE',
@@ -736,40 +778,47 @@ router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), val
         cooldownRemaining: retryAfter,
         cooldownTotal: cooldownSec,
       });
+      return;
     }
+
+    const strategyId = typeof req.body?.strategyId === 'string' ? req.body.strategyId : 'default';
+    const previousStrategyId =
+      typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
+
+    // Record switch time for cooldown tracking
+    process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
+
+    void eventOutboxService
+      .writeEvent({
+        eventType: 'vault.strategy.changed',
+        payload: {
+          transactionId: `strategy-${crypto.randomBytes(4).toString('hex')}`,
+          amount: '0',
+          asset: 'RWA',
+          walletAddress: String(
+            req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'unknown'
+          ),
+          transactionHash: 'strategy-change',
+          status: 'accepted',
+          timestamp: new Date().toISOString(),
+          vaultId: 'primary',
+          strategyId,
+          previousStrategyId,
+        },
+        aggregateType: 'vault',
+        aggregateId: 'primary',
+      })
+      .catch((error) => {
+        logger.log('error', 'Failed to write strategy change webhook event', {
+          error: error instanceof Error ? error.message : String(error),
+          strategyId,
+        });
+      });
+
+    res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
   }
-
-  const strategyId = typeof req.body?.strategyId === 'string' ? req.body.strategyId : 'default';
-  const previousStrategyId =
-    typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
-
-  // Record switch time for cooldown tracking
-  process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
-
-  void eventOutboxService.writeEvent({
-    eventType: 'vault.strategy.changed',
-    payload: {
-      transactionId: `strategy-${crypto.randomBytes(4).toString('hex')}`,
-      amount: '0',
-      asset: 'RWA',
-      walletAddress: String(req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'unknown'),
-      transactionHash: 'strategy-change',
-      status: 'accepted',
-      timestamp: new Date().toISOString(),
-      vaultId: 'primary',
-      strategyId,
-      previousStrategyId,
-    },
-    aggregateType: 'vault',
-    aggregateId: 'primary',
-  }).catch((error) => {
-    logger.log('error', 'Failed to write strategy change webhook event', {
-      error: error instanceof Error ? error.message : String(error),
-      strategyId,
-    });
-  });
-
-  res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
+);
+  return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
 });
 
 /**
@@ -887,20 +936,20 @@ router.post(
     } finally {
       walletLock.release();
     }
-  },
+  }
 );
 
 router.get('/receipts', readsLimiter, async (req: Request, res: Response) => {
   const prisma = getPrismaClient();
   const wallet = req.query.wallet as string | undefined;
-  const limit = Math.min(parseInt(req.query.limit as string || '50', 10), 100);
+  const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 100);
   const cursor = req.query.cursor as string | undefined;
 
   const where = wallet ? { user: wallet } : {};
 
   const transactions = await prisma.transaction.findMany({
     where,
-    orderBy: { createdAt: 'desc' },
+    orderBy: { timestamp: 'desc' },
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
@@ -916,7 +965,7 @@ router.get('/receipts', readsLimiter, async (req: Request, res: Response) => {
     status: tx.status,
     walletAddress: tx.user,
     explorerUrl: `${EXPLORER_BASE_URL}/${tx.id}`,
-    timestamp: tx.createdAt.toISOString(),
+    timestamp: tx.timestamp.toISOString(),
   }));
 
   res.status(200).json({

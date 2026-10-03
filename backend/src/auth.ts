@@ -48,6 +48,12 @@ import {
   type WalletAction,
 } from './walletNonce';
 import { buildWalletSignMessage } from './walletSignature';
+import {
+  getRevocationStore,
+  setRevocationStore,
+  RedisRevocationStore,
+  type RevocationReason,
+} from './tokenRevocation';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -155,6 +161,8 @@ export interface JwtPayload {
   iat: number;  // issued-at (unix seconds)
   exp: number;  // expiry   (unix seconds)
   jti: string;  // JWT ID (unique per token)
+  /** Optional "not before" (unix seconds). Tolerated by CLOCK_SKEW_TOLERANCE_SECONDS. */
+  nbf?: number;
 }
 
 interface RefreshTokenEntry {
@@ -287,6 +295,24 @@ function createRefreshTokenStore(): IRefreshTokenStore {
 
 const refreshTokenStore: IRefreshTokenStore = createRefreshTokenStore();
 
+// The revocation list is consulted on every authenticated request, so in a
+// multi-instance deployment it has to be shared: a logout handled by pod A
+// must be visible to pod B or the "stolen token" window re-opens. Redis is
+// used when REDIS_URL is configured; otherwise the in-process store applies
+// (single-instance / local development).
+function initRevocationStore(): void {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) return;
+
+  const redis = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
+  redis.on('error', (err) => {
+    logger.log('error', 'Redis revocation store error', { error: err.message });
+  });
+  setRevocationStore(new RedisRevocationStore(redis));
+}
+
+initRevocationStore();
+
 // ─── HS256 JWT Helpers ────────────────────────────────────────────────────────
 
 function base64UrlEncode(input: string | Buffer): string {
@@ -313,6 +339,65 @@ function signJwt(payload: JwtPayload): string {
     .replace(/\//g, '_')
     .replace(/=/g, '');
   return `${signingInput}.${sig}`;
+}
+
+// ─── Time-claim validation (Issue #1431) ──────────────────────────────────────────────────
+
+/**
+ * Tolerance, in seconds, allowed on `nbf`/`iat`.
+ *
+ * This exists purely to absorb clock skew between the API pod and whatever
+ * minted the token. It is deliberately NOT applied to `exp`: a token whose
+ * lifetime has run out must stop working the instant it does, otherwise a
+ * stolen bearer token keeps authorising `POST /vault/:id/withdraw` for an
+ * extra minute after the user logs out.
+ */
+export const CLOCK_SKEW_TOLERANCE_SECONDS = 5;
+
+/** Thrown when a token's `exp` has passed. */
+export class TokenExpiredError extends Error {
+  constructor(message = 'JWT has expired') {
+    super(message);
+    this.name = 'TokenExpiredError';
+  }
+}
+
+/** Thrown when a token is not valid yet beyond the tolerated clock skew. */
+export class TokenNotYetValidError extends Error {
+  constructor(message = 'JWT is not yet valid') {
+    super(message);
+    this.name = 'TokenNotYetValidError';
+  }
+}
+
+/**
+ * Validates the time-based claims of an already signature-verified payload.
+ *
+ * `exp` uses **zero** tolerance and is inclusive of the expiry second: RFC 7519
+ * says a token is invalid at and after `exp`, so `exp <= now` is rejected.
+ * `nbf`/`iat` get {@link CLOCK_SKEW_TOLERANCE_SECONDS} of slack.
+ */
+export function assertTimeClaims(payload: JwtPayload, nowSeconds = Math.floor(Date.now() / 1000)): void {
+  if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+    throw new Error('Malformed JWT payload');
+  }
+
+  // Strict: no tolerance whatsoever, and the expiry second itself is too late.
+  if (payload.exp <= nowSeconds) {
+    throw new TokenExpiredError();
+  }
+
+  if (typeof payload.nbf === 'number' && Number.isFinite(payload.nbf)) {
+    if (payload.nbf > nowSeconds + CLOCK_SKEW_TOLERANCE_SECONDS) {
+      throw new TokenNotYetValidError();
+    }
+  }
+
+  if (typeof payload.iat === 'number' && Number.isFinite(payload.iat)) {
+    if (payload.iat > nowSeconds + CLOCK_SKEW_TOLERANCE_SECONDS) {
+      throw new TokenNotYetValidError('JWT was issued in the future');
+    }
+  }
 }
 
 /**
@@ -346,8 +431,7 @@ export function verifyJwt(token: string): JwtPayload {
     throw new Error('Malformed JWT payload');
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp < now) throw new Error('JWT has expired');
+  assertTimeClaims(payload);
 
   return payload;
 }
@@ -390,6 +474,83 @@ export async function issueTokenPair(walletAddress: string, familyId?: string): 
 }
 
 // ─── Session Revocation ────────────────────────────────────────────────────────
+
+/**
+ * Adds a specific access token to the revocation list.
+ *
+ * The entry is retained until the token's own `exp`, at which point the token
+ * is rejected by the strict expiry check anyway, so the list can never grow
+ * unbounded.
+ */
+export async function revokeAccessToken(
+  payload: JwtPayload,
+  reason: RevocationReason = 'logout'
+): Promise<void> {
+  if (!payload?.jti || !payload?.sub) {
+    return;
+  }
+
+  await getRevocationStore().revoke({
+    tokenId: payload.jti,
+    walletAddress: payload.sub,
+    revokedAt: Date.now(),
+    reason,
+    expiresAt: payload.exp * 1000,
+  });
+
+  logger.log('info', 'Access token revoked', {
+    reason,
+    wallet: payload.sub.slice(0, 8) + '…',
+    jti: payload.jti,
+  });
+}
+
+/**
+ * Revokes every access token currently issued to `walletAddress`.
+ * This is used for /auth/logout-all and for "this device is compromised".
+ */
+export async function revokeAllAccessTokens(
+  walletAddress: string,
+  reason: RevocationReason = 'logout'
+): Promise<number> {
+  const normalizedAddress = normalizeWalletAddress(walletAddress);
+  const store = getRevocationStore();
+
+  await store.revokeWalletBefore(normalizedAddress, Date.now(), reason);
+  const removed = await store.revokeAllForWallet(normalizedAddress, reason);
+
+  logger.log('info', 'All access tokens revoked for wallet', {
+    reason,
+    wallet: normalizedAddress.slice(0, 8) + '…',
+    revokedCount: removed,
+  });
+
+  return removed;
+}
+
+/**
+ * True when the token has been revoked, either individually (`jti`) or because
+ * the whole wallet was revoked at or after the token was issued.
+ */
+export async function isAccessTokenRevoked(payload: JwtPayload): Promise<boolean> {
+  if (!payload?.jti) return false;
+
+  const store = getRevocationStore();
+
+  if (await store.isRevoked(payload.jti)) {
+    return true;
+  }
+
+  // `iat` is unix seconds; the wallet marker uses unix milliseconds. The
+  // wallet is normalised on both sides so a lower-case `sub` cannot dodge a
+  // revocation written for the canonical (upper-case) address.
+  if (typeof payload.iat === 'number' && Number.isFinite(payload.iat)) {
+    return store.isWalletRevokedBefore(normalizeWalletAddress(payload.sub), payload.iat * 1000);
+  }
+
+  return false;
+}
+
 
 /**
  * Revokes the current session (all tokens in the same family).
@@ -536,11 +697,21 @@ export interface AuthenticatedRequest extends Request {
   jwtPayload?: JwtPayload;
 }
 
+/** Error code returned when a structurally valid token has been revoked. */
+export const TOKEN_REVOKED_CODE = 'TOKEN_REVOKED';
+
 /**
  * Express middleware that validates the Bearer access token from the
  * Authorization header and attaches the decoded payload to req.jwtPayload.
  *
- * Returns 401 for missing / invalid / expired tokens.
+ * Two independent checks run on **every** request (Issue #1431):
+ *
+ *  1. Cryptographic verification plus time-claim validation, where `exp` is
+ *     enforced with zero tolerance (`assertTimeClaims`).
+ *  2. A revocation-list lookup covering both the individual token id and any
+ *     wallet-wide revocation issued at or after the token was minted.
+ *
+ * Returns 401 for missing / invalid / expired / revoked tokens.
  */
 export function requireAuth(
   req: AuthenticatedRequest,
@@ -560,9 +731,9 @@ export function requireAuth(
     return;
   }
 
+  let payload: JwtPayload;
   try {
-    req.jwtPayload = verifyJwt(match[1]);
-    next();
+    payload = verifyJwt(match[1]);
   } catch (err) {
     sendApiError(req, res, {
       status: 401,
@@ -570,7 +741,42 @@ export function requireAuth(
       message: err instanceof Error ? err.message : 'Invalid token',
       retryable: false,
     });
+    return;
   }
+
+  // The revocation lookup is async, so the rest of the chain runs from a
+  // continuation. Express ignores middleware return values, so returning
+  // before `next()` is safe for route usage; the single direct caller
+  // (authenticateTransactionExport) passes a synchronous next() and is
+  // unaffected.
+  isAccessTokenRevoked(payload).then(
+    (revoked) => {
+      if (revoked) {
+        sendApiError(req, res, {
+          status: 401,
+          code: TOKEN_REVOKED_CODE,
+          message: 'Token has been revoked. Please sign in again.',
+          retryable: false,
+        });
+        return;
+      }
+      req.jwtPayload = payload;
+      next();
+    },
+    (err) => {
+      logger.log('error', 'Revocation lookup failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Fail closed: an unreachable revocation store must not silently
+      // downgrade to "token is fine".
+      sendApiError(req, res, {
+        status: 503,
+        code: 'AUTH_REVOCATION_UNAVAILABLE',
+        message: 'Unable to verify session state. Please retry.',
+        retryable: true,
+      });
+    },
+  );
 }
 
 // ─── Auth Route Handlers ──────────────────────────────────────────────────────
