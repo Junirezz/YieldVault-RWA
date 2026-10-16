@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import {
   registerWebhookEndpoint,
   verifyWebhookEndpoint,
@@ -6,6 +7,7 @@ import {
   buildWebhookSignedEnvelope,
   createWebhookSignature,
   markWebhookDeliverySeen,
+  verifyIncomingWebhookPayload,
 } from '../webhookDelivery';
 
 describe('Webhook endpoint verification handshake', () => {
@@ -92,5 +94,38 @@ describe('Webhook endpoint verification handshake', () => {
     expect(signature).toHaveLength(64);
     expect(markWebhookDeliverySeen(delivery.endpointId, delivery.id, envelope.sentAt)).toBe(true);
     expect(markWebhookDeliverySeen(delivery.endpointId, delivery.id, envelope.sentAt)).toBe(false);
+  });
+
+  it('stores no plaintext secret and verifies signatures using the persisted hash', () => {
+    const secret = 'test-key-42';
+    const endpoint = registerWebhookEndpoint({
+      url: 'https://example.com/hook',
+      enabled: true,
+      secret,
+    });
+    const delivery = {
+      id: 'whd_hash_test',
+      endpointId: endpoint.id,
+      endpointUrl: endpoint.url,
+      eventType: 'transaction.deposit.created' as const,
+      status: 'pending' as const,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const envelope = buildWebhookSignedEnvelope(delivery, {
+      transactionId: 'tx-hash-test',
+      amount: '100',
+      asset: 'USDC',
+      walletAddress: `G${'A'.repeat(55)}`,
+      transactionHash: '0xdef',
+      status: 'pending',
+      timestamp: new Date().toISOString(),
+    });
+    const secretHash = crypto.createHash('sha256').update(secret).digest('hex');
+    const signature = createWebhookSignature(secretHash, envelope);
+
+    expect(JSON.stringify(endpoint)).not.toContain(secret);
+    expect(verifyIncomingWebhookPayload(endpoint.id, envelope, signature).verified).toBe(true);
   });
 });

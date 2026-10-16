@@ -49,7 +49,6 @@ interface InternalWebhookEndpoint {
   url: string;
   eventTypes: TransactionEventType[];
   enabled: boolean;
-  secret?: string;
   secretHash?: string;
   verificationStatus: WebhookVerificationStatus;
   challengeToken?: string;
@@ -270,7 +269,6 @@ export function registerWebhookEndpoint(input: RegisterWebhookInput): WebhookEnd
         ? input.eventTypes
         : DEFAULT_WEBHOOK_EVENT_TYPES,
     enabled: input.enabled ?? isUnverifiedDeliveryAllowed(),
-    secret: input.secret,
     secretHash: input.secret ? hashWebhookSecret(input.secret) : undefined,
     verificationStatus: 'pending',
     challengeToken,
@@ -303,7 +301,6 @@ export function updateWebhookEndpoint(
     ...existing,
     enabled: input.enabled ?? existing.enabled,
     eventTypes: input.eventTypes ?? existing.eventTypes,
-    secret: input.secret ?? existing.secret,
     secretHash:
       typeof input.secret === 'string' ? hashWebhookSecret(input.secret) : existing.secretHash,
     updatedAt: new Date().toISOString(),
@@ -637,7 +634,7 @@ export function verifyIncomingWebhookPayload(
   if (!endpoint || endpoint.deletedAt) {
     return { verified: false, reason: 'unknown-endpoint' };
   }
-  if (!endpoint.secret) {
+  if (!endpoint.secretHash) {
     return { verified: false, reason: 'missing-secret' };
   }
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
@@ -661,7 +658,7 @@ export function verifyIncomingWebhookPayload(
 
   if (
     typeof signature !== 'string' ||
-    !verifyWebhookSignature(endpoint.secret, envelope, signature)
+    !verifyWebhookSignature(endpoint.secretHash, envelope, signature)
   ) {
     return { verified: false, reason: 'invalid-signature' };
   }
@@ -775,8 +772,8 @@ async function deliverWithRetry(
     [WEBHOOK_HEADERS.deliveryId]: delivery.id,
   };
 
-  if (endpoint.secret) {
-    headers[WEBHOOK_HEADERS.signature] = createWebhookSignature(endpoint.secret, envelope);
+  if (endpoint.secretHash) {
+    headers[WEBHOOK_HEADERS.signature] = createWebhookSignature(endpoint.secretHash, envelope);
   }
 
   const controller = new AbortController();

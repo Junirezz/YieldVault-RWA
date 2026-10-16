@@ -49,6 +49,7 @@ import { sorobanCircuitBreaker, CircuitOpenError } from './circuitBreaker';
 import { isValidStellarAddress, normalizeWalletAddress } from './walletUtils';
 import { logger } from './middleware/structuredLogging';
 import { getCurrentTraceId } from './tracing';
+import { parseMoneyAmount } from './feeCalculator';
 import {
   transferOrchestrationTotal,
   transferOrchestrationReplayTotal,
@@ -374,8 +375,6 @@ export function resetTransferOrchestratorForTests(): void {
  * plain positive decimal only — no exponents, no signs, no `Infinity`/`NaN`,
  * all of which `Number()` would happily coerce further down the stack.
  */
-const AMOUNT_PATTERN = /^\d+(\.\d+)?$/;
-
 function assertValidKey(idempotencyKey: unknown): string {
   if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
     throw new TransferValidationError(
@@ -421,16 +420,12 @@ function assertValidParams(params: TransferParams): TransferParams {
       422,
     );
   }
-  if (typeof params.amount !== 'string' || !AMOUNT_PATTERN.test(params.amount.trim())) {
+  let amount: string;
+  try {
+    amount = parseMoneyAmount(params.amount).toFixed();
+  } catch (error) {
     throw new TransferValidationError(
-      'amount must be a positive decimal string',
-      'TRANSFER_AMOUNT_INVALID',
-      422,
-    );
-  }
-  if (Number(params.amount) <= 0) {
-    throw new TransferValidationError(
-      'amount must be greater than zero',
+      error instanceof Error ? error.message : 'amount is invalid',
       'TRANSFER_AMOUNT_INVALID',
       422,
     );
@@ -443,7 +438,7 @@ function assertValidParams(params: TransferParams): TransferParams {
   return {
     operationType: params.operationType,
     walletAddress: normalizeWalletAddress(params.walletAddress),
-    amount: params.amount.trim(),
+    amount,
     asset: params.asset.trim().toUpperCase(),
   };
 }

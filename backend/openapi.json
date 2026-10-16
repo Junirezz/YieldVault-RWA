@@ -85,11 +85,17 @@
       "ErrorEnvelope": {
         "type": "object",
         "required": [
+          "error",
           "status",
+          "code",
           "message",
-          "error"
+          "retryable"
         ],
         "properties": {
+          "error": {
+            "type": "string",
+            "example": "Bad Request"
+          },
           "status": {
             "type": "integer",
             "example": 400
@@ -98,30 +104,21 @@
             "type": "string",
             "example": "Some of the information you provided is invalid. Please check and try again."
           },
-          "error": {
+          "code": {
+            "type": "string",
+            "example": "VALIDATION_ERROR"
+          },
+          "retryable": {
+            "type": "boolean",
+            "example": false
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "details": {
             "type": "object",
-            "required": [
-              "code",
-              "message"
-            ],
-            "properties": {
-              "code": {
-                "type": "string",
-                "example": "VALIDATION_ERROR"
-              },
-              "message": {
-                "type": "string",
-                "example": "Validation failed"
-              },
-              "correlationId": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "details": {
-                "type": "object",
-                "nullable": true
-              }
-            }
+            "nullable": true
           }
         }
       },

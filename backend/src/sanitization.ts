@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { StrKey } from '@stellar/stellar-base';
+import { sendApiError } from './middleware/apiError';
 
 const MAX_SAFE_NUMBER = Number.MAX_SAFE_INTEGER;
 const MIN_SAFE_NUMBER = Number.MIN_SAFE_INTEGER;
@@ -32,11 +33,11 @@ export const sanitizationMiddleware = (req: Request, res: Response, next: NextFu
   try {
     sanitizeObject(req.body);
     next();
-  } catch (error: any) {
-    res.status(400).json({
-      error: 'Bad Request',
+  } catch (error: unknown) {
+    sendApiError(req, res, {
       status: 400,
-      message: error.message || 'Invalid input parameters detected',
+      code: 'VALIDATION_ERROR',
+      message: error instanceof Error ? error.message : 'Invalid input parameters detected',
     });
   }
 };

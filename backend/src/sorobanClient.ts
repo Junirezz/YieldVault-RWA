@@ -13,7 +13,7 @@ import {
   StrKey,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { getDeterministicBaseFee } from './feeCalculator';
+import { getDeterministicBaseFee, moneyAmountToBaseUnits } from './feeCalculator';
 import { logger } from './middleware/structuredLogging';
 import { getCurrentTraceId } from './tracing';
 import { sorobanRetryBudget } from './retryBudget';
@@ -201,10 +201,10 @@ export async function submitVaultOperation(
     const sourceAccount = await rpcClient.getAccount(sourceKeypair.publicKey());
     const contract = new Contract(contractId);
 
-    // Convert the amount string to BigInt so nativeToScVal produces a valid i128.
+    // Convert the decimal token amount to exact 7-decimal base units.
     let amountBigInt: bigint;
     try {
-      amountBigInt = BigInt(Math.round(Number(amount)));
+      amountBigInt = BigInt(moneyAmountToBaseUnits(amount));
     } catch {
       throw new SorobanSimulationError(
         `Invalid amount value: ${amount}`,

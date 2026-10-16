@@ -35,8 +35,8 @@ const options: swaggerJsdoc.Options = {
       description:
         'API documentation for the YieldVault Stellar RWA backend. ' +
         'The API exposes vault deposits/withdrawals, portfolio reads, referrals, ' +
-        'webhooks, and operational admin endpoints. All responses use the standard ' +
-        'error envelope `{ status, message, error: { code, message, correlationId } }`.\n\n' +
+        'webhooks, and operational admin endpoints. Errors use the standard envelope ' +
+        '`{ error, status, code, message, retryable, correlationId }`.\n\n' +
         '**Rate limiting:** ' +
         'Global limiter is 100 requests / 15 minutes per IP; authenticated API endpoints ' +
         'are limited to 30 requests / minute per API key. Exceeding a limit returns `429` ' +
@@ -130,24 +130,19 @@ const options: swaggerJsdoc.Options = {
       schemas: {
         ErrorEnvelope: {
           type: 'object',
-          required: ['status', 'message', 'error'],
+          required: ['error', 'status', 'code', 'message', 'retryable'],
           properties: {
+            error: { type: 'string', example: 'Bad Request' },
             status: { type: 'integer', example: 400 },
             message: {
               type: 'string',
               example:
                 'Some of the information you provided is invalid. Please check and try again.',
             },
-            error: {
-              type: 'object',
-              required: ['code', 'message'],
-              properties: {
-                code: { type: 'string', example: 'VALIDATION_ERROR' },
-                message: { type: 'string', example: 'Validation failed' },
-                correlationId: { type: 'string', format: 'uuid' },
-                details: { type: 'object', nullable: true },
-              },
-            },
+            code: { type: 'string', example: 'VALIDATION_ERROR' },
+            retryable: { type: 'boolean', example: false },
+            correlationId: { type: 'string', format: 'uuid' },
+            details: { type: 'object', nullable: true },
           },
         },
         PaginationMeta: {

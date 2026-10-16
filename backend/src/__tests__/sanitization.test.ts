@@ -1,10 +1,12 @@
 import request from 'supertest';
 import express, { Request, Response, NextFunction } from 'express';
 import { sanitizationMiddleware, isValidStellarAddress } from '../sanitization';
+import { correlationIdMiddleware } from '../middleware/correlationId';
 
 const app = express();
 
 app.use(express.json({ limit: '1kb' }));
+app.use(correlationIdMiddleware);
 app.use(sanitizationMiddleware);
 
 app.post('/test', (req: Request, res: Response) => {
@@ -51,9 +53,17 @@ describe('Sanitization Middleware', () => {
 
   it('should return 400 for numbers out of safe range', async () => {
     const payload = { num: Number.MAX_SAFE_INTEGER + 10 };
-    const response = await request(app).post('/test').send(payload);
+    const correlationId = '123e4567-e89b-12d3-a456-426614174000';
+    const response = await request(app).post('/test').set('X-Correlation-ID', correlationId).send(payload);
     expect(response.status).toBe(400);
     expect(response.body.message).toContain('Numeric parameter is out of acceptable range');
+    expect(response.body).toMatchObject({
+      error: 'Bad Request',
+      status: 400,
+      code: 'VALIDATION_ERROR',
+      correlationId,
+    });
+    expect(response.body.retryable).toBe(false);
   });
 
   it('should return 413 for oversized payloads', async () => {

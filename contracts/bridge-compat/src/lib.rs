@@ -157,14 +157,24 @@ enum DataKey {
     UserTransferCount(Address),
     EpochVolume,
     EpochStart,
+    EpochAccounting,
     Limits,
     DefaultProvider,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EpochAccounting {
+    start: u64,
+    volume: i128,
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const STELLAR_CHAIN_ID: u32 = 0;
 const BPS_DENOMINATOR: i128 = 10_000;
+const STORAGE_TTL_THRESHOLD: u32 = 10_000;
+const STORAGE_TTL_EXTENSION: u32 = 100_000;
 
 // ── Contract ───────────────────────────────────────────────────────────────
 
@@ -245,9 +255,7 @@ impl BridgeCompat {
             supported_chains,
         };
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Provider(provider_id), &provider);
+        Self::set_provider(&env, provider_id, &provider);
         env.storage()
             .instance()
             .set(&DataKey::ProviderNonce, &provider_id);
@@ -277,9 +285,7 @@ impl BridgeCompat {
         Self::require_admin(&env)?;
         let mut provider = Self::get_provider(&env, provider_id)?;
         provider.enabled = enabled;
-        env.storage()
-            .instance()
-            .set(&DataKey::Provider(provider_id), &provider);
+        Self::set_provider(&env, provider_id, &provider);
         env.events()
             .publish((symbol_short!("brgtog"),), (provider_id, enabled));
         Ok(())
@@ -293,9 +299,7 @@ impl BridgeCompat {
         }
         let mut provider = Self::get_provider(&env, provider_id)?;
         provider.fee_bps = fee_bps;
-        env.storage()
-            .instance()
-            .set(&DataKey::Provider(provider_id), &provider);
+        Self::set_provider(&env, provider_id, &provider);
         Ok(())
     }
 
@@ -596,10 +600,35 @@ impl BridgeCompat {
     }
 
     fn get_provider(env: &Env, provider_id: u32) -> Result<BridgeProvider, BridgeError> {
-        env.storage()
+        let key = DataKey::Provider(provider_id);
+        if let Some(provider) = env.storage().persistent().get(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                STORAGE_TTL_THRESHOLD,
+                STORAGE_TTL_EXTENSION,
+            );
+            return Ok(provider);
+        }
+
+        // Migrate providers created by earlier releases out of instance storage.
+        let provider: BridgeProvider = env
+            .storage()
             .instance()
-            .get(&DataKey::Provider(provider_id))
-            .ok_or(BridgeError::ProviderNotFound)
+            .get(&key)
+            .ok_or(BridgeError::ProviderNotFound)?;
+        Self::set_provider(env, provider_id, &provider);
+        env.storage().instance().remove(&key);
+        Ok(provider)
+    }
+
+    fn set_provider(env: &Env, provider_id: u32, provider: &BridgeProvider) {
+        let key = DataKey::Provider(provider_id);
+        env.storage().persistent().set(&key, provider);
+        env.storage().persistent().extend_ttl(
+            &key,
+            STORAGE_TTL_THRESHOLD,
+            STORAGE_TTL_EXTENSION,
+        );
     }
 
     fn check_epoch_volume(
@@ -608,33 +637,49 @@ impl BridgeCompat {
         limits: &TransferLimits,
     ) -> Result<(), BridgeError> {
         let now = env.ledger().timestamp();
-        let epoch_start: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::EpochStart)
-            .unwrap_or(0);
-        let mut epoch_volume: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::EpochVolume)
-            .unwrap_or(0);
+        let persistent = env.storage().persistent();
+        let accounting_key = DataKey::EpochAccounting;
+        let mut accounting: EpochAccounting = if let Some(accounting) =
+            persistent.get(&accounting_key)
+        {
+            accounting
+        } else {
+            let instance = env.storage().instance();
+            let legacy_start: Option<u64> = instance.get(&DataKey::EpochStart);
+            let legacy_volume: Option<i128> = instance.get(&DataKey::EpochVolume);
+            if legacy_start.is_some() {
+                instance.remove(&DataKey::EpochStart);
+            }
+            if legacy_volume.is_some() {
+                instance.remove(&DataKey::EpochVolume);
+            }
+            EpochAccounting {
+                start: legacy_start.unwrap_or(0),
+                volume: legacy_volume.unwrap_or(0),
+            }
+        };
 
         // Reset epoch if expired
-        if now >= epoch_start + limits.epoch_duration {
-            epoch_volume = 0;
-            env.storage().instance().set(&DataKey::EpochStart, &now);
+        if now >= accounting.start + limits.epoch_duration {
+            accounting.volume = 0;
+            accounting.start = now;
         }
 
-        let new_volume = epoch_volume
+        let new_volume = accounting
+            .volume
             .checked_add(amount)
             .ok_or(BridgeError::TransferLimitExceeded)?;
         if new_volume > limits.epoch_volume_limit {
             return Err(BridgeError::TransferLimitExceeded);
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::EpochVolume, &new_volume);
+        accounting.volume = new_volume;
+        persistent.set(&accounting_key, &accounting);
+        persistent.extend_ttl(
+            &accounting_key,
+            STORAGE_TTL_THRESHOLD,
+            STORAGE_TTL_EXTENSION,
+        );
         Ok(())
     }
 }
@@ -730,5 +775,28 @@ mod tests {
         assert_eq!(limits.per_transfer_limit, 1_000_000_000_000);
         assert_eq!(limits.epoch_volume_limit, 10_000_000_000_000);
         assert_eq!(limits.epoch_duration, 86_400);
+    }
+
+    #[test]
+    fn test_epoch_accounting_uses_one_packed_entry() {
+        let env = Env::default();
+        let contract_id = env.register(BridgeCompat, ());
+        env.as_contract(&contract_id, || {
+            let limits = TransferLimits {
+                per_transfer_limit: 100,
+                epoch_volume_limit: 1_000,
+                epoch_duration: 86_400,
+            };
+            BridgeCompat::check_epoch_volume(&env, 25, &limits).unwrap();
+
+            let accounting: EpochAccounting = env
+                .storage()
+                .persistent()
+                .get(&DataKey::EpochAccounting)
+                .unwrap();
+            assert_eq!(accounting.volume, 25);
+            assert!(!env.storage().instance().has(&DataKey::EpochStart));
+            assert!(!env.storage().instance().has(&DataKey::EpochVolume));
+        });
     }
 }

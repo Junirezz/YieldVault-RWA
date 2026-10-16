@@ -100,6 +100,9 @@ function checkFile(file) {
   const allowsBootstrapIndexes = lowered.includes(
     'migration-safety: allow-nonconcurrent-indexes'
   );
+  const allowsWebhookSecretDrop =
+    lowered.includes('migration-safety: allow-webhook-secret-drop') &&
+    /alter\s+table\s+["`]?webhookendpoint["`]?\s+drop\s+column\s+["`]?secret["`]?/i.test(content);
   const isCanarySafeOptIn = lowered.includes(
     'migration-safety: canary-safe'
   );
@@ -114,6 +117,7 @@ function checkFile(file) {
   ];
 
   for (const rule of highRiskPatterns) {
+    if (allowsWebhookSecretDrop && rule.label === 'blocking alter/drop change') continue;
     if (rule.pattern.test(content)) {
       results.push({ file, severity: 'error', message: rule.label });
     }

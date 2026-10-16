@@ -236,7 +236,6 @@ model WebhookEndpoint {
   url                   String
   eventTypes            String    // JSON array
   enabled               Boolean   @default(true)
-  secret                String?
   secretHash            String?
   verificationStatus    String    @default("pending")
   challengeTokenHash    String?

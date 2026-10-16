@@ -90,6 +90,17 @@ describe('transferOrchestrator', () => {
       expect(res.outcome).toBe('submitted');
     });
 
+    test('preserves the smallest supported token amount exactly', async () => {
+      await orchestrateTransfer({ ...params, amount: '0.0000001' }, freshKey());
+
+      expect(sorobanClient.submitVaultOperation).toHaveBeenCalledWith(
+        'deposit',
+        VALID_TEST_WALLET,
+        '0.0000001',
+        'USDC',
+      );
+    });
+
     test('a repeat with the same key replays without a second submission', async () => {
       const key = freshKey();
       const first = await orchestrateTransfer(params, key);
@@ -228,6 +239,14 @@ describe('transferOrchestrator', () => {
     test.each([
       ['a negative amount', { amount: '-1' }, 'TRANSFER_AMOUNT_INVALID'],
       ['a zero amount', { amount: '0' }, 'TRANSFER_AMOUNT_INVALID'],
+      ['an amount with excessive precision', { amount: '1.12345678' }, 'TRANSFER_AMOUNT_INVALID'],
+      [
+        'an amount above i128 base-unit capacity',
+        { amount: '17014118346046923173168730371588.4105728' },
+        'TRANSFER_AMOUNT_INVALID',
+      ],
+      ['an amount with excessive precision', { amount: '1.12345678' }, 'TRANSFER_AMOUNT_INVALID'],
+      ['an amount above i128 base-unit capacity', { amount: '17014118346046923173168730371.5884106' }, 'TRANSFER_AMOUNT_INVALID'],
       ['a NaN amount', { amount: 'NaN' }, 'TRANSFER_AMOUNT_INVALID'],
       ['an Infinity amount', { amount: 'Infinity' }, 'TRANSFER_AMOUNT_INVALID'],
       ['an exponent amount', { amount: '1e3' }, 'TRANSFER_AMOUNT_INVALID'],
