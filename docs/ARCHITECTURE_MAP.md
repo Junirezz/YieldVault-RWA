@@ -977,6 +977,7 @@ IN_TRANSIT
 | `docs/SECURITY_CHECKLIST.md` | Security review checklist |
 | `docs/VAULT_LIFECYCLE_AUDIT_LOG.md` | Audit event catalog |
 | `backend/docs/WITHDRAWAL_PARTIAL_FAILURE_RECOVERY.md` | Withdrawal saga state machine |
+| `docs/recovery.md` | Stranded funds operational recovery procedures (admin vs. subscriber) |
 | `docs/runbooks/CONTRACT_UPGRADE_PLAYBOOK.md` | Contract upgrade runbook |
 | `ARCHITECTURE_SUMMARY.md` | Architecture deliverables summary |
 

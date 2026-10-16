@@ -62,6 +62,7 @@ pub fn is_valid_delay(delay_secs: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use soroban_sdk::testutils::{Address as _, Ledger};
 
     #[test]
@@ -120,5 +121,86 @@ mod tests {
         };
         assert_eq!(change.new_value, addr);
         assert_eq!(change.eta, 7);
+    }
+
+    // ── Property Tests (Issue Acceptance Criteria) ───────────────────────────
+
+    proptest! {
+        /// Property 1: Timelock ETA overflow detection.
+        ///
+        /// Whenever timestamp + delay_secs > u64::MAX, compute_eta must panic
+        /// with "timelock eta overflow".
+        #[test]
+        fn prop_compute_eta_overflow_panics(
+            timestamp in 1u64..=u64::MAX,
+            excess in 1u64..=u64::MAX,
+        ) {
+            let env = Env::default();
+            env.ledger().set_timestamp(timestamp);
+
+            let max_non_overflow_delay = u64::MAX - timestamp;
+            let delay = max_non_overflow_delay.saturating_add(excess).max(max_non_overflow_delay.saturating_add(1));
+
+            if timestamp.checked_add(delay).is_none() {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    compute_eta(&env, delay)
+                }));
+                prop_assert!(
+                    result.is_err(),
+                    "expected compute_eta to panic on overflow: timestamp={}, delay={}",
+                    timestamp,
+                    delay
+                );
+            }
+        }
+
+        /// Property 2: Non-overflowing inputs compute exact ETA.
+        ///
+        /// For any (timestamp, delay) where timestamp + delay does not overflow,
+        /// compute_eta must return exactly timestamp + delay without panicking.
+        #[test]
+        fn prop_compute_eta_no_overflow_exact(
+            timestamp in 0u64..=u64::MAX,
+            delay in 0u64..=u64::MAX,
+        ) {
+            if let Some(expected_eta) = timestamp.checked_add(delay) {
+                let env = Env::default();
+                env.ledger().set_timestamp(timestamp);
+                let actual_eta = compute_eta(&env, delay);
+                prop_assert_eq!(actual_eta, expected_eta);
+            }
+        }
+
+        /// Property 3: Boundary edge around u64::MAX.
+        ///
+        /// Exactly at (u64::MAX - delay), compute_eta returns u64::MAX.
+        /// Exactly at (u64::MAX - delay + 1), compute_eta panics on overflow.
+        #[test]
+        fn prop_compute_eta_boundary_edge(
+            delay in 1u64..=u64::MAX,
+        ) {
+            let env = Env::default();
+            let safe_ts = u64::MAX - delay;
+
+            // Safe point: must succeed and equal u64::MAX
+            env.ledger().set_timestamp(safe_ts);
+            let eta = compute_eta(&env, delay);
+            prop_assert_eq!(eta, u64::MAX);
+
+            // Over-the-edge point: safe_ts + 1 must overflow and panic
+            if safe_ts < u64::MAX {
+                let overflow_ts = safe_ts + 1;
+                env.ledger().set_timestamp(overflow_ts);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    compute_eta(&env, delay)
+                }));
+                prop_assert!(
+                    result.is_err(),
+                    "expected panic at boundary overflow: ts={}, delay={}",
+                    overflow_ts,
+                    delay
+                );
+            }
+        }
     }
 }

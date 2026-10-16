@@ -661,20 +661,32 @@ impl BridgeCompat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
 
     /// Register the contract and return a client for it.
-    ///
-    /// The tests below went through `BridgeCompat::…` directly, which reads
-    /// instance storage outside a contract invocation. SDK 22 rejects that
-    /// ("this function is not accessible outside of a contract"), so they now
-    /// go through the generated client like every other test in the workspace.
     fn setup() -> (Env, BridgeCompatClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
         let id = env.register(BridgeCompat, ());
         let client = BridgeCompatClient::new(&env, &id);
         (env, client)
+    }
+
+    /// Register the contract with a live Stellar Asset Contract (SAC) token.
+    fn setup_with_token() -> (Env, BridgeCompatClient<'static>, Address, Address, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token_addr = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+
+        let id = env.register(BridgeCompat, ());
+        let client = BridgeCompatClient::new(&env, &id);
+        client.initialize(&admin, &token_addr);
+
+        (env, client, admin, token_addr, id)
     }
 
     #[test]
@@ -708,17 +720,6 @@ mod tests {
 
         client.initialize(&admin, &token);
 
-        let chains = Vec::from_array(&env, &[1, 2, 3]);
-        let id = BridgeCompat::register_provider(
-            env.clone(),
-            String::from_str(&env, "Wormhole"),
-            BridgeProviderKind::Wormhole,
-            endpoint,
-            50, // 0.5% fee
-            1_000_000_000_000,
-            chains,
-        )
-        .unwrap();
         let chains = Vec::from_array(&env, [1, 2, 3]);
         let id = client.register_provider(
             &String::from_str(&env, "Wormhole"),
@@ -825,5 +826,177 @@ mod tests {
         );
         assert_eq!(duplicate, Err(Ok(BridgeError::NonceAlreadyUsed)));
         assert_eq!(client.transfer(&id_a), Some(transfer_a));
+    // ── Acceptance Criteria Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_epoch_limit_exceeded() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let endpoint = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Bytes::from_slice(&env, &[1, 2, 3, 4]);
+
+        // Configure limits: 50,000 per transfer, 80,000 per epoch (duration: 3,600s)
+        let limits = TransferLimits {
+            per_transfer_limit: 50_000,
+            epoch_volume_limit: 80_000,
+            epoch_duration: 3_600,
+        };
+        client.set_transfer_limits(&limits);
+
+        // Register a provider supporting dest_chain 1
+        let chains = Vec::from_array(&env, [1]);
+        let provider_id = client.register_provider(
+            &String::from_str(&env, "LayerZero"),
+            &BridgeProviderKind::LayerZero,
+            &endpoint,
+            &50,
+            &100_000,
+            &chains,
+        );
+
+        // Fund sender and contract liquidity
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &200_000);
+        token_admin.mint(&contract_id, &200_000);
+
+        // First transfer: 50,000 (epoch volume becomes 50,000 <= 80,000) -> succeeds
+        let tx1 = client.transfer_out(&sender, &recipient, &50_000, &1, &Some(provider_id));
+        assert_eq!(tx1, 1);
+
+        // Second transfer: 40,000
+        // Epoch volume would be 50,000 + 40,000 = 90,000 > 80,000 (epoch_volume_limit)
+        // Must reject with TransferLimitExceeded
+        let err = client.try_transfer_out(&sender, &recipient, &40_000, &1, &Some(provider_id));
+        assert_eq!(err, Err(Ok(BridgeError::TransferLimitExceeded)));
+
+        // Advance ledger timestamp beyond epoch_duration to reset epoch
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3_601);
+
+        // Once epoch has reset, 40,000 transfer succeeds
+        let tx2 = client.transfer_out(&sender, &recipient, &40_000, &1, &Some(provider_id));
+        assert_eq!(tx2, 2);
+    }
+
+    #[test]
+    fn test_fail_transfer_refund() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let endpoint = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Bytes::from_slice(&env, &[9, 8, 7]);
+
+        let chains = Vec::from_array(&env, [1, 2]);
+        let provider_id = client.register_provider(
+            &String::from_str(&env, "Wormhole"),
+            &BridgeProviderKind::Wormhole,
+            &endpoint,
+            &100,
+            &500_000,
+            &chains,
+        );
+
+        let token_client = soroban_sdk::token::Client::new(&env, &token_addr);
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+
+        let initial_sender_balance = 100_000i128;
+        let transfer_amount = 30_000i128;
+        token_admin.mint(&sender, &initial_sender_balance);
+        token_admin.mint(&contract_id, &100_000);
+
+        // 1. Initiate transfer_out
+        let transfer_id = client.transfer_out(&sender, &recipient, &transfer_amount, &1, &Some(provider_id));
+        assert_eq!(transfer_id, 1);
+
+        // Verify sender debited by transfer_amount
+        assert_eq!(
+            token_client.balance(&sender),
+            initial_sender_balance - transfer_amount
+        );
+
+        // Verify initial transfer status is InFlight
+        let transfer_record = client.transfer(&transfer_id).unwrap();
+        assert_eq!(transfer_record.status, TransferStatus::InFlight);
+        assert_eq!(transfer_record.completed_at, 0);
+
+        // Advance timestamp
+        let fail_timestamp = env.ledger().timestamp() + 300;
+        env.ledger().set_timestamp(fail_timestamp);
+
+        // 2. Admin fails the transfer to trigger refund
+        client.fail_transfer(&transfer_id);
+
+        // Verify sender received full refund
+        assert_eq!(token_client.balance(&sender), initial_sender_balance);
+
+        // Verify status updated to Refunded and completed_at recorded
+        let refunded_record = client.transfer(&transfer_id).unwrap();
+        assert_eq!(refunded_record.status, TransferStatus::Refunded);
+        assert_eq!(refunded_record.completed_at, fail_timestamp);
+
+        // 3. Repeated fail_transfer must fail because status is no longer InFlight
+        let re_fail = client.try_fail_transfer(&transfer_id);
+        assert_eq!(re_fail, Err(Ok(BridgeError::TransferInFlight)));
+
+        // 4. Confirming an already refunded transfer must also fail
+        let re_confirm = client.try_confirm_transfer(&transfer_id);
+        assert_eq!(re_confirm, Err(Ok(BridgeError::TransferInFlight)));
+    }
+
+    #[test]
+    fn test_disabled_provider_rejection() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let endpoint = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Bytes::from_slice(&env, &[4, 5, 6]);
+
+        let chains = Vec::from_array(&env, [1, 2]);
+        let provider_id = client.register_provider(
+            &String::from_str(&env, "CustomBridge"),
+            &BridgeProviderKind::Custom,
+            &endpoint,
+            &25,
+            &500_000,
+            &chains,
+        );
+
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &100_000);
+        token_admin.mint(&contract_id, &100_000);
+
+        // Provider is initially enabled
+        assert!(client.provider(&provider_id).unwrap().enabled);
+
+        // Estimate succeeds while enabled
+        let estimate = client.estimate_transfer(&10_000, &1, &Some(provider_id));
+        assert_eq!(estimate.provider_id, provider_id);
+
+        // Disable provider via admin
+        client.set_provider_enabled(&provider_id, &false);
+        assert!(!client.provider(&provider_id).unwrap().enabled);
+
+        // 1. estimate_transfer with explicit disabled provider_id returns ProviderDisabled
+        let est_err = client.try_estimate_transfer(&10_000, &1, &Some(provider_id));
+        assert_eq!(est_err, Err(Ok(BridgeError::ProviderDisabled)));
+
+        // 2. estimate_transfer using default provider (which is disabled) returns ProviderDisabled
+        let est_def_err = client.try_estimate_transfer(&10_000, &1, &None);
+        assert_eq!(est_def_err, Err(Ok(BridgeError::ProviderDisabled)));
+
+        // 3. transfer_out with explicit disabled provider_id returns ProviderDisabled
+        let tx_err = client.try_transfer_out(&sender, &recipient, &10_000, &1, &Some(provider_id));
+        assert_eq!(tx_err, Err(Ok(BridgeError::ProviderDisabled)));
+
+        // 4. transfer_out using default provider (which is disabled) returns ProviderDisabled
+        let tx_def_err = client.try_transfer_out(&sender, &recipient, &10_000, &1, &None);
+        assert_eq!(tx_def_err, Err(Ok(BridgeError::ProviderDisabled)));
+
+        // Re-enable provider and verify transfers and estimates resume
+        client.set_provider_enabled(&provider_id, &true);
+        assert!(client.provider(&provider_id).unwrap().enabled);
+
+        let estimate_ok = client.estimate_transfer(&10_000, &1, &Some(provider_id));
+        assert_eq!(estimate_ok.provider_id, provider_id);
+
+        let tx_id = client.transfer_out(&sender, &recipient, &10_000, &1, &Some(provider_id));
+        assert_eq!(tx_id, 1);
     }
 }
