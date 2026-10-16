@@ -115,6 +115,12 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+        env:
+          # Sentry source-map upload is optional in CI; skip if token absent
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      - name: Check bundle size
+        run: npm run check-size
 
   backend-lint-test:
     name: Backend lint + test

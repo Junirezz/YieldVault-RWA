@@ -80,7 +80,32 @@
   "bundlesize": [
     {
       "path": "./dist/assets/index-*.js",
-      "maxSize": "450 kB",
+      "maxSize": "150 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/vendor-charts-*.js",
+      "maxSize": "200 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/vendor-motion-*.js",
+      "maxSize": "100 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/vendor-stellar-*.js",
+      "maxSize": "300 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/vendor-sentry-*.js",
+      "maxSize": "150 kB",
+      "compression": "gzip"
+    },
+    {
+      "path": "./dist/assets/vendor-react-*.js",
+      "maxSize": "60 kB",
       "compression": "gzip"
     },
     {

@@ -48,10 +48,7 @@ import {
   LazyVaultComparison,
   prefetchDashboardRoutes,
 } from "./lib/routePrefetch";
-import NetworkWarningBanner from "./components/NetworkWarningBanner";
-import OfflineBanner from "./components/OfflineBanner";
-import HighLatencyBanner from "./components/HighLatencyBanner";
-import NetworkBanner from "./components/NetworkBanner";
+import NetworkBannerStack from "./components/NetworkBannerStack";
 import { useVault, VaultProvider } from "./context/VaultContext";
 import { usePageViewTracking } from "./hooks/useAnalytics";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -84,7 +81,14 @@ function AppContent() {
   useRestoreGuardedRoute(role);
 
   useEffect(() => {
-    if ((window as Window & { Cypress?: unknown }).Cypress) {
+    // Skip SW registration when running under Playwright (VITE_E2E=1) or when
+    // explicitly disabled via VITE_ENABLE_SW=0.  Both flags are baked at build
+    // time by Vite so there is no runtime window pollution needed.
+    const swDisabled =
+      import.meta.env.VITE_E2E === "1" ||
+      import.meta.env.VITE_ENABLE_SW === "0";
+
+    if (swDisabled) {
       return;
     }
 
@@ -170,11 +174,12 @@ function AppContent() {
         <MotionProvider>
         <SkipLinks />
         <RouteAnnouncer />
-        <OfflineBanner lastKnownTvl={tvl} lastKnownBalance={usdcBalance} />
+        <NetworkBannerStack
+          walletAddress={walletAddress}
+          lastKnownTvl={tvl}
+          lastKnownBalance={usdcBalance}
+        />
         <div className="app-container">
-          <NetworkWarningBanner walletAddress={walletAddress} />
-          <HighLatencyBanner />
-          <NetworkBanner />
           <Navbar
             walletAddress={walletAddress}
             usdcBalance={usdcBalance}
