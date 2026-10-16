@@ -3,18 +3,12 @@
 //! This module documents all external calls made by the vault and ensures they follow
 //! the Checks-Effects-Interactions (CEI) pattern to prevent reentrancy vulnerabilities.
 //!
-//! # Reentrancy Notes (Soroban)
+//! # CEI Ordering
 //!
-//! Soroban's model provides inherent protection against reentrancy:
-//! - Contract calls are atomic within a transaction
-//! - State changes are committed atomically
-//! - No recursive calls can occur during execution
-//! - Each contract invocation gets its own execution frame
-//!
-//! However, following CEI pattern still applies for:
-//! - Logical correctness and state consistency
-//! - Preventing state from being observed in invalid intermediate states
-//! - Clear audit trail and intent
+//! For every external interaction, finish validation first, persist all state
+//! effects second, and invoke the external contract last. This keeps callbacks
+//! from observing stale accounting. Transaction atomicity rolls these effects
+//! back if the interaction fails; it does not replace correct call ordering.
 //!
 //! See [`docs/CONTRACTS_ARCHITECTURE.md`](../../docs/CONTRACTS_ARCHITECTURE.md) for details.
 
@@ -26,25 +20,38 @@ pub fn validate_external_call_precondition(condition: bool, msg: &str) {
     }
 }
 
-/// Documents that a call follows CEI pattern
-/// (Checks → Effects → Interactions)
+/// Runs the three CEI phases in order: checks, effects, then interactions.
+///
+/// Keep external contract calls exclusively in the `interactions` block. The
+/// scoped blocks make the order executable and testable, not just documentary.
 #[macro_export]
 macro_rules! cei_pattern {
-    ($name:expr, checks: $checks:expr, effects: $effects:expr, interactions: $interactions:expr) => {
-        // This macro documents the CEI pattern for code review
-        // Structure:
-        // 1. Checks: $checks
-        // 2. Effects: $effects
-        // 3. Interactions: $interactions
-    };
+    ($name:expr, checks: $checks:block, effects: $effects:block, interactions: $interactions:block) => {{
+        let _cei_operation = $name;
+        $checks
+        $effects
+        $interactions
+    }};
 }
 
 #[cfg(test)]
 mod tests {
 
     #[test]
-    fn test_external_calls_inventory_documented() {
-        // This test verifies that all external calls are documented
-        // Actual reentrancy protections are tested via integration tests
+    fn test_cei_phases_run_in_order() {
+        let mut state_updated = false;
+
+        crate::cei_pattern!(
+            "test operation",
+            checks: {
+                assert!(!state_updated);
+            },
+            effects: {
+                state_updated = true;
+            },
+            interactions: {
+                assert!(state_updated);
+            }
+        );
     }
 }

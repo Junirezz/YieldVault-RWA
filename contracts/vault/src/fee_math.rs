@@ -16,32 +16,40 @@
 pub const BPS_DENOMINATOR: i128 = 10_000;
 pub const MAX_TREASURY_ACCUMULATOR: i128 = i128::MAX / 2;
 
+use crate::VaultError;
+
 /// Compute protocol fee and net amount using floor rounding.
 ///
 /// Returns `(fee_amount, net_amount)` where `fee_amount + net_amount == amount`.
-pub fn calculate_protocol_fee(amount: i128, fee_bps: i128) -> (i128, i128) {
-    assert!(amount >= 0, "amount must be non-negative");
-    assert!(
-        (0..=BPS_DENOMINATOR).contains(&fee_bps),
-        "fee_bps out of range"
-    );
-
-    if amount == 0 || fee_bps == 0 {
-        return (0, amount);
+pub fn calculate_protocol_fee(
+    amount: i128,
+    fee_bps: i128,
+) -> Result<(i128, i128), VaultError> {
+    if amount < 0 {
+        return Err(VaultError::InvalidAmount);
+    }
+    if !(0..=BPS_DENOMINATOR).contains(&fee_bps) {
+        return Err(VaultError::InvalidFeeBps);
     }
 
-    let fee_amount = amount.checked_mul(fee_bps).expect("fee overflow") / BPS_DENOMINATOR;
-    let net_amount = amount - fee_amount;
-    assert!(
-        fee_amount >= 0 && net_amount >= 0,
-        "fee accounting invariant violated: negative fee share"
-    );
-    assert_eq!(
-        fee_amount + net_amount,
-        amount,
-        "fee accounting invariant violated: fee + net != amount"
-    );
-    (fee_amount, net_amount)
+    if amount == 0 || fee_bps == 0 {
+        return Ok((0, amount));
+    }
+
+    let whole_fee = (amount / BPS_DENOMINATOR)
+        .checked_mul(fee_bps)
+        .ok_or(VaultError::MathOverflow)?;
+    let fractional_fee = (amount % BPS_DENOMINATOR)
+        .checked_mul(fee_bps)
+        .ok_or(VaultError::MathOverflow)?
+        / BPS_DENOMINATOR;
+    let fee_amount = whole_fee
+        .checked_add(fractional_fee)
+        .ok_or(VaultError::MathOverflow)?;
+    let net_amount = amount
+        .checked_sub(fee_amount)
+        .ok_or(VaultError::MathOverflow)?;
+    Ok((fee_amount, net_amount))
 }
 
 /// Check if accumulating a fee amount would exceed the bounded accumulator.
@@ -53,7 +61,16 @@ pub fn would_exceed_accumulator_bound(current_balance: i128, fee_to_add: i128) -
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        calculate_protocol_fee as try_calculate_protocol_fee, would_exceed_accumulator_bound,
+        MAX_TREASURY_ACCUMULATOR,
+    };
+    use crate::VaultError;
+    use proptest::prelude::*;
+
+    fn calculate_protocol_fee(amount: i128, fee_bps: i128) -> (i128, i128) {
+        try_calculate_protocol_fee(amount, fee_bps).unwrap()
+    }
 
     #[test]
     fn test_zero_amount_zero_fee() {
@@ -164,21 +181,56 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "fee_bps out of range")]
     fn test_rejects_negative_bps() {
-        calculate_protocol_fee(100, -1);
+        assert_eq!(
+            try_calculate_protocol_fee(100, -1),
+            Err(VaultError::InvalidFeeBps)
+        );
     }
 
     #[test]
-    #[should_panic(expected = "fee_bps out of range")]
     fn test_rejects_bps_above_denominator() {
-        calculate_protocol_fee(100, 10_001);
+        assert_eq!(
+            try_calculate_protocol_fee(100, 10_001),
+            Err(VaultError::InvalidFeeBps)
+        );
     }
 
     #[test]
-    #[should_panic(expected = "amount must be non-negative")]
     fn test_rejects_negative_amount() {
-        calculate_protocol_fee(-1, 100);
+        assert_eq!(
+            try_calculate_protocol_fee(-1, 100),
+            Err(VaultError::InvalidAmount)
+        );
+    }
+
+    #[test]
+    fn test_maximum_amount_does_not_overflow() {
+        assert_eq!(
+            try_calculate_protocol_fee(i128::MAX, 10_000),
+            Ok((i128::MAX, 0))
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn protocol_fee_is_conservative(
+            amount in 0i128..=i128::MAX,
+            fee_bps in 0i128..=10_000,
+        ) {
+            let (fee, net) = try_calculate_protocol_fee(amount, fee_bps).unwrap();
+            prop_assert!(fee >= 0 && net >= 0);
+            prop_assert!(fee <= amount && net <= amount);
+            prop_assert_eq!(fee.checked_add(net), Some(amount));
+        }
+    }
+
+    #[test]
+    fn test_math_overflow_is_returned() {
+        assert_eq!(
+            try_calculate_protocol_fee(i128::MAX, 5_000),
+            Ok((i128::MAX / 2, i128::MAX - i128::MAX / 2))
+        );
     }
 
     #[test]

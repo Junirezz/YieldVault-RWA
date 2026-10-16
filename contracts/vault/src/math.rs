@@ -3,12 +3,24 @@
 //! See [`share_price_math`] for implementation and rounding guarantees.
 
 pub use share_price_math::{
-    assets_to_shares, shares_to_assets, try_assets_to_shares, try_shares_to_assets,
+    assets_to_shares, shares_to_assets, try_assets_to_shares, try_shares_to_assets, MathError,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        assets_to_shares as checked_assets_to_shares,
+        shares_to_assets as checked_shares_to_assets,
+    };
+    use share_price_math::MathError;
+
+    fn assets_to_shares(assets: i128, total_shares: i128, total_assets: i128) -> i128 {
+        checked_assets_to_shares(assets, total_shares, total_assets).unwrap()
+    }
+
+    fn shares_to_assets(shares: i128, total_shares: i128, total_assets: i128) -> i128 {
+        checked_shares_to_assets(shares, total_shares, total_assets).unwrap()
+    }
 
     #[test]
     fn test_first_deposit_one_to_one() {
@@ -166,14 +178,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow")]
     fn test_overflow_protection_assets_to_shares() {
-        let _ = assets_to_shares(i128::MAX, i128::MAX, 1);
+        assert_eq!(
+            checked_assets_to_shares(i128::MAX, i128::MAX, 1),
+            Err(MathError::Overflow)
+        );
     }
 
     #[test]
-    #[should_panic(expected = "overflow")]
     fn test_overflow_protection_shares_to_assets() {
-        let _ = shares_to_assets(i128::MAX, 1, i128::MAX);
+        assert_eq!(
+            checked_shares_to_assets(i128::MAX, 1, i128::MAX),
+            Err(MathError::Overflow)
+        );
     }
 }

@@ -30,6 +30,7 @@ use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
     Bytes, Env, String, Vec,
 };
+use soroban_sdk::xdr::ToXdr;
 
 // ── Error types ────────────────────────────────────────────────────────────
 
@@ -159,6 +160,7 @@ enum DataKey {
     EpochStart,
     Limits,
     DefaultProvider,
+    TransferNonceFor(Address, u32),
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -441,21 +443,23 @@ impl BridgeCompat {
             return Err(BridgeError::InsufficientBalance);
         }
 
-        // Transfer tokens from sender to this contract
-        token_client.transfer(&sender, &env.current_contract_address(), &amount);
-
-        // Create transfer record
-        let transfer_id = env
+        // Nonces are monotonic within a sender/provider domain. Transfer IDs
+        // additionally bind that nonce to both identities so they cannot be
+        // confused with replay nonces or reused across providers.
+        let nonce_key = DataKey::TransferNonceFor(sender.clone(), pid);
+        let previous_nonce = env
             .storage()
             .instance()
-            .get::<_, u64>(&DataKey::TransferNonce)
-            .unwrap_or(0)
-            + 1;
-        let nonce = env
-            .storage()
-            .instance()
-            .get::<_, u64>(&DataKey::TransferNonce)
+            .get::<_, u64>(&nonce_key)
             .unwrap_or(0);
+        let nonce = previous_nonce
+            .checked_add(1)
+            .ok_or(BridgeError::NonceAlreadyUsed)?;
+        let transfer_id = Self::derive_transfer_id(&env, &sender, nonce, pid);
+        let transfer_key = DataKey::Transfer(transfer_id);
+        if env.storage().instance().has(&transfer_key) {
+            return Err(BridgeError::NonceAlreadyUsed);
+        }
 
         let transfer = BridgeTransfer {
             transfer_id,
@@ -473,10 +477,10 @@ impl BridgeCompat {
 
         env.storage()
             .instance()
-            .set(&DataKey::Transfer(transfer_id), &transfer);
+            .set(&transfer_key, &transfer);
         env.storage()
             .instance()
-            .set(&DataKey::TransferNonce, &(transfer_id));
+            .set(&nonce_key, &nonce);
 
         // Update user transfer count
         let user_count: i128 = env
@@ -490,9 +494,13 @@ impl BridgeCompat {
         );
 
         env.events().publish(
-            (symbol_short!("brgout"), sender),
+            (symbol_short!("brgout"), sender.clone()),
             (transfer_id, amount, dest_chain, pid),
         );
+
+        // Persist the nonce and transfer record before the token interaction.
+        // A callback therefore cannot observe or reuse an uncommitted nonce.
+        token_client.transfer(&sender, &env.current_contract_address(), &amount);
 
         Ok(transfer_id)
     }
@@ -600,6 +608,17 @@ impl BridgeCompat {
             .instance()
             .get(&DataKey::Provider(provider_id))
             .ok_or(BridgeError::ProviderNotFound)
+    }
+
+    fn derive_transfer_id(env: &Env, sender: &Address, nonce: u64, provider_id: u32) -> u64 {
+        let mut payload = sender.to_xdr(env);
+        payload.append(&nonce.to_xdr(env));
+        payload.append(&provider_id.to_xdr(env));
+        let digest = env.crypto().sha256(&payload).to_array();
+        u64::from_be_bytes([
+            digest[0], digest[1], digest[2], digest[3],
+            digest[4], digest[5], digest[6], digest[7],
+        ])
     }
 
     fn check_epoch_volume(
@@ -730,5 +749,81 @@ mod tests {
         assert_eq!(limits.per_transfer_limit, 1_000_000_000_000);
         assert_eq!(limits.epoch_volume_limit, 10_000_000_000_000);
         assert_eq!(limits.epoch_duration, 86_400);
+    }
+
+    #[test]
+    fn transfer_ids_are_context_bound_and_duplicate_ids_are_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let bridge_id = env.register(BridgeCompat, ());
+        let client = BridgeCompatClient::new(&env, &bridge_id);
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token_id = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+        client.initialize(&admin, &token_id);
+
+        let sender_a = Address::generate(&env);
+        let sender_b = Address::generate(&env);
+        token_admin_client.mint(&bridge_id, &1_000);
+        token_admin_client.mint(&sender_a, &300);
+        token_admin_client.mint(&sender_b, &300);
+
+        let endpoint_a = Address::generate(&env);
+        let endpoint_b = Address::generate(&env);
+        let chains = Vec::from_array(&env, &[1u32]);
+        let provider_a = client.register_provider(
+            &String::from_str(&env, "provider-a"),
+            &BridgeProviderKind::Wormhole,
+            &endpoint_a,
+            &0,
+            &1_000,
+            &chains,
+        );
+        let provider_b = client.register_provider(
+            &String::from_str(&env, "provider-b"),
+            &BridgeProviderKind::LayerZero,
+            &endpoint_b,
+            &0,
+            &1_000,
+            &chains,
+        );
+        let recipient = Bytes::new(&env);
+
+        let id_a = client.transfer_out(&sender_a, &recipient, &100, &1, &Some(provider_a));
+        let id_b = client.transfer_out(&sender_b, &recipient, &100, &1, &Some(provider_b));
+        let id_a_next = client.transfer_out(&sender_a, &recipient, &100, &1, &Some(provider_a));
+
+        let transfer_a = client.transfer(&id_a).unwrap();
+        let transfer_b = client.transfer(&id_b).unwrap();
+        let transfer_a_next = client.transfer(&id_a_next).unwrap();
+        assert_eq!(transfer_a.nonce, 1);
+        assert_eq!(transfer_b.nonce, 1);
+        assert_eq!(transfer_a_next.nonce, 2);
+        assert_ne!(id_a, transfer_a.nonce);
+        assert_ne!(id_a, id_b);
+        assert_ne!(id_a, id_a_next);
+        assert_eq!(transfer_a.transfer_id, id_a);
+
+        // Simulate replayed nonce state: the derived ID is already occupied,
+        // so a transfer must fail instead of replacing the original record.
+        env.as_contract(&bridge_id, || {
+            env.storage().instance().set(
+                &DataKey::TransferNonceFor(sender_a.clone(), provider_a),
+                &0u64,
+            );
+        });
+        let duplicate = client.try_transfer_out(
+            &sender_a,
+            &recipient,
+            &100,
+            &1,
+            &Some(provider_a),
+        );
+        assert_eq!(duplicate, Err(Ok(BridgeError::NonceAlreadyUsed)));
+        assert_eq!(client.transfer(&id_a), Some(transfer_a));
     }
 }

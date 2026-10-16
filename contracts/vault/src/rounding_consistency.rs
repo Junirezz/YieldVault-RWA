@@ -26,16 +26,14 @@ impl RoundingPolicy {
     /// - Prevents over-minting and over-withdrawal
     /// - Maintains vault solvency invariant
     ///
-    /// # Panics
-    /// - Panics if `denominator` is zero
-    ///
     /// # Examples
     /// ```ignore
     /// let shares = RoundingPolicy::floor_division(100, 1500);  // (100 * 1000) / 1500 = 66
     /// ```
-    pub fn floor_division(numerator: i128, denominator: i128) -> i128 {
-        assert!(denominator != 0, "division by zero");
-        numerator / denominator // Rust's / operator truncates toward zero for integer division
+    pub fn floor_division(numerator: i128, denominator: i128) -> Result<i128, VaultError> {
+        numerator
+            .checked_div(denominator)
+            .ok_or(VaultError::MathOverflow)
     }
 
     /// Performs floor division with validation for decimal conversion edge cases.
@@ -61,35 +59,35 @@ impl RoundingPolicy {
         denominator: i128,
         max_allowed_loss_bps: i128,
     ) -> Result<i128, VaultError> {
-        assert!(denominator != 0, "division by zero");
+        if denominator == 0 || max_allowed_loss_bps < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
 
         if numerator == 0 {
             return Ok(0);
         }
 
-        // Exact result using extended precision (i128 * 2 represented as u128)
-        let exact_numerator = numerator.abs() as u128;
-        let exact_denominator = denominator.abs() as u128;
-
-        // Compute exact quotient and remainder
-        let quotient = exact_numerator / exact_denominator;
-        let remainder = exact_numerator % exact_denominator;
+        let result = numerator
+            .checked_div(denominator)
+            .ok_or(VaultError::MathOverflow)?;
+        let remainder = numerator
+            .checked_rem(denominator)
+            .ok_or(VaultError::MathOverflow)?
+            .unsigned_abs();
 
         // Compute rounding loss in basis points
         // loss_bps = (remainder * 10_000) / exact_numerator
         if remainder > 0 {
-            let loss_bps = (remainder * 10_000) / exact_numerator;
+            let loss_bps = remainder
+                .checked_mul(10_000)
+                .ok_or(VaultError::MathOverflow)?
+                / numerator.unsigned_abs();
             if loss_bps > max_allowed_loss_bps as u128 {
                 return Err(VaultError::SlippageExceeded);
             }
         }
 
-        let result = quotient as i128;
-        if numerator < 0 {
-            Ok(-result)
-        } else {
-            Ok(result)
-        }
+        Ok(result)
     }
 
     /// Converts between decimal places with safe rounding and overflow checking.
@@ -167,15 +165,22 @@ impl RoundingPolicy {
         original_amount: i128,
         max_loss_bps: i128,
     ) -> Result<(), VaultError> {
+        if max_loss_bps < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
         if loss_amount == 0 || original_amount == 0 {
             return Ok(());
         }
 
         // Compute loss in basis points
         // loss_bps = (loss * 10_000) / original
-        let loss_bps = (loss_amount.abs() * 10_000) / original_amount.abs();
+        let loss_bps = loss_amount
+            .unsigned_abs()
+            .checked_mul(10_000)
+            .ok_or(VaultError::MathOverflow)?
+            / original_amount.unsigned_abs();
 
-        if loss_bps > max_loss_bps {
+        if loss_bps > max_loss_bps as u128 {
             return Err(VaultError::SlippageExceeded);
         }
 
@@ -227,6 +232,9 @@ impl RoundingPolicy {
         amount: i128,
         basis_points: i128,
     ) -> Result<i128, VaultError> {
+        if amount < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
         if amount == 0 || basis_points == 0 {
             return Ok(0);
         }
@@ -235,7 +243,16 @@ impl RoundingPolicy {
             return Err(VaultError::InvalidFeeBps);
         }
 
-        let result = (amount * basis_points) / 10_000;
+        let whole_amount = (amount / 10_000)
+            .checked_mul(basis_points)
+            .ok_or(VaultError::MathOverflow)?;
+        let fractional_amount = (amount % 10_000)
+            .checked_mul(basis_points)
+            .ok_or(VaultError::MathOverflow)?
+            / 10_000;
+        let result = whole_amount
+            .checked_add(fractional_amount)
+            .ok_or(VaultError::MathOverflow)?;
         Ok(result)
     }
 }
@@ -246,13 +263,25 @@ mod tests {
 
     #[test]
     fn test_floor_division_exact() {
-        assert_eq!(RoundingPolicy::floor_division(100, 10), 10);
+        assert_eq!(RoundingPolicy::floor_division(100, 10), Ok(10));
     }
 
     #[test]
     fn test_floor_division_rounds_down() {
-        assert_eq!(RoundingPolicy::floor_division(99, 10), 9);
-        assert_eq!(RoundingPolicy::floor_division(100, 1500), 0);
+        assert_eq!(RoundingPolicy::floor_division(99, 10), Ok(9));
+        assert_eq!(RoundingPolicy::floor_division(100, 1500), Ok(0));
+    }
+
+    #[test]
+    fn test_floor_division_reports_invalid_arithmetic() {
+        assert_eq!(
+            RoundingPolicy::floor_division(1, 0),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            RoundingPolicy::floor_division(i128::MIN, -1),
+            Err(VaultError::MathOverflow)
+        );
     }
 
     #[test]
