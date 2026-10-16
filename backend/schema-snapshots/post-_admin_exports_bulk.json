@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "job": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "processing",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "json"
+          ]
+        },
+        "generatedBy": {
+          "type": "string"
+        },
+        "filters": {
+          "type": "unknown"
+        },
+        "totalRows": {
+          "type": "number"
+        },
+        "processedRows": {
+          "type": "number"
+        },
+        "errorRows": {
+          "type": "number"
+        },
+        "artifactId": {
+          "type": "string"
+        },
+        "errorMessage": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "format",
+        "generatedBy",
+        "filters",
+        "totalRows",
+        "processedRows",
+        "errorRows",
+        "artifactId",
+        "errorMessage",
+        "createdAt",
+        "updatedAt",
+        "completedAt"
+      ],
+      "additionalProperties": false
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message",
+    "job",
+    "timestamp"
+  ],
+  "additionalProperties": false
+}

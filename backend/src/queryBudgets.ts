@@ -30,6 +30,52 @@ export const QUERY_BUDGETS: Readonly<Record<string, number>> = Object.freeze({
   'Referral.findUnique': 50,
   'WebhookEndpoint.findMany': 100,
   'WebhookDelivery.findMany': 150,
+
+  // EventOutbox hot paths
+  'EventOutbox.findUnique': 50,
+  'EventOutbox.findFirst': 50,
+  'EventOutbox.findMany': 100,
+  'EventOutbox.create': 100,
+  'EventOutbox.createMany': 100,
+  'EventOutbox.update': 100,
+  'EventOutbox.updateMany': 100,
+  'EventOutbox.deleteMany': 150,
+  'EventOutbox.count': 50,
+
+  // BulkExportJob hot paths
+  'BulkExportJob.findUnique': 50,
+  'BulkExportJob.findFirst': 50,
+  'BulkExportJob.findMany': 100,
+  'BulkExportJob.create': 150,
+  'BulkExportJob.update': 150,
+  'BulkExportJob.upsert': 150,
+  'BulkExportJob.deleteMany': 150,
+
+  // EmailQueue hot paths
+  'EmailQueue.findUnique': 50,
+  'EmailQueue.findFirst': 50,
+  'EmailQueue.findMany': 100,
+  'EmailQueue.create': 100,
+  'EmailQueue.update': 100,
+  'EmailQueue.deleteMany': 150,
+
+  // TransactionBackfill hot paths
+  'TransactionBackfill.findUnique': 50,
+  'TransactionBackfill.findFirst': 50,
+  'TransactionBackfill.findMany': 100,
+  'TransactionBackfill.create': 150,
+  'TransactionBackfill.update': 150,
+  'TransactionBackfill.upsert': 150,
+  'TransactionBackfill.deleteMany': 150,
+
+  // TransactionBackfillJob hot paths
+  'TransactionBackfillJob.findUnique': 50,
+  'TransactionBackfillJob.findFirst': 50,
+  'TransactionBackfillJob.findMany': 100,
+  'TransactionBackfillJob.create': 150,
+  'TransactionBackfillJob.update': 150,
+  'TransactionBackfillJob.upsert': 150,
+  'TransactionBackfillJob.deleteMany': 150,
 });
 
 const READ_ACTIONS = new Set([
@@ -198,6 +244,19 @@ export function getQueryBudget(model: string, action: string): number {
   const overrides = readBudgetOverrides();
   if (overrides[key] !== undefined) return overrides[key];
   if (QUERY_BUDGETS[key] !== undefined) return QUERY_BUDGETS[key];
+
+  // Model alias resolution (e.g. TransactionBackfill <-> TransactionBackfillJob)
+  if (model === 'TransactionBackfill' && QUERY_BUDGETS[`TransactionBackfillJob.${action}`] !== undefined) {
+    return QUERY_BUDGETS[`TransactionBackfillJob.${action}`];
+  }
+  if (model === 'TransactionBackfillJob' && QUERY_BUDGETS[`TransactionBackfill.${action}`] !== undefined) {
+    return QUERY_BUDGETS[`TransactionBackfill.${action}`];
+  }
+
+  // Case normalization fallback (e.g. eventOutbox.findMany -> EventOutbox.findMany)
+  const capitalizedModel = model.charAt(0).toUpperCase() + model.slice(1);
+  const capitalizedKey = `${capitalizedModel}.${action}`;
+  if (QUERY_BUDGETS[capitalizedKey] !== undefined) return QUERY_BUDGETS[capitalizedKey];
 
   return READ_ACTIONS.has(action)
     ? parsePositiveNumber(process.env.QUERY_READ_BUDGET_MS, DEFAULT_READ_QUERY_BUDGET_MS)
@@ -425,3 +484,117 @@ export function resetAlertCooldowns(): void {
   budgetOverrideCacheRaw = undefined;
   budgetOverrideCache = {};
 }
+
+export interface QueryWrapperOptions {
+  source?: QueryPerformanceSource;
+  onEvaluation?: (evaluation: QueryPerformanceEvaluation) => void;
+  onBreach?: (evaluation: QueryPerformanceEvaluation) => void;
+}
+
+/**
+ * Wraps a database query operation with execution duration measurement,
+ * performance tracking, and budget enforcement.
+ * When the query duration exceeds the configured budget, alerts and breach
+ * metrics are recorded.
+ */
+export async function withQueryBudget<T>(
+  model: string,
+  action: string,
+  fn: () => Promise<T>,
+  options?: QueryWrapperOptions | QueryPerformanceSource
+): Promise<T> {
+  const opts: QueryWrapperOptions =
+    typeof options === 'string' ? { source: options } : options ?? {};
+  const source = opts.source ?? 'prisma';
+  const startedAt = process.hrtime.bigint();
+  let failed = false;
+
+  try {
+    return await fn();
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    void recordQueryPerformance({
+      model,
+      action,
+      durationMs: elapsedMs,
+      source,
+      failed,
+    })
+      .then((evaluation) => {
+        opts.onEvaluation?.(evaluation);
+        if (evaluation.breached) {
+          opts.onBreach?.(evaluation);
+        }
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV !== 'test') {
+          logger.log('error', 'Failed to record query performance', {
+            error: err instanceof Error ? err.message : String(err),
+            model,
+            action,
+          });
+        }
+      });
+  }
+}
+
+/**
+ * Standard query wrapper alias for withQueryBudget.
+ */
+export const wrapQuery = withQueryBudget;
+
+/**
+ * Executes a query with budget enforcement and awaits the performance evaluation,
+ * returning both the query result and the evaluation details.
+ */
+export async function executeWithBudget<T>(
+  model: string,
+  action: string,
+  fn: () => Promise<T>,
+  options?: QueryWrapperOptions | QueryPerformanceSource
+): Promise<{ result: T; evaluation: QueryPerformanceEvaluation }> {
+  const opts: QueryWrapperOptions =
+    typeof options === 'string' ? { source: options } : options ?? {};
+  const source = opts.source ?? 'prisma';
+  const startedAt = process.hrtime.bigint();
+  let failed = false;
+  let result: T;
+
+  try {
+    result = await fn();
+  } catch (error) {
+    failed = true;
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const evaluation = await recordQueryPerformance({
+      model,
+      action,
+      durationMs: elapsedMs,
+      source,
+      failed: true,
+    });
+    opts.onEvaluation?.(evaluation);
+    if (evaluation.breached) {
+      opts.onBreach?.(evaluation);
+    }
+    throw error;
+  }
+
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  const evaluation = await recordQueryPerformance({
+    model,
+    action,
+    durationMs: elapsedMs,
+    source,
+    failed: false,
+  });
+  opts.onEvaluation?.(evaluation);
+  if (evaluation.breached) {
+    opts.onBreach?.(evaluation);
+  }
+
+  return { result, evaluation };
+}
+
