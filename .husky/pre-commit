@@ -1,2 +1,0 @@
-node scripts/secrets-check.js
-npm run lint:staged

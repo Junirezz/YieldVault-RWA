@@ -79,6 +79,9 @@ export function VirtualizedDataTable<T>({
 }: VirtualizedDataTableProps<T>) {
   const { t } = useTranslation();
   const delayedLoading = useDelayedLoading(isLoading);
+  // The scroll container wraps the whole table so thead and tbody stay in the
+  // same table element — screen readers can correctly associate header cells
+  // with data cells.
   const parentRef = useRef<HTMLDivElement>(null);
 
   const handleRowKeyDown = (
@@ -128,10 +131,22 @@ export function VirtualizedDataTable<T>({
 
   return (
     <div className="data-table-shell glass-panel" aria-busy={delayedLoading}>
-      <div className="data-table-scroll">
-        <table className="data-table">
+      {/*
+       * Single scroll container wrapping one <table>.
+       * thead uses position:sticky so it remains visible while the body
+       * scrolls, without ever leaving the table — preserving the DOM
+       * relationship that lets screen readers map headers to cells.
+       */}
+      <div
+        ref={parentRef}
+        className="data-table-scroll"
+        style={{ maxHeight, overflowY: "auto", overflowX: "auto" }}
+        data-testid="virtualized-table-body"
+      >
+        <table className="data-table" style={{ width: "100%" }}>
           <caption className="sr-only">{caption}</caption>
-          <thead>
+
+          <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
             <tr>
               {columns.map((column) => {
                 const sortState = getColumnSortState(
@@ -165,7 +180,10 @@ export function VirtualizedDataTable<T>({
                         aria-label={`${t("dataTable.sortBy")} ${column.header}`}
                       >
                         <span>{column.header}</span>
-                        <span className="data-table-sort-indicator" aria-hidden="true">
+                        <span
+                          className="data-table-sort-indicator"
+                          aria-hidden="true"
+                        >
                           {sortState.direction
                             ? sortState.direction === "asc"
                               ? "↑"
@@ -189,33 +207,18 @@ export function VirtualizedDataTable<T>({
               })}
             </tr>
           </thead>
-        </table>
 
-        <div
-          ref={parentRef}
-          className="virtualized-data-table-body"
-          style={{ maxHeight, overflow: "auto" }}
-          data-testid="virtualized-table-body"
-        >
-          {delayedLoading ? (
-            <table className="data-table">
-              <tbody>
-                <TableSkeleton columns={columns.length} rows={skeletonRows} />
-              </tbody>
-            </table>
-          ) : rows.length === 0 && !isLoading ? (
-            <table className="data-table">
-              <tbody>
-                <tr>
-                  <td colSpan={columns.length} className="data-table-empty">
-                    {emptyMessage}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          ) : (
-            <table className="data-table" style={{ width: "100%" }}>
-              <tbody>
+          <tbody>
+            {delayedLoading ? (
+              <TableSkeleton columns={columns.length} rows={skeletonRows} />
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="data-table-empty">
+                  {emptyMessage}
+                </td>
+              </tr>
+            ) : (
+              <>
                 {paddingTop > 0 && (
                   <tr aria-hidden="true">
                     <td
@@ -240,7 +243,9 @@ export function VirtualizedDataTable<T>({
                       onKeyDown={(event) => handleRowKeyDown(event, row)}
                       aria-selected={onRowClick ? isSelected : undefined}
                       role={onRowClick ? "button" : undefined}
-                      aria-label={onRowClick ? t("dataTable.viewRowDetails") : undefined}
+                      aria-label={
+                        onRowClick ? t("dataTable.viewRowDetails") : undefined
+                      }
                     >
                       {columns.map((column, columnIndex) => {
                         const content = column.cell
@@ -271,44 +276,24 @@ export function VirtualizedDataTable<T>({
                   <tr aria-hidden="true">
                     <td
                       colSpan={columns.length}
-                      style={{ height: paddingBottom, padding: 0, border: "none" }}
+                      style={{
+                        height: paddingBottom,
+                        padding: 0,
+                        border: "none",
+                      }}
                     />
                   </tr>
                 )}
-              </tbody>
-            </table>
-          )}
-        </div>
+              </>
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {pagination && pagination.totalPages > 1 && (
-        <div className="data-table-pagination">
-          <div className="data-table-pagination-summary">
-            {t("dataTable.pageLabel")} {pagination.page}{" "}
-            {t("dataTable.pageOf")} {pagination.totalPages}
-          </div>
-          <div className="data-table-pagination-actions">
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => onPageChange?.(pagination.page - 1)}
-              disabled={pagination.page <= 1}
-            >
-              {t("dataTable.previous")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => onPageChange?.(pagination.page + 1)}
-              disabled={pagination.page >= pagination.totalPages}
-            >
-              {t("dataTable.next")}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Single pagination control — the custom prev/next block that was
+          previously duplicated here has been removed. */}
       {pagination && (
-        <div className="data-table-pagination" style={{ padding: 0 }}>
+        <div className="data-table-pagination">
           <Pagination
             page={pagination.page}
             pageSize={pagination.pageSize}

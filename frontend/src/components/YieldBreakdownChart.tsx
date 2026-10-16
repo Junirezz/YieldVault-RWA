@@ -16,12 +16,21 @@ import { TrendingUp } from "./icons";
 import ChartWidgetPlaceholder from "./ui/ChartWidgetPlaceholder";
 import SkeletonChart from "./ui/SkeletonChart";
 import { ChartModeToggle } from "./ChartModeToggle";
+import ChartDataTable from "./ChartDataTable";
+import ChartKeyboardPoints from "./ChartKeyboardPoints";
 import { usePreferencesContext } from "../context/PreferencesContext";
 import { formatCurrency, formatDate } from "../lib/formatters";
 import { formatChartCurrency, createChartCurrencyTickFormatter } from "../lib/chartFormatters";
 import { sampleChartSeries } from "../lib/chartSeries";
 
 const MAX_RENDER_POINTS = 120;
+
+// ─── Chart layout constants (mirror Recharts margin in this component) ───────
+const CHART_MARGIN = { top: 8, right: 8, left: -20, bottom: 0 };
+/** Approximate YAxis width in pixels (left margin + axis itself). */
+const YAXIS_WIDTH = 60;
+/** Chart container height in pixels. */
+const CHART_HEIGHT = 220;
 
 interface YieldDataPoint {
   date: string;
@@ -52,7 +61,6 @@ function generateYieldData(totalGain: number, days: number): YieldDataPoint[] {
   for (let i = days - 1; i >= 0; i--) {
     const date = new Date(now - i * MS_PER_DAY);
     const dateStr = date.toISOString().slice(0, 10);
-    // Add slight variance so the chart looks natural
     const variance = (Math.sin(i * 1.3) * 0.15 + 1) * dailyBase;
     points.push({ date: dateStr, yield: Math.max(variance, 0) });
   }
@@ -82,21 +90,46 @@ function YieldTooltip({ active, payload, label, locale, currency }: TooltipProps
     >
       <div style={{ color: "var(--text-secondary)", marginBottom: "4px" }}>
         {label
-          ? formatDate(label, {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            }, locale)
+          ? formatDate(
+              label,
+              { month: "short", day: "numeric", year: "numeric" },
+              locale,
+            )
           : ""}
       </div>
       <div style={{ color: "var(--accent-cyan)", fontWeight: 700 }}>
-        Daily yield: {formatChartCurrency(value, currency, locale, { maxDecimals: 2 })}
+        Daily yield:{" "}
+        {formatChartCurrency(value, currency, locale, { maxDecimals: 2 })}
       </div>
     </div>
   );
 }
 
-const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain, isLoading }) => {
+/**
+ * Compute pixel x/y coordinates for each data point using a simple linear
+ * scale that mirrors Recharts' own layout (no external dependency needed).
+ */
+function computePointCoords(
+  data: YieldDataPoint[],
+  areaWidth: number,
+  areaHeight: number,
+): Array<{ x: number; y: number }> {
+  if (data.length === 0) return [];
+  const yValues = data.map((d) => d.yield);
+  const yMin = Math.min(...yValues);
+  const yMax = Math.max(...yValues);
+  const yRange = yMax - yMin || 1;
+
+  return data.map((_, i) => ({
+    x: data.length === 1 ? areaWidth / 2 : (i / (data.length - 1)) * areaWidth,
+    y: areaHeight - ((data[i].yield - yMin) / yRange) * areaHeight,
+  }));
+}
+
+const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({
+  totalGain,
+  isLoading,
+}) => {
   const { preferences, chartModes, setChartMode } = usePreferencesContext();
   const [period, setPeriod] = useState<YieldPeriod>("30D");
   const chartMode = chartModes.yieldBreakdown;
@@ -124,6 +157,44 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain, is
   );
 
   const isEmpty = totalGain === 0;
+
+  // ─── a11y: data table rows ─────────────────────────────────────────────
+  const tableRows = useMemo(
+    () =>
+      data.map((d) => [
+        formatDate(d.date, { month: "short", day: "numeric", year: "numeric" }, locale),
+        formatChartCurrency(d.yield, currency, locale, { maxDecimals: 4 }),
+      ] as const),
+    [data, locale, currency],
+  );
+
+  const summaryLabel = useMemo(
+    () =>
+      `${data.length} data points · ${formatCurrency(periodTotal, currency, 2, locale)} total`,
+    [data.length, periodTotal, currency, locale],
+  );
+
+  // ─── a11y: keyboard-navigable SVG points ──────────────────────────────
+  /** Data area dimensions (chart height minus margins, width estimated). */
+  const chartAreaWidth = 560; // estimated; exact value requires ResizeObserver
+  const chartAreaHeight = CHART_HEIGHT - CHART_MARGIN.top - CHART_MARGIN.bottom;
+
+  const keyboardPoints = useMemo(() => {
+    const coords = computePointCoords(data, chartAreaWidth, chartAreaHeight);
+    return data.map((d, i) => ({
+      index: i,
+      x: coords[i].x,
+      y: coords[i].y,
+      label: `${formatDate(d.date, { month: "short", day: "numeric", year: "numeric" }, locale)}: ${formatChartCurrency(d.yield, currency, locale, { maxDecimals: 4 })}`,
+    }));
+  }, [data, locale, currency, chartAreaHeight]);
+
+  const chartArea = {
+    left: YAXIS_WIDTH,
+    top: CHART_MARGIN.top,
+    width: chartAreaWidth,
+    height: chartAreaHeight,
+  };
 
   return (
     <section
@@ -160,149 +231,260 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({ totalGain, is
         </div>
 
         {/* Period toggle */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-end" }}>
-        <ChartModeToggle
-          value={chartMode}
-          onChange={(mode) => setChartMode("yieldBreakdown", mode)}
-          aria-label="Yield breakdown chart mode"
-        />
         <div
-          role="group"
-          aria-label="Select yield period"
-          className="flex gap-xs"
           style={{
-            background: "rgba(255,255,255,0.03)",
-            padding: "4px",
-            borderRadius: "8px",
-            border: "1px solid var(--border-glass)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            alignItems: "flex-end",
           }}
         >
-          {(["7D", "30D", "ALL"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              aria-pressed={period === p}
-              onClick={() => setPeriod(p)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "6px",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-                background: period === p ? "var(--accent-purple)" : "transparent",
-                color: period === p ? "#fff" : "var(--text-secondary)",
-                border: "none",
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+          <ChartModeToggle
+            value={chartMode}
+            onChange={(mode) => setChartMode("yieldBreakdown", mode)}
+            aria-label="Yield breakdown chart mode"
+          />
+          <div
+            role="group"
+            aria-label="Select yield period"
+            className="flex gap-xs"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              padding: "4px",
+              borderRadius: "8px",
+              border: "1px solid var(--border-glass)",
+            }}
+          >
+            {(["7D", "30D", "ALL"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={period === p}
+                onClick={() => setPeriod(p)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                  background:
+                    period === p ? "var(--accent-purple)" : "transparent",
+                  color: period === p ? "#fff" : "var(--text-secondary)",
+                  border: "none",
+                }}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Chart */}
-      <div style={{ height: "220px", position: "relative" }}>
+      <div style={{ height: `${CHART_HEIGHT}px`, position: "relative" }}>
         {isLoading ? (
-          <SkeletonChart height={220} />
+          <SkeletonChart height={CHART_HEIGHT} />
         ) : isEmpty ? (
           <ChartWidgetPlaceholder
             variant="empty"
             title="No yield data yet"
             description="Deposit to start earning and track daily yield here."
             icon={<TrendingUp />}
-            height={220}
+            height={CHART_HEIGHT}
             onRetry={() => {
               window.dispatchEvent(new Event("TRIGGER_DEPOSIT"));
             }}
             retryLabel="Deposit Now"
           />
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {chartMode === "bar" ? (
-              <BarChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} aria-label="Daily yield earnings bar chart">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={(str: string) => formatDate(str, { month: "short", day: "numeric" }, locale)} minTickGap={28} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={createChartCurrencyTickFormatter(currency, locale, true)} />
-                <Tooltip content={(props: { active?: boolean; payload?: ReadonlyArray<{ value?: number }>; label?: string }) => <YieldTooltip {...props} locale={locale} currency={currency} />} />
-                <Bar
-                  dataKey="yield"
-                  fill="var(--accent-purple)"
-                  radius={[4, 4, 0, 0]}
-                  isAnimationActive={!isCompactSeries}
-                  animationDuration={isCompactSeries ? 0 : 600}
-                />
-              </BarChart>
-            ) : chartMode === "area" ? (
-              <AreaChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} aria-label="Daily yield earnings area chart">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={(str: string) => formatDate(str, { month: "short", day: "numeric" }, locale)} minTickGap={28} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} tickFormatter={createChartCurrencyTickFormatter(currency, locale, true)} />
-                <Tooltip content={(props: { active?: boolean; payload?: ReadonlyArray<{ value?: number }>; label?: string }) => <YieldTooltip {...props} locale={locale} currency={currency} />} />
-                <Area
-                  type="monotone"
-                  dataKey="yield"
-                  stroke="var(--accent-purple)"
-                  strokeWidth={2}
-                  fill="var(--accent-purple)"
-                  fillOpacity={0.2}
-                  isAnimationActive={!isCompactSeries}
-                  animationDuration={isCompactSeries ? 0 : 600}
-                />
-              </AreaChart>
-            ) : (
-            <LineChart
-              data={data}
-              margin={{ top: 8, right: 8, left: -20, bottom: 0 }}
-              aria-label="Daily yield earnings line chart"
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="rgba(255,255,255,0.05)"
-                vertical={false}
-              />
-              <XAxis
-                dataKey="date"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
-                tickFormatter={(str: string) =>
-                  formatDate(str, {
-                    month: "short",
-                    day: "numeric",
-                  }, locale)
-                }
-                minTickGap={28}
-              />
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
-                tickFormatter={createChartCurrencyTickFormatter(currency, locale, true)}
-              />
-              <Tooltip
-                content={(props: {
-                  active?: boolean;
-                  payload?: ReadonlyArray<{ value?: number }>;
-                  label?: string;
-                }) => <YieldTooltip {...props} locale={locale} currency={currency} />}
-              />
-              <Line
-                type="monotone"
-                dataKey="yield"
-                stroke="var(--accent-purple)"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--accent-purple)" }}
-                isAnimationActive={!isCompactSeries}
-                animationDuration={isCompactSeries ? 0 : 600}
-              />
-            </LineChart>
-            )}
-          </ResponsiveContainer>
+          <>
+            <ResponsiveContainer width="100%" height="100%">
+              {chartMode === "bar" ? (
+                <BarChart
+                  data={data}
+                  margin={CHART_MARGIN}
+                  aria-label="Daily yield earnings bar chart"
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={(str: string) =>
+                      formatDate(str, { month: "short", day: "numeric" }, locale)
+                    }
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={createChartCurrencyTickFormatter(
+                      currency,
+                      locale,
+                      true,
+                    )}
+                  />
+                  <Tooltip
+                    content={(props: {
+                      active?: boolean;
+                      payload?: ReadonlyArray<{ value?: number }>;
+                      label?: string;
+                    }) => (
+                      <YieldTooltip
+                        {...props}
+                        locale={locale}
+                        currency={currency}
+                      />
+                    )}
+                  />
+                  <Bar
+                    dataKey="yield"
+                    fill="var(--accent-purple)"
+                    radius={[4, 4, 0, 0]}
+                    isAnimationActive={!isCompactSeries}
+                    animationDuration={isCompactSeries ? 0 : 600}
+                  />
+                </BarChart>
+              ) : chartMode === "area" ? (
+                <AreaChart
+                  data={data}
+                  margin={CHART_MARGIN}
+                  aria-label="Daily yield earnings area chart"
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={(str: string) =>
+                      formatDate(str, { month: "short", day: "numeric" }, locale)
+                    }
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={createChartCurrencyTickFormatter(
+                      currency,
+                      locale,
+                      true,
+                    )}
+                  />
+                  <Tooltip
+                    content={(props: {
+                      active?: boolean;
+                      payload?: ReadonlyArray<{ value?: number }>;
+                      label?: string;
+                    }) => (
+                      <YieldTooltip
+                        {...props}
+                        locale={locale}
+                        currency={currency}
+                      />
+                    )}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="yield"
+                    stroke="var(--accent-purple)"
+                    strokeWidth={2}
+                    fill="var(--accent-purple)"
+                    fillOpacity={0.2}
+                    isAnimationActive={!isCompactSeries}
+                    animationDuration={isCompactSeries ? 0 : 600}
+                  />
+                </AreaChart>
+              ) : (
+                <LineChart
+                  data={data}
+                  margin={CHART_MARGIN}
+                  aria-label="Daily yield earnings line chart"
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={(str: string) =>
+                      formatDate(str, { month: "short", day: "numeric" }, locale)
+                    }
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
+                    tickFormatter={createChartCurrencyTickFormatter(
+                      currency,
+                      locale,
+                      true,
+                    )}
+                  />
+                  <Tooltip
+                    content={(props: {
+                      active?: boolean;
+                      payload?: ReadonlyArray<{ value?: number }>;
+                      label?: string;
+                    }) => (
+                      <YieldTooltip
+                        {...props}
+                        locale={locale}
+                        currency={currency}
+                      />
+                    )}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="yield"
+                    stroke="var(--accent-purple)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: "var(--accent-purple)" }}
+                    isAnimationActive={!isCompactSeries}
+                    animationDuration={isCompactSeries ? 0 : 600}
+                  />
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+
+            {/* Keyboard-navigable point overlay */}
+            <ChartKeyboardPoints
+              points={keyboardPoints}
+              chartArea={chartArea}
+              aria-label="Yield data points — use arrow keys to navigate"
+              data-testid="yield-keyboard-points"
+            />
+          </>
         )}
       </div>
+
+      {/* Non-visual data table alternative */}
+      {!isEmpty && !isLoading && (
+        <ChartDataTable
+          caption="Daily yield earnings data"
+          columns={["Date", `Yield (${currency})`]}
+          rows={tableRows}
+          summaryLabel={summaryLabel}
+        />
+      )}
     </section>
   );
 };
