@@ -3,6 +3,8 @@
 //! The vault must never round in the user's favour: rounding always leaves the
 //! residual dust with the vault, so `deposit -> withdraw` round trips can never
 //! mint value out of nothing.
+
+use crate::MathError;
 //!
 //! | Operation  | Direction | Rounding |
 //! |------------|-----------|----------|
@@ -66,24 +68,23 @@ impl Op {
 
 /// `a * b / denom` with an explicit rounding direction.
 ///
-/// Returns `None` on i128 overflow or a zero denominator so callers can map the
-/// failure onto a contract error instead of panicking.
-pub fn mul_div(a: i128, b: i128, denom: i128, rounding: Rounding) -> Option<i128> {
+/// Returns an error on i128 overflow or a zero denominator.
+pub fn mul_div(a: i128, b: i128, denom: i128, rounding: Rounding) -> Result<i128, MathError> {
     if denom == 0 {
-        return None;
+        return Err(MathError::DivisionByZero);
     }
 
-    let product = a.checked_mul(b)?;
-    let quotient = product.checked_div(denom)?;
+    let product = a.checked_mul(b).ok_or(MathError::Overflow)?;
+    let quotient = product.checked_div(denom).ok_or(MathError::Overflow)?;
 
     match rounding {
-        Rounding::Down => Some(quotient),
+        Rounding::Down => Ok(quotient),
         Rounding::Up => {
-            let remainder = product.checked_rem(denom)?;
+            let remainder = product.checked_rem(denom).ok_or(MathError::Overflow)?;
             if remainder == 0 {
-                Some(quotient)
+                Ok(quotient)
             } else {
-                quotient.checked_add(1)
+                quotient.checked_add(1).ok_or(MathError::Overflow)
             }
         }
     }
@@ -97,9 +98,9 @@ pub fn assets_to_shares_rounded(
     total_shares: i128,
     total_assets: i128,
     op: Op,
-) -> Option<i128> {
+) -> Result<i128, MathError> {
     if total_assets == 0 || total_shares == 0 {
-        return Some(assets);
+        return Ok(assets);
     }
     mul_div(assets, total_shares, total_assets, op.rounding())
 }
@@ -112,9 +113,9 @@ pub fn shares_to_assets_rounded(
     total_shares: i128,
     total_assets: i128,
     op: Op,
-) -> Option<i128> {
+) -> Result<i128, MathError> {
     if total_shares == 0 {
-        return Some(0);
+        return Ok(0);
     }
     mul_div(shares, total_assets, total_shares, op.rounding())
 }
@@ -218,7 +219,7 @@ pub const FIXTURES: &[RoundingFixture] = &[
 ];
 
 /// Evaluates a fixture with the production conversion helpers.
-pub fn evaluate(fixture: &RoundingFixture) -> Option<i128> {
+pub fn evaluate(fixture: &RoundingFixture) -> Result<i128, MathError> {
     match fixture.op {
         Op::Deposit | Op::Withdraw => assets_to_shares_rounded(
             fixture.amount,
@@ -244,7 +245,7 @@ mod tests {
         for fixture in FIXTURES {
             assert_eq!(
                 evaluate(fixture),
-                Some(fixture.expected),
+                Ok(fixture.expected),
                 "fixture `{}` diverged from the rounding policy",
                 fixture.id
             );
@@ -253,19 +254,28 @@ mod tests {
 
     #[test]
     fn mul_div_rejects_zero_denominator() {
-        assert_eq!(mul_div(10, 10, 0, Rounding::Down), None);
-        assert_eq!(mul_div(10, 10, 0, Rounding::Up), None);
+        assert_eq!(
+            mul_div(10, 10, 0, Rounding::Down),
+            Err(MathError::DivisionByZero)
+        );
+        assert_eq!(
+            mul_div(10, 10, 0, Rounding::Up),
+            Err(MathError::DivisionByZero)
+        );
     }
 
     #[test]
     fn mul_div_rejects_overflow() {
-        assert_eq!(mul_div(i128::MAX, 2, 3, Rounding::Down), None);
+        assert_eq!(
+            mul_div(i128::MAX, 2, 3, Rounding::Down),
+            Err(MathError::Overflow)
+        );
     }
 
     #[test]
     fn rounding_up_only_bumps_on_remainder() {
-        assert_eq!(mul_div(10, 3, 5, Rounding::Up), Some(6));
-        assert_eq!(mul_div(10, 3, 4, Rounding::Up), Some(8));
+        assert_eq!(mul_div(10, 3, 5, Rounding::Up), Ok(6));
+        assert_eq!(mul_div(10, 3, 4, Rounding::Up), Ok(8));
     }
 
     #[test]

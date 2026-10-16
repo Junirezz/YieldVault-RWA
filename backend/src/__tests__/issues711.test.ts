@@ -12,6 +12,15 @@ import {
   validateResponseAgainstSchema,
   zodToJsonShape,
   HealthResponseSchema,
+  BulkExportJobSchema,
+  BulkExportCreateResponseSchema,
+  BulkExportJobsListResponseSchema,
+  BulkExportJobDetailResponseSchema,
+  AdminExportJobSchema,
+  AdminExportJobsListResponseSchema,
+  ExportManifestSchema,
+  AdminReportExportResponseSchema,
+  AdminReportManifestsListResponseSchema,
   JsonSchemaShape,
 } from '../apiContractSnapshots';
 import * as fs from 'fs';
@@ -189,4 +198,281 @@ describe('#711 API contract schema snapshots', () => {
     expect(ready?.properties?.dependencies?.properties?.indexer).toEqual({ type: 'boolean' });
     expect(ready?.properties?.dependencies?.required).toContain('indexer');
   });
+
+  // -------------------------------------------------------------------------
+  // Issue #1561 — bulk / admin export endpoint snapshots
+  // -------------------------------------------------------------------------
+
+  describe('#1561 bulk/admin export endpoint snapshots', () => {
+    const EXPORT_ENDPOINTS = [
+      'POST /admin/exports/bulk',
+      'GET /admin/exports/bulk/jobs',
+      'GET /admin/exports/bulk/jobs/:id',
+      'GET /admin/exports/jobs',
+      'POST /admin/reports/exports',
+      'GET /admin/reports/exports/manifests',
+    ] as const;
+
+    it('defines committed snapshot files for all new export endpoints', () => {
+      for (const endpoint of EXPORT_ENDPOINTS) {
+        const snapshot = loadSnapshot(endpoint as any);
+        expect(snapshot).not.toBeNull();
+        expect(snapshot?.type).toBe('object');
+        // Every committed snapshot should be an object with properties
+        expect(snapshot?.properties).toBeDefined();
+      }
+    });
+
+    it('committed export snapshots match generator output byte-for-byte', () => {
+      for (const endpoint of EXPORT_ENDPOINTS) {
+        const committed = fs.readFileSync(snapshotPathFor(endpoint as any), 'utf8');
+        expect(committed).toBe(
+          JSON.stringify(generateSnapshotFor(endpoint as any), null, 2) + '\n'
+        );
+      }
+    });
+
+    it('CRITICAL_ENDPOINTS now includes all 6 new export routes', () => {
+      for (const endpoint of EXPORT_ENDPOINTS) {
+        expect((CRITICAL_ENDPOINTS as readonly string[]).includes(endpoint)).toBe(true);
+      }
+      expect(CRITICAL_ENDPOINTS.length).toBeGreaterThanOrEqual(11);
+    });
+
+    it('checkSnapshotCompatibility passes for all export endpoints', () => {
+      const issues = checkSnapshotCompatibility();
+      const exportIssues = issues.filter((i) =>
+        EXPORT_ENDPOINTS.some((ep) => i.path.startsWith(ep))
+      );
+      expect(exportIssues).toEqual([]);
+    });
+
+    // BulkExportJobSchema
+    it('BulkExportJobSchema validates a conforming bulk export job', () => {
+      const job = {
+        id: 'bulk_123_abc',
+        status: 'completed' as const,
+        format: 'csv' as const,
+        generatedBy: 'admin',
+        filters: { limit: 100 },
+        totalRows: 500,
+        processedRows: 500,
+        errorRows: 0,
+        artifactId: 'art-1',
+        errorMessage: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      expect(BulkExportJobSchema.safeParse(job).success).toBe(true);
+    });
+
+    it('BulkExportJobSchema rejects missing required fields', () => {
+      expect(BulkExportJobSchema.safeParse({ id: 'x', status: 'pending' }).success).toBe(false);
+    });
+
+    it('BulkExportJobSchema rejects invalid status values', () => {
+      const job = {
+        id: 'bulk_123',
+        status: 'unknown_status',
+        format: 'csv',
+        generatedBy: 'admin',
+        filters: {},
+        totalRows: 0,
+        processedRows: 0,
+        errorRows: 0,
+        artifactId: null,
+        errorMessage: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: null,
+      };
+      expect(BulkExportJobSchema.safeParse(job).success).toBe(false);
+    });
+
+    // POST /admin/exports/bulk — create response
+    it('validates a conforming POST /admin/exports/bulk response', () => {
+      const job = {
+        id: 'bulk_1',
+        status: 'pending' as const,
+        format: 'json' as const,
+        generatedBy: 'admin',
+        filters: {},
+        totalRows: 0,
+        processedRows: 0,
+        errorRows: 0,
+        artifactId: null,
+        errorMessage: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: null,
+      };
+      const result = validateResponseAgainstSchema('POST /admin/exports/bulk' as any, {
+        message: 'Bulk export job created',
+        job,
+        timestamp: new Date().toISOString(),
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects POST /admin/exports/bulk response missing job field', () => {
+      const result = validateResponseAgainstSchema('POST /admin/exports/bulk' as any, {
+        message: 'Bulk export job created',
+        timestamp: new Date().toISOString(),
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // GET /admin/exports/bulk/jobs/:id — detail response
+    it('validates a conforming GET /admin/exports/bulk/jobs/:id response', () => {
+      const job = {
+        id: 'bulk_2',
+        status: 'completed' as const,
+        format: 'csv' as const,
+        generatedBy: 'admin',
+        filters: { limit: 50 },
+        totalRows: 200,
+        processedRows: 200,
+        errorRows: 0,
+        artifactId: 'art-2',
+        errorMessage: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      const result = validateResponseAgainstSchema('GET /admin/exports/bulk/jobs/:id' as any, {
+        job,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects GET /admin/exports/bulk/jobs/:id response with bad format', () => {
+      const result = validateResponseAgainstSchema('GET /admin/exports/bulk/jobs/:id' as any, {
+        job: { id: 'x', format: 'xml', status: 'pending' },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // ExportManifestSchema
+    it('ExportManifestSchema validates a conforming manifest', () => {
+      const manifest = {
+        id: 'exp-1',
+        requester: 'admin',
+        reportType: 'transactions',
+        filters: { from: '2026-01-01' },
+        checksum: 'abc123def456',
+        generatedAt: new Date().toISOString(),
+        fileName: 'transactions-2026.json',
+        rowCount: 42,
+      };
+      expect(ExportManifestSchema.safeParse(manifest).success).toBe(true);
+    });
+
+    it('ExportManifestSchema accepts optional bulkExportJobId and artifactId', () => {
+      const manifest = {
+        id: 'exp-2',
+        requester: 'admin',
+        reportType: 'transactions',
+        filters: {},
+        checksum: 'xyz',
+        generatedAt: new Date().toISOString(),
+        fileName: 'report.json',
+        rowCount: 5,
+        bulkExportJobId: 'bulk_99',
+        artifactId: 'art-99',
+      };
+      expect(ExportManifestSchema.safeParse(manifest).success).toBe(true);
+    });
+
+    // POST /admin/reports/exports — manifest create response
+    it('validates a conforming POST /admin/reports/exports response', () => {
+      const manifest = {
+        id: 'exp-3',
+        requester: 'admin',
+        reportType: 'transactions',
+        filters: {},
+        checksum: 'abc',
+        generatedAt: new Date().toISOString(),
+        fileName: 'report.json',
+        rowCount: 1,
+      };
+      const result = validateResponseAgainstSchema('POST /admin/reports/exports' as any, {
+        message: 'Export generated and manifest recorded',
+        manifest,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects POST /admin/reports/exports response missing manifest field', () => {
+      const result = validateResponseAgainstSchema('POST /admin/reports/exports' as any, {
+        message: 'Export generated and manifest recorded',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // GET /admin/reports/exports/manifests — paginated list
+    it('validates a conforming GET /admin/reports/exports/manifests response', () => {
+      const manifest = {
+        id: 'exp-4',
+        requester: 'admin',
+        reportType: 'transactions',
+        filters: {},
+        checksum: 'abc',
+        generatedAt: new Date().toISOString(),
+        fileName: 'report.json',
+        rowCount: 10,
+      };
+      const result = validateResponseAgainstSchema(
+        'GET /admin/reports/exports/manifests' as any,
+        {
+          data: [manifest],
+          total: 1,
+          limit: 50,
+          offset: 0,
+          timestamp: new Date().toISOString(),
+        }
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects GET /admin/reports/exports/manifests response missing total field', () => {
+      const result = validateResponseAgainstSchema(
+        'GET /admin/reports/exports/manifests' as any,
+        {
+          data: [],
+          limit: 50,
+          offset: 0,
+          timestamp: new Date().toISOString(),
+        }
+      );
+      expect(result.success).toBe(false);
+    });
+
+    // Drift detection for export schemas
+    it('detects field removal in BulkExportJobSchema as a breaking change', () => {
+      const baseline = zodToJsonShape(BulkExportJobSchema);
+      const current = JSON.parse(JSON.stringify(baseline)) as JsonSchemaShape;
+      delete current.properties?.status;
+      current.required = (current.required ?? []).filter((k: string) => k !== 'status');
+      const issues = diffSchemaShapes(baseline, current, 'bulk-export-job');
+      expect(issues.some((i) => i.message === 'field removed')).toBe(true);
+    });
+
+    it('detects type change in ExportManifestSchema as a breaking change', () => {
+      const baseline = zodToJsonShape(ExportManifestSchema);
+      const current = JSON.parse(JSON.stringify(baseline)) as JsonSchemaShape;
+      if (current.properties) current.properties.rowCount = { type: 'string' };
+      const issues = diffSchemaShapes(baseline, current, 'export-manifest');
+      expect(issues.some((i) => i.message.includes('type changed'))).toBe(true);
+    });
+
+    it('generates stable snapshot shapes for export endpoints', () => {
+      for (const endpoint of EXPORT_ENDPOINTS) {
+        const first = generateSnapshotFor(endpoint as any);
+        const second = generateSnapshotFor(endpoint as any);
+        expect(first).toEqual(second);
+      }
+    });
+  });
 });
+

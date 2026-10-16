@@ -262,16 +262,6 @@ export async function interceptApiRoutes(page: Page) {
       'yieldvault-preferences:guest',
       JSON.stringify({ maskSensitiveValues: false }),
     );
-    // Match Cypress: skip service-worker registration so Playwright route mocks
-    // are not bypassed by cross-origin fetches issued from the SW context.
-    (window as Window & { Cypress?: boolean }).Cypress = true;
-    if ('serviceWorker' in navigator) {
-      void navigator.serviceWorker.getRegistrations().then((registrations) => {
-        registrations.forEach((registration) => {
-          void registration.unregister();
-        });
-      });
-    }
     // Privacy masking is on by default; disable it so address/balance assertions stay stable.
     try {
       localStorage.setItem(
@@ -298,14 +288,6 @@ export async function interceptApiRoutes(page: Page) {
       // ignore quota / private mode
     }
   });
-
-  await page.route('**/sw.js', (route) =>
-    route.fulfill({
-      status: 404,
-      contentType: 'text/plain',
-      body: 'disabled in e2e',
-    }),
-  );
 
   await page.route('**/mock-api/vault-summary.json', (route) =>
     route.fulfill({

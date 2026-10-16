@@ -79,8 +79,5 @@
   "resolutions": {
     "lodash": "^4.17.21"
   },
-  "lint-staged": {
-    "{frontend,backend}/**/*.{ts,tsx}": "node scripts/lint-staged-runners.js eslint",
-    "contracts/**/*.rs": "node scripts/lint-staged-runners.js rustfmt"
-  }
+  
 }

@@ -3,6 +3,9 @@
  *
  * Committed JSON snapshots describe the shape of critical public endpoint responses.
  * CI fails when a required field is removed or its type changes.
+ *
+ * Issue #1561: bulk/admin export endpoint shapes are now included so that
+ * bulkExportJobs.ts and admin export routes cannot drift undetected.
  */
 
 import { z } from 'zod';
@@ -18,6 +21,13 @@ export const CRITICAL_ENDPOINTS = [
   'GET /api/v1/vault/summary',
   'GET /api/v1/transactions',
   'GET /api/v1/vaults',
+  // Issue #1561 — bulk / admin export routes
+  'POST /admin/exports/bulk',
+  'GET /admin/exports/bulk/jobs',
+  'GET /admin/exports/bulk/jobs/:id',
+  'GET /admin/exports/jobs',
+  'POST /admin/reports/exports',
+  'GET /admin/reports/exports/manifests',
 ] as const;
 
 export type CriticalEndpoint = (typeof CRITICAL_ENDPOINTS)[number];
@@ -139,12 +149,171 @@ export const VaultListResponseSchema = z
   })
   .strict();
 
+// ---------------------------------------------------------------------------
+// Bulk / admin export schemas (Issue #1561)
+// ---------------------------------------------------------------------------
+
+/** Shape of BulkExportJobRecord as returned by the API. */
+export const BulkExportJobSchema = z
+  .object({
+    id: z.string(),
+    status: z.enum(['pending', 'processing', 'completed', 'failed', 'cancelled']),
+    format: z.enum(['csv', 'json']),
+    generatedBy: z.string(),
+    filters: z.record(z.unknown()),
+    totalRows: z.number(),
+    processedRows: z.number(),
+    errorRows: z.number(),
+    artifactId: z.string().nullable(),
+    errorMessage: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    completedAt: z.string().nullable(),
+  })
+  .strict();
+
+/**
+ * POST /admin/exports/bulk
+ * 201 response: job created, async processing started.
+ */
+export const BulkExportCreateResponseSchema = z
+  .object({
+    message: z.string(),
+    job: BulkExportJobSchema,
+    timestamp: z.string(),
+  })
+  .strict();
+
+/**
+ * GET /admin/exports/bulk/jobs
+ * Paginated list of bulk export jobs.
+ */
+export const BulkExportJobsListResponseSchema = z
+  .object({
+    data: z.array(BulkExportJobSchema),
+    pagination: PaginationMetaSchema,
+    timestamp: z.string(),
+    jobs: z.array(BulkExportJobSchema),
+    meta: z
+      .object({
+        count: z.number(),
+        limit: z.number(),
+        timestamp: z.string(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
+ * GET /admin/exports/bulk/jobs/:id
+ * Single bulk export job detail.
+ */
+export const BulkExportJobDetailResponseSchema = z
+  .object({
+    job: BulkExportJobSchema,
+  })
+  .strict();
+
+/** Shape of a transaction export job record (legacy admin exports). */
+export const AdminExportJobSchema = z
+  .object({
+    id: z.string(),
+    format: z.enum(['csv', 'json']),
+    generatedBy: z.string(),
+    walletAddress: z.string().nullable().optional(),
+    rowCount: z.number(),
+    fileName: z.string(),
+    checksum: z.string(),
+    checksumAlgorithm: z.string(),
+    status: z.string().optional(),
+    createdAt: z.string(),
+  })
+  .strict();
+
+/**
+ * GET /admin/exports/jobs
+ * Paginated list of legacy transaction export job records.
+ */
+export const AdminExportJobsListResponseSchema = z
+  .object({
+    data: z.array(AdminExportJobSchema),
+    pagination: PaginationMetaSchema,
+    timestamp: z.string(),
+    jobs: z.array(AdminExportJobSchema),
+    meta: z
+      .object({
+        count: z.number(),
+        limit: z.number(),
+        filters: z
+          .object({
+            format: z.enum(['csv', 'json']).nullable(),
+            generatedBy: z.string().nullable(),
+            walletAddress: z.string().nullable(),
+            checksum: z.string().nullable(),
+            from: z.string().nullable(),
+            to: z.string().nullable(),
+          })
+          .strict(),
+        timestamp: z.string(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/** Shape of an ExportManifestRecord as returned by the API. */
+export const ExportManifestSchema = z
+  .object({
+    id: z.string(),
+    requester: z.string(),
+    reportType: z.string(),
+    filters: z.record(z.unknown()),
+    checksum: z.string(),
+    generatedAt: z.string(),
+    fileName: z.string(),
+    rowCount: z.number(),
+    bulkExportJobId: z.string().optional(),
+    artifactId: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * POST /admin/reports/exports
+ * 201 response: manifest created.
+ */
+export const AdminReportExportResponseSchema = z
+  .object({
+    message: z.string(),
+    manifest: ExportManifestSchema,
+  })
+  .strict();
+
+/**
+ * GET /admin/reports/exports/manifests
+ * Paginated list of immutable export manifests.
+ */
+export const AdminReportManifestsListResponseSchema = z
+  .object({
+    data: z.array(ExportManifestSchema),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+    timestamp: z.string(),
+  })
+  .strict();
+
 export const ENDPOINT_SCHEMAS: Record<CriticalEndpoint, z.ZodTypeAny> = {
   'GET /health': HealthResponseSchema,
   'GET /ready': ReadyResponseSchema,
   'GET /api/v1/vault/summary': VaultSummaryResponseSchema,
   'GET /api/v1/transactions': TransactionsListResponseSchema,
   'GET /api/v1/vaults': VaultListResponseSchema,
+  // Issue #1561 — bulk / admin export routes
+  'POST /admin/exports/bulk': BulkExportCreateResponseSchema,
+  'GET /admin/exports/bulk/jobs': BulkExportJobsListResponseSchema,
+  'GET /admin/exports/bulk/jobs/:id': BulkExportJobDetailResponseSchema,
+  'GET /admin/exports/jobs': AdminExportJobsListResponseSchema,
+  'POST /admin/reports/exports': AdminReportExportResponseSchema,
+  'GET /admin/reports/exports/manifests': AdminReportManifestsListResponseSchema,
 };
 
 export function endpointToFilename(endpoint: CriticalEndpoint): string {

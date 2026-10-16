@@ -19,6 +19,63 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       sourcemap: true,
+      // Warn when any individual chunk exceeds 500 kB (uncompressed).
+      // The CI size-gate uses gzip budgets defined in package.json bundlesize.
+      chunkSizeWarningLimit: 500,
+      rollupOptions: {
+        output: {
+          /**
+           * Manual chunk splitting keeps heavy third-party libraries out of the
+           * main entry chunk so the critical path loads fast and each vendor
+           * chunk is cached independently.
+           *
+           * Chunk budget targets (gzip) — enforced in CI via bundlesize:
+           *   main          ≤ 150 kB
+           *   vendor-charts ≤ 200 kB   (recharts + d3 transitive deps)
+           *   vendor-motion ≤ 100 kB   (framer-motion)
+           *   vendor-stellar ≤ 300 kB  (stellar-sdk + freighter-api)
+           *   vendor-sentry  ≤ 150 kB  (@sentry/react + @sentry/core)
+           *   vendor-react   ≤ 60 kB   (react + react-dom)
+           */
+          manualChunks(id) {
+            // Recharts and its d3 transitive dependencies
+            if (
+              id.includes("node_modules/recharts") ||
+              id.includes("node_modules/d3-") ||
+              id.includes("node_modules/victory-vendor")
+            ) {
+              return "vendor-charts";
+            }
+
+            // Framer Motion
+            if (id.includes("node_modules/framer-motion")) {
+              return "vendor-motion";
+            }
+
+            // Stellar SDK and Freighter wallet API
+            if (
+              id.includes("node_modules/@stellar") ||
+              id.includes("node_modules/stellar-sdk")
+            ) {
+              return "vendor-stellar";
+            }
+
+            // Sentry (keep separate so it never blocks page paint)
+            if (id.includes("node_modules/@sentry")) {
+              return "vendor-sentry";
+            }
+
+            // React runtime — tiny chunk, cached forever
+            if (
+              id.includes("node_modules/react/") ||
+              id.includes("node_modules/react-dom/") ||
+              id.includes("node_modules/scheduler/")
+            ) {
+              return "vendor-react";
+            }
+          },
+        },
+      },
     },
     server: {
       watch: {

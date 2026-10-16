@@ -1578,7 +1578,8 @@ impl YieldVault {
                     .get(&DataKeyExt::PerformanceFeeBps)
                     .unwrap_or(0);
                 if perf_fee_bps > 0 {
-                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    let (pf, _) =
+                        fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
                     perf_fee_amount = pf;
                     if perf_fee_amount > 0 {
                         if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
@@ -2089,7 +2090,7 @@ impl YieldVault {
     pub fn calculate_shares(env: Env, assets: i128) -> Result<i128, VaultError> {
         let state = Self::get_state(&env);
         crate::math::try_assets_to_shares(assets, state.total_shares, state.total_assets)
-            .ok_or(VaultError::MathOverflow)
+            .map_err(|_| VaultError::MathOverflow)
     }
 
     /// Calculates the number of assets that would be returned for a given share amount.
@@ -2108,7 +2109,7 @@ impl YieldVault {
     pub fn calculate_assets(env: Env, shares: i128) -> Result<i128, VaultError> {
         let state = Self::get_state(&env);
         crate::math::try_shares_to_assets(shares, state.total_shares, state.total_assets)
-            .ok_or(VaultError::MathOverflow)
+            .map_err(|_| VaultError::MathOverflow)
     }
 
     /// Deposits underlying tokens in exchange for vault shares.
@@ -2156,7 +2157,7 @@ impl YieldVault {
         // Use centralized conversion with deterministic round-down policy
         let shares_to_mint =
             crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
-                .ok_or(VaultError::MathOverflow)?;
+                .map_err(|_| VaultError::MathOverflow)?;
 
         // Prevent silent loss of funds if shares round down to 0
         if shares_to_mint == 0 {
@@ -2165,7 +2166,9 @@ impl YieldVault {
 
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
-        let new_deposit = current_deposit.checked_add(amount).expect("overflow");
+        let new_deposit = current_deposit
+            .checked_add(amount)
+            .ok_or(VaultError::MathOverflow)?;
 
         let cap: i128 = env
             .storage()
@@ -2175,10 +2178,6 @@ impl YieldVault {
         if new_deposit > cap {
             return Err(VaultError::ExceedsUserCap);
         }
-
-        token_client.transfer(&user, &env.current_contract_address(), &amount);
-
-        env.storage().instance().set(&deposit_key, &new_deposit);
 
         // Update idle state
         // Dust handling: sweep any deposit truncation dust to the treasury.
@@ -2190,58 +2189,67 @@ impl YieldVault {
                 state.total_shares,
                 state.total_assets,
             )
-            .ok_or(VaultError::MathOverflow)?
+            .map_err(|_| VaultError::MathOverflow)?
         };
         let dust = amount.checked_sub(effective_assets).unwrap_or(0);
 
-        if dust > 0 {
-            let mut treasury_bal: i128 = env
-                .storage()
-                .instance()
-                .get(&DataKey::TreasuryBalance)
-                .unwrap_or(0);
-            treasury_bal = treasury_bal.checked_add(dust).expect("overflow");
-            env.storage()
-                .instance()
-                .set(&DataKey::TreasuryBalance, &treasury_bal);
-        }
-
-        // Canonical idle assets live in VaultState.
-        state.total_assets = state
-            .total_assets
-            .checked_add(effective_assets)
-            .expect("overflow");
-        state.total_shares = state
-            .total_shares
-            .checked_add(shares_to_mint)
-            .expect("overflow");
-        Self::persist_accounting_state(&env, &state)?;
-        Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
-
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
-        env.storage().instance().set(
-            &user_key,
-            &user_shares.checked_add(shares_to_mint).expect("overflow"),
-        );
+        let updated_user_shares = user_shares
+            .checked_add(shares_to_mint)
+            .ok_or(VaultError::MathOverflow)?;
+        crate::cei_pattern!(
+            "deposit",
+            checks: {
+                assert!(shares_to_mint > 0 && new_deposit <= cap);
+            },
+            effects: {
+                env.storage().instance().set(&deposit_key, &new_deposit);
 
-        // Track last deposit time for withdrawal cooldown
-        env.storage().instance().set(
-            &DataKey::LastDepositTime(user.clone()),
-            &env.ledger().timestamp(),
-        );
+                if dust > 0 {
+                    let treasury_bal: i128 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::TreasuryBalance)
+                        .unwrap_or(0);
+                    env.storage().instance().set(
+                        &DataKey::TreasuryBalance,
+                        &treasury_bal
+                            .checked_add(dust)
+                            .ok_or(VaultError::MathOverflow)?,
+                    );
+                }
 
-        env.events().publish(
-            (symbol_short!("deposit"), user.clone()),
-            (amount, shares_to_mint),
-        );
-
-        crate::audit_events::emit_deposit(
-            &env,
-            &user,
-            amount,
-            shares_to_mint,
-            env.ledger().timestamp(),
+                state.total_assets = state
+                    .total_assets
+                    .checked_add(effective_assets)
+                    .ok_or(VaultError::MathOverflow)?;
+                state.total_shares = state
+                    .total_shares
+                    .checked_add(shares_to_mint)
+                    .ok_or(VaultError::MathOverflow)?;
+                Self::persist_accounting_state(&env, &state)?;
+                Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
+                env.storage().instance().set(&user_key, &updated_user_shares);
+                env.storage().instance().set(
+                    &DataKey::LastDepositTime(user.clone()),
+                    &env.ledger().timestamp(),
+                );
+                env.events().publish(
+                    (symbol_short!("deposit"), user.clone()),
+                    (amount, shares_to_mint),
+                );
+                crate::audit_events::emit_deposit(
+                    &env,
+                    &user,
+                    amount,
+                    shares_to_mint,
+                    env.ledger().timestamp(),
+                );
+            },
+            interactions: {
+                token_client.transfer(&user, &env.current_contract_address(), &amount);
+            }
         );
 
         Ok(shares_to_mint)
@@ -2346,7 +2354,7 @@ impl YieldVault {
         // Compute shares using deterministic round-down policy
         let shares_to_mint =
             crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
-                .ok_or(VaultError::MathOverflow)?;
+                .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
             return Err(VaultError::InvalidAmount);
@@ -2355,7 +2363,9 @@ impl YieldVault {
         // Per-user deposit cap check
         let deposit_key = DataKey::UserDeposit(user.clone());
         let current_deposit: i128 = env.storage().instance().get(&deposit_key).unwrap_or(0);
-        let new_deposit = current_deposit.checked_add(amount).expect("overflow");
+        let new_deposit = current_deposit
+            .checked_add(amount)
+            .ok_or(VaultError::MathOverflow)?;
         let cap: i128 = env
             .storage()
             .instance()
@@ -2364,11 +2374,6 @@ impl YieldVault {
         if new_deposit > cap {
             return Err(VaultError::ExceedsUserCap);
         }
-
-        // User must have pre-authorized the token transfer
-        token_client.transfer(&user, &env.current_contract_address(), &amount);
-
-        env.storage().instance().set(&deposit_key, &new_deposit);
 
         // Dust handling
         let effective_assets = if state.total_shares == 0 {
@@ -2379,49 +2384,58 @@ impl YieldVault {
                 state.total_shares,
                 state.total_assets,
             )
-            .ok_or(VaultError::MathOverflow)?
+            .map_err(|_| VaultError::MathOverflow)?
         };
         let dust = amount.checked_sub(effective_assets).unwrap_or(0);
 
-        if dust > 0 {
-            let mut treasury_bal: i128 = env
-                .storage()
-                .instance()
-                .get(&DataKey::TreasuryBalance)
-                .unwrap_or(0);
-            treasury_bal = treasury_bal.checked_add(dust).expect("overflow");
-            env.storage()
-                .instance()
-                .set(&DataKey::TreasuryBalance, &treasury_bal);
-        }
-
-        state.total_assets = state
-            .total_assets
-            .checked_add(effective_assets)
-            .expect("overflow");
-        state.total_shares = state
-            .total_shares
-            .checked_add(shares_to_mint)
-            .expect("overflow");
-        Self::persist_accounting_state(&env, &state)?;
-        Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
-
         let user_key = DataKey::ShareBalance(user.clone());
         let user_shares: i128 = env.storage().instance().get(&user_key).unwrap_or(0);
-        env.storage().instance().set(
-            &user_key,
-            &user_shares.checked_add(shares_to_mint).expect("overflow"),
-        );
-
-        // Track last deposit time for withdrawal cooldown
-        env.storage().instance().set(
-            &DataKey::LastDepositTime(user.clone()),
-            &env.ledger().timestamp(),
-        );
-
-        env.events().publish(
-            (symbol_short!("glessdep"), relayer.clone()),
-            (user, amount, shares_to_mint),
+        let updated_user_shares = user_shares
+            .checked_add(shares_to_mint)
+            .ok_or(VaultError::MathOverflow)?;
+        crate::cei_pattern!(
+            "gasless_deposit",
+            checks: {
+                assert!(shares_to_mint > 0 && new_deposit <= cap);
+            },
+            effects: {
+                env.storage().instance().set(&deposit_key, &new_deposit);
+                if dust > 0 {
+                    let treasury_bal: i128 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::TreasuryBalance)
+                        .unwrap_or(0);
+                    env.storage().instance().set(
+                        &DataKey::TreasuryBalance,
+                        &treasury_bal
+                            .checked_add(dust)
+                            .ok_or(VaultError::MathOverflow)?,
+                    );
+                }
+                state.total_assets = state
+                    .total_assets
+                    .checked_add(effective_assets)
+                    .ok_or(VaultError::MathOverflow)?;
+                state.total_shares = state
+                    .total_shares
+                    .checked_add(shares_to_mint)
+                    .ok_or(VaultError::MathOverflow)?;
+                Self::persist_accounting_state(&env, &state)?;
+                Self::bump_idle_accounting(&env, effective_assets, shares_to_mint);
+                env.storage().instance().set(&user_key, &updated_user_shares);
+                env.storage().instance().set(
+                    &DataKey::LastDepositTime(user.clone()),
+                    &env.ledger().timestamp(),
+                );
+                env.events().publish(
+                    (symbol_short!("glessdep"), relayer.clone()),
+                    (user.clone(), amount, shares_to_mint),
+                );
+            },
+            interactions: {
+                token_client.transfer(&user, &env.current_contract_address(), &amount);
+            }
         );
         Ok(shares_to_mint)
     }
@@ -2633,7 +2647,7 @@ impl YieldVault {
         // Compute shares using current in-memory state (updated incrementally)
         let shares_to_mint =
             crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
-                .ok_or(VaultError::MathOverflow)?;
+                .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
             return Err(VaultError::InvalidAmount);
@@ -2742,7 +2756,7 @@ impl YieldVault {
         // Use centralized conversion with deterministic round-down policy
         let assets_to_return =
             crate::math::try_shares_to_assets(shares, state.total_shares, state.total_assets)
-                .ok_or(VaultError::MathOverflow)?;
+                .map_err(|_| VaultError::MathOverflow)?;
 
         if assets_to_return > threshold {
             // Create a pending withdrawal with a 24-hour timelock
@@ -2795,7 +2809,7 @@ impl YieldVault {
             state.total_shares,
             state.total_assets,
         )
-        .ok_or(VaultError::MathOverflow)?;
+        .map_err(|_| VaultError::MathOverflow)?;
 
         Self::do_withdraw(&env, &mut state, user, pending.shares, assets_to_return)
     }
@@ -3100,21 +3114,28 @@ impl YieldVault {
             &Self::load_protocol_limits(&env),
         )?;
 
-        // Approve and deposit to strategy
         let token_client = token::Client::new(&env, &token_addr);
-        token_client.approve(
-            &env.current_contract_address(),
-            &strategy_addr,
-            &amount,
-            &env.ledger().sequence(),
+        crate::cei_pattern!(
+            "invest",
+            checks: {
+                assert!(amount > 0 && state.total_assets >= amount);
+                assert!(new_total_invested <= cap);
+            },
+            effects: {
+                Self::raise_strategy_watermark(&env, &strategy_addr, new_total_invested);
+                state.total_assets = remaining_idle;
+                env.storage().instance().set(&DataKey::State, &state);
+            },
+            interactions: {
+                token_client.approve(
+                    &env.current_contract_address(),
+                    &strategy_addr,
+                    &amount,
+                    &env.ledger().sequence(),
+                );
+                strategy_client.deposit(&amount);
+            }
         );
-
-        strategy_client.deposit(&amount);
-        Self::raise_strategy_watermark(&env, &strategy_addr, new_total_invested);
-
-        // Update idle assets
-        state.total_assets = remaining_idle;
-        env.storage().instance().set(&DataKey::State, &state);
         Ok(())
     }
 
@@ -3285,22 +3306,7 @@ impl YieldVault {
         }
 
         let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
-        let fee_amount = amount
-            .checked_mul(fee_bps)
-            .ok_or(VaultError::MathOverflow)?
-            / fee_math::BPS_DENOMINATOR;
-        let net_yield = amount
-            .checked_sub(fee_amount)
-            .ok_or(VaultError::MathOverflow)?;
-        assert!(
-            fee_amount >= 0 && net_yield >= 0,
-            "fee accounting invariant violated: negative fee share"
-        );
-        assert_eq!(
-            fee_amount + net_yield,
-            amount,
-            "fee accounting invariant violated: fee + net != amount"
-        );
+        let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps)?;
 
         let token_addr = Self::token(env.clone());
         let token_client = token::Client::new(&env, &token_addr);
@@ -3335,7 +3341,9 @@ impl YieldVault {
                 env.events()
                     .publish((symbol_short!("rolvr"), admin.clone()), excess);
             } else {
-                treasury_bal = treasury_bal.checked_add(fee_amount).expect("overflow");
+                treasury_bal = treasury_bal
+                    .checked_add(fee_amount)
+                    .ok_or(VaultError::MathOverflow)?;
             }
 
             env.storage()
@@ -4571,7 +4579,7 @@ impl YieldVault {
                 (utilization, fee_bps, static_fee_bps),
             );
         }
-        let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps);
+        let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps)?;
         if fee_amount > 0 {
             let treasury_bal: i128 = env
                 .storage()
@@ -4580,7 +4588,9 @@ impl YieldVault {
                 .unwrap_or(0);
             env.storage().instance().set(
                 &DataKey::TreasuryBalance,
-                &treasury_bal.checked_add(fee_amount).expect("overflow"),
+                &treasury_bal
+                    .checked_add(fee_amount)
+                    .ok_or(VaultError::MathOverflow)?,
             );
         }
 
@@ -4601,7 +4611,8 @@ impl YieldVault {
                     .get(&DataKeyExt::PerformanceFeeBps)
                     .unwrap_or(0);
                 if perf_fee_bps > 0 {
-                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps);
+                    let (pf, _) =
+                        fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
                     perf_fee_amount = pf;
                     if perf_fee_amount > 0 {
                         if let Some(pool) = Self::performance_incentive_pool(env.clone()) {

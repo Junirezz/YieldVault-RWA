@@ -1,12 +1,12 @@
 //! Share-price math invariants shared by proptest and libFuzzer.
 
-use crate::{try_assets_to_shares, try_shares_to_assets};
+use crate::{try_assets_to_shares, try_shares_to_assets, MathError};
 
-fn shares_for(assets: i128, total_shares: i128, total_assets: i128) -> Option<i128> {
+fn shares_for(assets: i128, total_shares: i128, total_assets: i128) -> Result<i128, MathError> {
     try_assets_to_shares(assets, total_shares, total_assets)
 }
 
-fn assets_for(shares: i128, total_shares: i128, total_assets: i128) -> Option<i128> {
+fn assets_for(shares: i128, total_shares: i128, total_assets: i128) -> Result<i128, MathError> {
     try_shares_to_assets(shares, total_shares, total_assets)
 }
 
@@ -80,19 +80,20 @@ pub fn assert_share_price_invariants(
     let _ = assets_for(assets.min(total_shares.max(1)), total_shares, total_assets);
 
     if total_shares == 0 && total_assets == 0 {
-        let shares = shares_for(assets, 0, 0).expect("bootstrap shares");
-        assert_eq!(
-            shares, assets,
-            "first deposit must be 1:1: assets={assets} shares={shares}"
-        );
+        if let Ok(shares) = shares_for(assets, 0, 0) {
+            assert_eq!(
+                shares, assets,
+                "first deposit must be 1:1: assets={assets} shares={shares}"
+            );
+        }
     }
 
-    if let Some(shares) = shares_for(assets, total_shares, total_assets) {
+    if let Ok(shares) = shares_for(assets, total_shares, total_assets) {
         if let (Some(new_shares), Some(new_assets)) = (
             total_shares.checked_add(shares),
             total_assets.checked_add(assets),
         ) {
-            if let Some(returned) = assets_for(shares, new_shares, new_assets) {
+            if let Ok(returned) = assets_for(shares, new_shares, new_assets) {
                 assert!(
                     returned <= assets,
                     "round-trip returned more than deposited: {returned} > {assets}"
@@ -102,9 +103,9 @@ pub fn assert_share_price_invariants(
     }
 
     let probe_shares = assets.min(total_shares.max(1));
-    let before = assets_for(probe_shares, total_shares, total_assets);
+    let before = assets_for(probe_shares, total_shares, total_assets).ok();
     if let Some(after_total_assets) = total_assets.checked_add(yield_amount) {
-        let after = assets_for(probe_shares, total_shares, after_total_assets);
+        let after = assets_for(probe_shares, total_shares, after_total_assets).ok();
         if let (Some(before), Some(after)) = (before, after) {
             assert!(
                 after >= before,

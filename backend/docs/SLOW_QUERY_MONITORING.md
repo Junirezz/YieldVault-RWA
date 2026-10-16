@@ -28,6 +28,28 @@ Built-in optimized budgets for hot paths:
 'Referral.findUnique': 50ms
 'WebhookEndpoint.findMany': 100ms
 'WebhookDelivery.findMany': 150ms
+
+// Hot paths (Issue #1560)
+'EventOutbox.findUnique': 50ms
+'EventOutbox.findMany': 100ms
+'EventOutbox.create': 100ms
+'EventOutbox.update': 100ms
+'BulkExportJob.findUnique': 50ms
+'BulkExportJob.findMany': 100ms
+'BulkExportJob.create': 150ms
+'BulkExportJob.update': 150ms
+'EmailQueue.findUnique': 50ms
+'EmailQueue.findMany': 100ms
+'EmailQueue.create': 100ms
+'EmailQueue.update': 100ms
+'TransactionBackfill.findUnique': 50ms
+'TransactionBackfill.findMany': 100ms
+'TransactionBackfill.create': 150ms
+'TransactionBackfill.update': 150ms
+'TransactionBackfillJob.findUnique': 50ms
+'TransactionBackfillJob.findMany': 100ms
+'TransactionBackfillJob.create': 150ms
+'TransactionBackfillJob.update': 150ms
 ```
 
 ### Custom Budgets via Environment

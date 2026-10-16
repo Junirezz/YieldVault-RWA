@@ -1,3 +1,9 @@
+/**
+ * Cypress smoke tests — #1573
+ *
+ * Assertions are tied to actual rendered content from the mock API responses,
+ * not generic loading / connect-wallet fallback text.
+ */
 const MOCK_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
 const vaultSummary = {
@@ -23,8 +29,27 @@ const vaultSummary = {
   },
 };
 
+const portfolioHoldings = [
+  {
+    id: 'hold-1',
+    asset: 'USDC Treasury Pool',
+    vaultId: 'vault-1',
+    vaultName: 'Stellar RWA Yield Fund',
+    symbol: 'yvUSDC',
+    shares: 1250.5,
+    apy: 8.45,
+    valueUsd: 1250.5,
+    unrealizedGainUsd: 42.15,
+    issuer: 'Franklin Templeton',
+    status: 'active',
+  },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 /**
- * Inject the Freighter stub into the window BEFORE the app bundle executes.
+ * Inject the Freighter wallet stub so the app believes a wallet is connected.
+ * Must run inside onBeforeLoad so it fires before the app bundle initialises.
  */
 function stubFreighterConnected(win: Cypress.AUTWindow): void {
   const stub = { connected: true };
@@ -41,45 +66,38 @@ function stubFreighterConnected(win: Cypress.AUTWindow): void {
 
     const { messageId, type } = event.data as { messageId: number; type: string };
 
-    const response: Record<string, unknown> = {
-      source: 'FREIGHTER_EXTERNAL_MSG_RESPONSE',
-      messagedId: messageId,
-    };
+    const base = { source: 'FREIGHTER_EXTERNAL_MSG_RESPONSE', messagedId: messageId };
 
     switch (type) {
       case 'SET_ALLOWED_STATUS':
-        stub.connected = true;
-        response.isAllowed = true;
-        response.publicKey = MOCK_ADDRESS;
-        break;
-      case 'REQUEST_ALLOWED_STATUS':
-        response.isAllowed = stub.connected;
-        break;
-      case 'REQUEST_PUBLIC_KEY':
-        response.publicKey = stub.connected ? MOCK_ADDRESS : '';
-        break;
       case 'REQUEST_ACCESS':
         stub.connected = true;
-        response.isAllowed = true;
-        response.publicKey = MOCK_ADDRESS;
+        win.postMessage({ ...base, isAllowed: true, publicKey: MOCK_ADDRESS }, win.location.origin);
+        break;
+      case 'REQUEST_ALLOWED_STATUS':
+        win.postMessage({ ...base, isAllowed: stub.connected }, win.location.origin);
+        break;
+      case 'REQUEST_PUBLIC_KEY':
+        win.postMessage({ ...base, publicKey: stub.connected ? MOCK_ADDRESS : '' }, win.location.origin);
         break;
       case 'REQUEST_CONNECTION_STATUS':
-        response.isConnected = stub.connected;
+        win.postMessage({ ...base, isConnected: stub.connected }, win.location.origin);
         break;
       case 'REQUEST_NETWORK_DETAILS':
-        response.networkDetails = {
-          network: 'TESTNET',
-          networkName: 'Test SDF Network',
-          networkUrl: 'https://horizon-testnet.stellar.org',
-          networkPassphrase: 'Test SDF Network ; September 2015',
-          sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
-        };
+        win.postMessage({
+          ...base,
+          networkDetails: {
+            network: 'TESTNET',
+            networkName: 'Test SDF Network',
+            networkUrl: 'https://horizon-testnet.stellar.org',
+            networkPassphrase: 'Test SDF Network ; September 2015',
+            sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
+          },
+        }, win.location.origin);
         break;
       default:
-        return;
+        break;
     }
-
-    win.postMessage(response, win.location.origin);
   });
 }
 
@@ -88,14 +106,22 @@ function setupApiIntercepts(): void {
     statusCode: 200,
     body: vaultSummary,
   }).as('vaultSummary');
+
   cy.intercept('GET', '**/mock-api/portfolio-holdings.json', {
     statusCode: 200,
-    body: [],
+    body: portfolioHoldings,
   }).as('portfolioHoldings');
+
+  cy.intercept('GET', '**/mock-api/vault-health.json', {
+    statusCode: 200,
+    body: [],
+  }).as('vaultHealth');
+
   cy.intercept('GET', 'https://horizon-testnet.stellar.org/accounts/*/operations*', {
     statusCode: 200,
     body: { _embedded: { records: [] } },
   }).as('horizonOperations');
+
   cy.intercept('GET', 'https://horizon-testnet.stellar.org/accounts/*', (req) => {
     const accountId = req.url.split('/accounts/')[1]?.split('?')[0] ?? MOCK_ADDRESS;
     req.reply({
@@ -125,54 +151,122 @@ function visitWithStubs(url = '/'): void {
     onBeforeLoad: (win) => {
       stubFreighterConnected(win);
       win.localStorage.setItem('hasSeenWalkthrough', 'true');
+      win.localStorage.setItem(
+        'yieldvault-preferences:guest',
+        JSON.stringify({ maskSensitiveValues: false }),
+      );
     },
   });
 }
 
+// ─── Smoke suite ─────────────────────────────────────────────────────────────
+
 describe('YieldVault Smoke Tests', () => {
-  beforeEach(() => {
-    visitWithStubs('/');
-  });
+  // ── Home / Vault dashboard ────────────────────────────────────────────────
 
-  it('should connect wallet', () => {
-    cy.get('body', { timeout: 15000 }).should(($body) => {
-      const hasDisconnect = $body.find('button[aria-label="Disconnect Wallet"]').length > 0;
-      const hasConnect = $body.text().includes('Connect Freighter');
-      const hasChecking = $body.text().includes('Checking wallet');
-      expect(hasDisconnect || hasConnect || hasChecking).to.eq(true);
+  describe('Home — vault dashboard', () => {
+    beforeEach(() => visitWithStubs('/'));
+
+    it('renders the vault name and APY from the mock API', () => {
+      cy.wait('@vaultSummary');
+      // Actual vault name from mock data — not a generic heading
+      cy.contains('Global RWA Yield Fund', { timeout: 15_000 }).should('be.visible');
+      // APY from mock: 8.45
+      cy.contains(/8\.4[0-9]%/, { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('shows Total Value Locked with formatted amount', () => {
+      cy.wait('@vaultSummary');
+      cy.contains('Total Value Locked', { timeout: 10_000 }).should('be.visible');
+      // TVL from mock: 12,450,800 → rendered as $12.45M or $12,450,800
+      cy.contains(/\$12[,.]?4/, { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('displays the strategy name from mock data', () => {
+      cy.wait('@vaultSummary');
+      cy.contains('Franklin BENJI Connector', { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('shows the wallet is connected with abbreviated address', () => {
+      cy.wait('@horizonAccount', { timeout: 15_000 });
+      // Abbreviated: GBBD4...FLA5 or similar
+      cy.contains(/GBBD4?\.{2,}FLA5/, { timeout: 15_000 }).should('be.visible');
+    });
+
+    it('shows USDC balance from Horizon stub', () => {
+      cy.wait('@horizonAccount', { timeout: 15_000 });
+      cy.contains(/1[,.]?250/, { timeout: 15_000 }).should('be.visible');
     });
   });
 
-  it('should navigate to deposit flow', () => {
-    cy.contains('button', 'Deposit').click({ force: true });
-    cy.get('body', { timeout: 10000 }).should(($body) => {
-      const text = $body.text();
-      const hasDepositForm = text.includes('Amount to deposit');
-      const hasWalletGate = text.includes('Wallet Not Connected');
-      expect(hasDepositForm || hasWalletGate).to.eq(true);
+  // ── Deposit / withdraw tabs ───────────────────────────────────────────────
+
+  describe('Deposit & Withdraw tabs', () => {
+    beforeEach(() => visitWithStubs('/'));
+
+    it('deposit tab shows amount input field', () => {
+      cy.wait('@vaultSummary');
+      cy.contains('button', 'Deposit', { timeout: 10_000 }).click({ force: true });
+      // Real label on the deposit input — not "Amount to deposit" which is generic
+      cy.get('label[for]', { timeout: 10_000 })
+        .contains(/Deposit amount|Amount/i)
+        .should('be.visible');
+    });
+
+    it('withdraw tab shows amount input field', () => {
+      cy.wait('@vaultSummary');
+      cy.contains('button', 'Withdraw', { timeout: 10_000 }).click({ force: true });
+      cy.get('label[for]', { timeout: 10_000 })
+        .contains(/Withdraw amount|Amount/i)
+        .should('be.visible');
     });
   });
 
-  it('should navigate to withdrawal flow', () => {
-    cy.contains('button', 'Withdraw').click({ force: true });
-    cy.get('body', { timeout: 10000 }).should(($body) => {
-      const text = $body.text();
-      const hasWithdrawForm = text.includes('Amount to withdraw');
-      const hasWalletGate = text.includes('Wallet Not Connected');
-      expect(hasWithdrawForm || hasWalletGate).to.eq(true);
+  // ── Navigation ───────────────────────────────────────────────────────────
+
+  describe('Navigation', () => {
+    beforeEach(() => visitWithStubs('/'));
+
+    it('navigates to Portfolio and shows the holdings table heading', () => {
+      cy.get('a[href="/portfolio"]', { timeout: 10_000 }).click();
+      cy.url().should('include', '/portfolio');
+      // Real heading — not a generic text
+      cy.contains('h1', 'Your Portfolio', { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('navigates to Analytics and shows the TVL stat card', () => {
+      cy.get('a[href="/analytics"]', { timeout: 10_000 }).click();
+      cy.url().should('include', '/analytics');
+      cy.contains('Total Value Locked', { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('navigates to Transaction History and shows the page heading', () => {
+      cy.get('a[href="/transactions"]', { timeout: 10_000 }).click();
+      cy.url().should('include', '/transactions');
+      // The real heading on the transactions page
+      cy.contains(/Transaction History|History/i, { timeout: 10_000 }).should('be.visible');
     });
   });
 
-  it('should view transaction history', () => {
-    visitWithStubs('/transactions');
-    cy.contains('History', { timeout: 10000 }).should('be.visible');
-    cy.get('body').should(($body) => {
-      const text = $body.text();
-      const hasTable = $body.find('table').length > 0;
-      const hasEmptyState = text.includes('No transactions yet');
-      const hasWalletPrompt = text.includes('Connect your wallet');
-      const hasLoading = text.includes('Loading...');
-      expect(hasTable || hasEmptyState || hasWalletPrompt || hasLoading).to.eq(true);
+  // ── Transaction history ───────────────────────────────────────────────────
+
+  describe('Transaction history page', () => {
+    it('shows the connect-wallet heading when no wallet is connected', () => {
+      setupApiIntercepts();
+      cy.visit('/transactions', {
+        onBeforeLoad: (win) => {
+          win.localStorage.setItem('hasSeenWalkthrough', 'true');
+        },
+      });
+      // Real heading from TransactionHistory unauthenticated state
+      cy.contains(/Connect your wallet/i, { timeout: 10_000 }).should('be.visible');
+    });
+
+    it('renders transaction rows when wallet is connected', () => {
+      visitWithStubs('/transactions');
+      cy.wait('@horizonAccount', { timeout: 15_000 });
+      // With the Horizon stub returning a USDC payment of 100
+      cy.contains(/USDC|100/, { timeout: 15_000 }).should('be.visible');
     });
   });
 });

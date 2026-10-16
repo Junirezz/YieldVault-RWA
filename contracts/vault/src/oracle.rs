@@ -337,6 +337,7 @@ pub fn validate_conversion_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_price_data_scaled_18_decimals() {
@@ -428,5 +429,136 @@ mod tests {
         let price_data = price_data_new(100_000_000i128, env.ledger().timestamp(), 18);
         let result = OracleValidator::sanity_check_before_swap(&env, &price_data, 500_000_000i128);
         assert!(result.is_err());
+    }
+
+    // ── Property Tests (Issue Acceptance Criteria) ───────────────────────────
+
+    proptest! {
+        /// Property 1: Oracle deviation boundaries around 4999 / 5000 / 5001 bps (Price Increase).
+        ///
+        /// When max_deviation_bps = 5000:
+        /// - 4999 bps increase: valid (deviation <= 5000) -> Ok
+        /// - 5000 bps increase: valid exact boundary (deviation == 5000) -> Ok
+        /// - 5001 bps increase: invalid (deviation > 5000) -> Err(PriceDeviationExceeded)
+        #[test]
+        fn prop_oracle_deviation_boundary_increase(
+            // Scale multiplier: base price L = k * 10_000, ensuring exact integer arithmetic
+            k in 1i128..=1_000_000_000i128,
+            decimals in 0u32..=30u32,
+        ) {
+            let env = Env::default();
+            let ts = env.ledger().timestamp();
+            let base_price = k * 10_000;
+            let last = price_data_new(base_price, ts, decimals);
+
+            // 1. 4999 bps increase: deviation is exactly 4999 bps <= 5000 bps -> Ok
+            let p_4999 = price_data_new(base_price + 4_999 * k, ts, decimals);
+            prop_assert!(
+                OracleValidator::validate_price_data(&env, &p_4999, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)).is_ok(),
+                "4999 bps increase failed validation"
+            );
+
+            // 2. 5000 bps increase: deviation is exactly 5000 bps <= 5000 bps -> Ok
+            let p_5000 = price_data_new(base_price + 5_000 * k, ts, decimals);
+            prop_assert!(
+                OracleValidator::validate_price_data(&env, &p_5000, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)).is_ok(),
+                "5000 bps increase failed validation at exact boundary"
+            );
+
+            // 3. 5001 bps increase: deviation is exactly 5001 bps > 5000 bps -> Err
+            let p_5001 = price_data_new(base_price + 5_001 * k, ts, decimals);
+            prop_assert_eq!(
+                OracleValidator::validate_price_data(&env, &p_5001, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)),
+                Err(OracleError::PriceDeviationExceeded),
+                "5001 bps increase should have exceeded max deviation"
+            );
+        }
+
+        /// Property 2: Oracle deviation boundaries around 4999 / 5000 / 5001 bps (Price Decrease).
+        ///
+        /// When max_deviation_bps = 5000:
+        /// - 4999 bps decrease: valid (deviation <= 5000) -> Ok
+        /// - 5000 bps decrease: valid exact boundary (deviation == 5000) -> Ok
+        /// - 5001 bps decrease: invalid (deviation > 5000) -> Err(PriceDeviationExceeded)
+        #[test]
+        fn prop_oracle_deviation_boundary_decrease(
+            k in 1i128..=1_000_000_000i128,
+            decimals in 0u32..=30u32,
+        ) {
+            let env = Env::default();
+            let ts = env.ledger().timestamp();
+            let base_price = k * 10_000;
+            let last = price_data_new(base_price, ts, decimals);
+
+            // 1. 4999 bps decrease: deviation is exactly 4999 bps <= 5000 bps -> Ok
+            let p_4999 = price_data_new(base_price - 4_999 * k, ts, decimals);
+            prop_assert!(
+                OracleValidator::validate_price_data(&env, &p_4999, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)).is_ok(),
+                "4999 bps decrease failed validation"
+            );
+
+            // 2. 5000 bps decrease: deviation is exactly 5000 bps <= 5000 bps -> Ok
+            let p_5000 = price_data_new(base_price - 5_000 * k, ts, decimals);
+            prop_assert!(
+                OracleValidator::validate_price_data(&env, &p_5000, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)).is_ok(),
+                "5000 bps decrease failed validation at exact boundary"
+            );
+
+            // 3. 5001 bps decrease: deviation is exactly 5001 bps > 5000 bps -> Err
+            let p_5001 = price_data_new(base_price - 5_001 * k, ts, decimals);
+            prop_assert_eq!(
+                OracleValidator::validate_price_data(&env, &p_5001, 3600, Some(MAX_PRICE_DEVIATION_BPS), Some(&last)),
+                Err(OracleError::PriceDeviationExceeded),
+                "5001 bps decrease should have exceeded max deviation"
+            );
+        }
+
+        /// Property 3: Arbitrary base price deviation boundary test.
+        ///
+        /// Verifies 4999, 5000, and 5001 bps boundaries for any unconstrained base price.
+        #[test]
+        fn prop_oracle_deviation_arbitrary_base_price(
+            base_price in 10_000i128..=1_000_000_000_000i128,
+        ) {
+            let last = price_data_new(base_price, 0, 18);
+
+            // 4999 bps increase
+            let delta_4999 = (4_999 * base_price) / 10_000;
+            let p_4999 = price_data_new(base_price + delta_4999, 0, 18);
+            prop_assert!(OracleValidator::validate_deviation(&p_4999, &last, 5000).is_ok());
+
+            // 5000 bps increase (exact 50% boundary)
+            let delta_5000 = (5_000 * base_price) / 10_000;
+            let p_5000 = price_data_new(base_price + delta_5000, 0, 18);
+            prop_assert!(OracleValidator::validate_deviation(&p_5000, &last, 5000).is_ok());
+
+            // 5001 bps increase (ceil: guaranteed > 5000 bps deviation)
+            let delta_5001 = (5_001 * base_price + 9_999) / 10_000;
+            let p_5001 = price_data_new(base_price + delta_5001, 0, 18);
+            prop_assert_eq!(
+                OracleValidator::validate_deviation(&p_5001, &last, 5000),
+                Err(OracleError::PriceDeviationExceeded)
+            );
+        }
+
+        /// Property 4: Slippage bounds deviation edges (4999 / 5000 / 5001 bps).
+        #[test]
+        fn prop_oracle_slippage_bounds_edges(
+            k in 1i128..=1_000_000_000i128,
+        ) {
+            let reference_price = k * 10_000;
+
+            let p_4999 = price_data_new(reference_price + 4_999 * k, 0, 18);
+            prop_assert!(OracleValidator::validate_slippage_bounds(&p_4999, reference_price, 5000).is_ok());
+
+            let p_5000 = price_data_new(reference_price + 5_000 * k, 0, 18);
+            prop_assert!(OracleValidator::validate_slippage_bounds(&p_5000, reference_price, 5000).is_ok());
+
+            let p_5001 = price_data_new(reference_price + 5_001 * k, 0, 18);
+            prop_assert_eq!(
+                OracleValidator::validate_slippage_bounds(&p_5001, reference_price, 5000),
+                Err(OracleError::PriceDeviationExceeded)
+            );
+        }
     }
 }

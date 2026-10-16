@@ -1,0 +1,223 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "json"
+            ]
+          },
+          "generatedBy": {
+            "type": "string"
+          },
+          "walletAddress": {
+            "type": "string"
+          },
+          "rowCount": {
+            "type": "number"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "checksum": {
+            "type": "string"
+          },
+          "checksumAlgorithm": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "generatedBy",
+          "rowCount",
+          "fileName",
+          "checksum",
+          "checksumAlgorithm",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        },
+        "nextCursor": {
+          "type": "string"
+        },
+        "prevCursor": {
+          "type": "string"
+        },
+        "currentPage": {
+          "type": "number"
+        },
+        "totalPages": {
+          "type": "number"
+        },
+        "hasNextPage": {
+          "type": "boolean"
+        },
+        "hasPrevPage": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "count",
+        "limit",
+        "total",
+        "nextCursor",
+        "prevCursor",
+        "currentPage",
+        "totalPages",
+        "hasNextPage",
+        "hasPrevPage"
+      ],
+      "additionalProperties": false
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "json"
+            ]
+          },
+          "generatedBy": {
+            "type": "string"
+          },
+          "walletAddress": {
+            "type": "string"
+          },
+          "rowCount": {
+            "type": "number"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "checksum": {
+            "type": "string"
+          },
+          "checksumAlgorithm": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "generatedBy",
+          "rowCount",
+          "fileName",
+          "checksum",
+          "checksumAlgorithm",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "filters": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "json"
+              ]
+            },
+            "generatedBy": {
+              "type": "string"
+            },
+            "walletAddress": {
+              "type": "string"
+            },
+            "checksum": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "generatedBy",
+            "walletAddress",
+            "checksum",
+            "from",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "limit",
+        "filters",
+        "timestamp"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "data",
+    "pagination",
+    "timestamp",
+    "jobs",
+    "meta"
+  ],
+  "additionalProperties": false
+}

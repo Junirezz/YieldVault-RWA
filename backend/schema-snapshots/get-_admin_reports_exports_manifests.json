@@ -1,0 +1,74 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "requester": {
+            "type": "string"
+          },
+          "reportType": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "unknown"
+          },
+          "checksum": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "rowCount": {
+            "type": "number"
+          },
+          "bulkExportJobId": {
+            "type": "string"
+          },
+          "artifactId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "requester",
+          "reportType",
+          "filters",
+          "checksum",
+          "generatedAt",
+          "fileName",
+          "rowCount"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "number"
+    },
+    "limit": {
+      "type": "number"
+    },
+    "offset": {
+      "type": "number"
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "data",
+    "total",
+    "limit",
+    "offset",
+    "timestamp"
+  ],
+  "additionalProperties": false
+}

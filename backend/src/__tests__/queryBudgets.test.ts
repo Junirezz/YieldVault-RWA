@@ -2,12 +2,16 @@ import {
   DEFAULT_READ_QUERY_BUDGET_MS,
   DEFAULT_WRITE_QUERY_BUDGET_MS,
   evaluateQueryPerformance,
+  executeWithBudget,
   getQueryBudget,
   InMemoryAlertCooldownStore,
+  QUERY_BUDGETS,
   recordQueryPerformance,
   RedisAlertCooldownStore,
   resetAlertCooldowns,
   triggerSlowQueryAlert,
+  withQueryBudget,
+  wrapQuery,
 } from '../queryBudgets';
 import type Redis from 'ioredis';
 import { classifySqlAction, DatabaseManager, type IDatabasePool } from '../database';
@@ -48,6 +52,65 @@ describe('Query Performance Budgets and Slow Query Alerts', () => {
     it('returns built-in budgets for known model/action pairs', () => {
       expect(getQueryBudget('User', 'findUnique')).toBe(50);
       expect(getQueryBudget('SharePriceSnapshot', 'create')).toBe(150);
+    });
+
+    it('returns built-in budgets for uncovered hot paths (Issue #1560)', () => {
+      // EventOutbox hot paths
+      expect(getQueryBudget('EventOutbox', 'findUnique')).toBe(50);
+      expect(getQueryBudget('EventOutbox', 'findFirst')).toBe(50);
+      expect(getQueryBudget('EventOutbox', 'findMany')).toBe(100);
+      expect(getQueryBudget('EventOutbox', 'create')).toBe(100);
+      expect(getQueryBudget('EventOutbox', 'update')).toBe(100);
+      expect(getQueryBudget('EventOutbox', 'updateMany')).toBe(100);
+      expect(getQueryBudget('EventOutbox', 'deleteMany')).toBe(150);
+      expect(getQueryBudget('EventOutbox', 'count')).toBe(50);
+
+      // BulkExportJob hot paths
+      expect(getQueryBudget('BulkExportJob', 'findUnique')).toBe(50);
+      expect(getQueryBudget('BulkExportJob', 'findFirst')).toBe(50);
+      expect(getQueryBudget('BulkExportJob', 'findMany')).toBe(100);
+      expect(getQueryBudget('BulkExportJob', 'create')).toBe(150);
+      expect(getQueryBudget('BulkExportJob', 'update')).toBe(150);
+      expect(getQueryBudget('BulkExportJob', 'upsert')).toBe(150);
+      expect(getQueryBudget('BulkExportJob', 'deleteMany')).toBe(150);
+
+      // EmailQueue hot paths
+      expect(getQueryBudget('EmailQueue', 'findUnique')).toBe(50);
+      expect(getQueryBudget('EmailQueue', 'findFirst')).toBe(50);
+      expect(getQueryBudget('EmailQueue', 'findMany')).toBe(100);
+      expect(getQueryBudget('EmailQueue', 'create')).toBe(100);
+      expect(getQueryBudget('EmailQueue', 'update')).toBe(100);
+      expect(getQueryBudget('EmailQueue', 'deleteMany')).toBe(150);
+
+      // TransactionBackfill hot paths
+      expect(getQueryBudget('TransactionBackfill', 'findUnique')).toBe(50);
+      expect(getQueryBudget('TransactionBackfill', 'findFirst')).toBe(50);
+      expect(getQueryBudget('TransactionBackfill', 'findMany')).toBe(100);
+      expect(getQueryBudget('TransactionBackfill', 'create')).toBe(150);
+      expect(getQueryBudget('TransactionBackfill', 'update')).toBe(150);
+      expect(getQueryBudget('TransactionBackfill', 'upsert')).toBe(150);
+      expect(getQueryBudget('TransactionBackfill', 'deleteMany')).toBe(150);
+
+      // TransactionBackfillJob hot paths
+      expect(getQueryBudget('TransactionBackfillJob', 'findUnique')).toBe(50);
+      expect(getQueryBudget('TransactionBackfillJob', 'findFirst')).toBe(50);
+      expect(getQueryBudget('TransactionBackfillJob', 'findMany')).toBe(100);
+      expect(getQueryBudget('TransactionBackfillJob', 'create')).toBe(150);
+      expect(getQueryBudget('TransactionBackfillJob', 'update')).toBe(150);
+      expect(getQueryBudget('TransactionBackfillJob', 'upsert')).toBe(150);
+      expect(getQueryBudget('TransactionBackfillJob', 'deleteMany')).toBe(150);
+    });
+
+    it('resolves model aliases and case normalization', () => {
+      // TransactionBackfill <-> TransactionBackfillJob alias resolution
+      expect(getQueryBudget('TransactionBackfill', 'findMany')).toBe(100);
+      expect(getQueryBudget('TransactionBackfillJob', 'findMany')).toBe(100);
+
+      // Case normalization fallback
+      expect(getQueryBudget('eventOutbox', 'findMany')).toBe(100);
+      expect(getQueryBudget('bulkExportJob', 'findUnique')).toBe(50);
+      expect(getQueryBudget('emailQueue', 'create')).toBe(100);
+      expect(getQueryBudget('transactionBackfillJob', 'update')).toBe(150);
     });
 
     it('returns configurable read and write defaults', () => {
@@ -261,6 +324,293 @@ describe('Query Performance Budgets and Slow Query Alerts', () => {
 
       const after = await counterValue('raw_replica', 'select', 'postgres', 'critical');
       expect(after - before).toBe(1);
+    });
+  });
+
+  describe('withQueryBudget() and query wrapper enforcement', () => {
+    it('executes a query within budget and returns the result', async () => {
+      const data = { id: 'evt-123', status: 'pending' };
+      const result = await withQueryBudget('EventOutbox', 'findUnique', async () => data);
+      expect(result).toBe(data);
+    });
+
+    it('works with the wrapQuery alias', async () => {
+      const data = [{ id: 'job-1' }];
+      const result = await wrapQuery('BulkExportJob', 'findMany', async () => data);
+      expect(result).toBe(data);
+    });
+
+    it('propagates errors when wrapped query function throws', async () => {
+      await expect(
+        withQueryBudget('EmailQueue', 'create', async () => {
+          throw new Error('Database connection failed');
+        })
+      ).rejects.toThrow('Database connection failed');
+    });
+
+    it('enforces budget in query wrapper when duration exceeds budget', async () => {
+      process.env.QUERY_BUDGETS_JSON = JSON.stringify({ 'EventOutbox.findMany': 0.001 });
+      const before = await counterValue('EventOutbox', 'findMany', 'prisma', 'critical');
+      let capturedBreach: any = null;
+
+      const result = await withQueryBudget(
+        'EventOutbox',
+        'findMany',
+        async () => {
+          await new Promise((r) => setTimeout(r, 10));
+          return [{ id: 'evt-1' }];
+        },
+        {
+          onBreach: (evaluation) => {
+            capturedBreach = evaluation;
+          },
+        }
+      );
+
+      expect(result).toEqual([{ id: 'evt-1' }]);
+      await new Promise((resolve) => setImmediate(resolve));
+      const after = await counterValue('EventOutbox', 'findMany', 'prisma', 'critical');
+      expect(after - before).toBe(1);
+      expect(capturedBreach).toMatchObject({
+        model: 'EventOutbox',
+        action: 'findMany',
+        breached: true,
+      });
+    });
+
+    it('executeWithBudget returns both query result and performance evaluation', async () => {
+      const { result, evaluation } = await executeWithBudget(
+        'BulkExportJob',
+        'findUnique',
+        async () => ({ id: 'export-999', status: 'completed' })
+      );
+
+      expect(result).toEqual({ id: 'export-999', status: 'completed' });
+      expect(evaluation.model).toBe('BulkExportJob');
+      expect(evaluation.action).toBe('findUnique');
+      expect(evaluation.budgetMs).toBe(50);
+      expect(evaluation.breached).toBe(false);
+    });
+
+    it('executeWithBudget captures failed queries and records evaluation', async () => {
+      let breachTriggered = false;
+      await expect(
+        executeWithBudget(
+          'EmailQueue',
+          'update',
+          async () => {
+            throw new Error('Deadlock detected');
+          },
+          {
+            onEvaluation: (evalResult) => {
+              expect(evalResult.failed).toBe(true);
+              breachTriggered = true;
+            },
+          }
+        )
+      ).rejects.toThrow('Deadlock detected');
+
+      expect(breachTriggered).toBe(true);
+    });
+  });
+
+  describe('budget-exceeded tests for uncovered hot paths (Issue #1560)', () => {
+    describe('EventOutbox hot paths', () => {
+      it('triggers warning breach when duration exceeds EventOutbox.findMany budget', async () => {
+        const before = await counterValue('EventOutbox', 'findMany', 'prisma', 'warning');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'EventOutbox',
+          action: 'findMany',
+          durationMs: 120, // Budget is 100ms, < 300ms (warning)
+          source: 'prisma',
+        });
+
+        const after = await counterValue('EventOutbox', 'findMany', 'prisma', 'warning');
+        expect(evaluation).toMatchObject({
+          model: 'EventOutbox',
+          action: 'findMany',
+          budgetMs: 100,
+          breached: true,
+          severity: 'warning',
+        });
+        expect(after - before).toBe(1);
+      });
+
+      it('triggers critical breach and alerts when duration heavily exceeds EventOutbox.create budget', async () => {
+        process.env.QUERY_ALERT_TYPE = 'slack';
+        process.env.SLOW_QUERY_SLACK_WEBHOOK_URL = 'https://hooks.slack.test/query';
+        global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+
+        const before = await counterValue('EventOutbox', 'create', 'prisma', 'critical');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'EventOutbox',
+          action: 'create',
+          durationMs: 350, // Budget is 100ms, >= 300ms (critical)
+          source: 'prisma',
+        });
+
+        const after = await counterValue('EventOutbox', 'create', 'prisma', 'critical');
+        expect(evaluation).toMatchObject({
+          model: 'EventOutbox',
+          action: 'create',
+          budgetMs: 100,
+          breached: true,
+          severity: 'critical',
+        });
+        expect(after - before).toBe(1);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('BulkExportJob hot paths', () => {
+      it('triggers warning breach when duration exceeds BulkExportJob.findMany budget', async () => {
+        const before = await counterValue('BulkExportJob', 'findMany', 'prisma', 'warning');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'BulkExportJob',
+          action: 'findMany',
+          durationMs: 130, // Budget is 100ms
+          source: 'prisma',
+        });
+
+        const after = await counterValue('BulkExportJob', 'findMany', 'prisma', 'warning');
+        expect(evaluation).toMatchObject({
+          model: 'BulkExportJob',
+          action: 'findMany',
+          budgetMs: 100,
+          breached: true,
+          severity: 'warning',
+        });
+        expect(after - before).toBe(1);
+      });
+
+      it('triggers critical breach when duration heavily exceeds BulkExportJob.create budget', async () => {
+        const before = await counterValue('BulkExportJob', 'create', 'prisma', 'critical');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'BulkExportJob',
+          action: 'create',
+          durationMs: 500, // Budget is 150ms, >= 450ms (critical)
+          source: 'prisma',
+        });
+
+        const after = await counterValue('BulkExportJob', 'create', 'prisma', 'critical');
+        expect(evaluation).toMatchObject({
+          model: 'BulkExportJob',
+          action: 'create',
+          budgetMs: 150,
+          breached: true,
+          severity: 'critical',
+        });
+        expect(after - before).toBe(1);
+      });
+    });
+
+    describe('EmailQueue hot paths', () => {
+      it('triggers warning breach when duration exceeds EmailQueue.findMany budget', async () => {
+        const before = await counterValue('EmailQueue', 'findMany', 'prisma', 'warning');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'EmailQueue',
+          action: 'findMany',
+          durationMs: 110, // Budget is 100ms
+          source: 'prisma',
+        });
+
+        const after = await counterValue('EmailQueue', 'findMany', 'prisma', 'warning');
+        expect(evaluation).toMatchObject({
+          model: 'EmailQueue',
+          action: 'findMany',
+          budgetMs: 100,
+          breached: true,
+          severity: 'warning',
+        });
+        expect(after - before).toBe(1);
+      });
+
+      it('triggers critical breach when duration heavily exceeds EmailQueue.create budget', async () => {
+        const before = await counterValue('EmailQueue', 'create', 'prisma', 'critical');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'EmailQueue',
+          action: 'create',
+          durationMs: 310, // Budget is 100ms, >= 300ms (critical)
+          source: 'prisma',
+        });
+
+        const after = await counterValue('EmailQueue', 'create', 'prisma', 'critical');
+        expect(evaluation).toMatchObject({
+          model: 'EmailQueue',
+          action: 'create',
+          budgetMs: 100,
+          breached: true,
+          severity: 'critical',
+        });
+        expect(after - before).toBe(1);
+      });
+    });
+
+    describe('TransactionBackfill and TransactionBackfillJob hot paths', () => {
+      it('triggers warning breach when duration exceeds TransactionBackfill.findMany budget', async () => {
+        const before = await counterValue('TransactionBackfill', 'findMany', 'prisma', 'warning');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'TransactionBackfill',
+          action: 'findMany',
+          durationMs: 125, // Budget is 100ms
+          source: 'prisma',
+        });
+
+        const after = await counterValue('TransactionBackfill', 'findMany', 'prisma', 'warning');
+        expect(evaluation).toMatchObject({
+          model: 'TransactionBackfill',
+          action: 'findMany',
+          budgetMs: 100,
+          breached: true,
+          severity: 'warning',
+        });
+        expect(after - before).toBe(1);
+      });
+
+      it('triggers critical breach when duration heavily exceeds TransactionBackfillJob.create budget', async () => {
+        const before = await counterValue('TransactionBackfillJob', 'create', 'prisma', 'critical');
+
+        const evaluation = await recordQueryPerformance({
+          model: 'TransactionBackfillJob',
+          action: 'create',
+          durationMs: 500, // Budget is 150ms, >= 450ms (critical)
+          source: 'prisma',
+        });
+
+        const after = await counterValue('TransactionBackfillJob', 'create', 'prisma', 'critical');
+        expect(evaluation).toMatchObject({
+          model: 'TransactionBackfillJob',
+          action: 'create',
+          budgetMs: 150,
+          breached: true,
+          severity: 'critical',
+        });
+        expect(after - before).toBe(1);
+      });
+
+      it('enforces budget for TransactionBackfill.upsert via wrapper', async () => {
+        const evaluation = evaluateQueryPerformance({
+          model: 'TransactionBackfill',
+          action: 'upsert',
+          durationMs: 200,
+          source: 'prisma',
+        });
+
+        expect(evaluation).toMatchObject({
+          model: 'TransactionBackfill',
+          action: 'upsert',
+          budgetMs: 150,
+          breached: true,
+          severity: 'warning',
+        });
+      });
     });
   });
 });

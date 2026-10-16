@@ -192,6 +192,7 @@ pub fn effective_fee_bps(curve: &FeeCurve, static_fee_bps: i128, utilization_bps
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     /// Reference curve used across the acceptance-criteria tests:
     /// 0.25% base → 1% at an 80% kink → 5% at full utilization.
@@ -438,5 +439,110 @@ mod tests {
         let curve = default_curve();
         assert!(!curve.enabled);
         assert_eq!(effective_fee_bps(&curve, 777, 9_500), 777);
+    }
+
+    // ── Property Tests (Issue Acceptance Criteria) ───────────────────────────
+
+    fn arb_valid_curve() -> impl Strategy<Value = FeeCurve> {
+        (
+            0i128..=BPS_DENOMINATOR,
+            0i128..=BPS_DENOMINATOR,
+            0i128..=BPS_DENOMINATOR,
+            1i128..BPS_DENOMINATOR,
+        )
+            .prop_map(|(f1, f2, f3, kink)| {
+                let mut fees = [f1, f2, f3];
+                fees.sort_unstable();
+                FeeCurve {
+                    enabled: true,
+                    base_fee_bps: fees[0],
+                    optimal_fee_bps: fees[1],
+                    max_fee_bps: fees[2],
+                    optimal_utilization_bps: kink,
+                }
+            })
+    }
+
+    proptest! {
+        /// Property-test fee curve monotonicity around kink.
+        ///
+        /// Asserts that for any valid fee curve:
+        /// 1. fee_bps_at(curve, kink) == curve.optimal_fee_bps
+        /// 2. fee_bps_at(curve, kink - 1) <= fee_bps_at(curve, kink) <= fee_bps_at(curve, kink + 1)
+        /// 3. fee_bps_at(curve, kink - delta) <= fee_bps_at(curve, kink) <= fee_bps_at(curve, kink + delta)
+        ///    for any delta >= 0.
+        #[test]
+        fn prop_fee_curve_monotonicity_around_kink(
+            curve in arb_valid_curve(),
+            delta in 0i128..=BPS_DENOMINATOR,
+        ) {
+            let kink = curve.optimal_utilization_bps;
+            let fee_at_kink = fee_bps_at(&curve, kink);
+
+            // Exactly at the kink, the fee must match optimal_fee_bps
+            prop_assert_eq!(fee_at_kink, curve.optimal_fee_bps);
+
+            // Immediate boundary points adjacent to the kink
+            let fee_before = fee_bps_at(&curve, kink - 1);
+            let fee_after = fee_bps_at(&curve, kink + 1);
+            prop_assert!(
+                fee_before <= fee_at_kink,
+                "fee before kink ({}) > fee at kink ({}) for kink {}",
+                fee_before,
+                fee_at_kink,
+                kink
+            );
+            prop_assert!(
+                fee_at_kink <= fee_after,
+                "fee at kink ({}) > fee after kink ({}) for kink {}",
+                fee_at_kink,
+                fee_after,
+                kink
+            );
+
+            // Symmetric / asymmetric delta step around the kink
+            let fee_lower = fee_bps_at(&curve, kink - delta);
+            let fee_upper = fee_bps_at(&curve, kink + delta);
+            prop_assert!(
+                fee_lower <= fee_at_kink,
+                "fee below kink ({}) > fee at kink ({}) for delta {}",
+                fee_lower,
+                fee_at_kink,
+                delta
+            );
+            prop_assert!(
+                fee_at_kink <= fee_upper,
+                "fee at kink ({}) > fee above kink ({}) for delta {}",
+                fee_at_kink,
+                fee_upper,
+                delta
+            );
+        }
+
+        /// Property-test fee curve global monotonicity:
+        /// for any valid curve and any u1 <= u2, fee_bps_at(u1) <= fee_bps_at(u2).
+        #[test]
+        fn prop_fee_curve_global_monotonicity(
+            curve in arb_valid_curve(),
+            u1 in -1_000i128..=15_000i128,
+            u2 in -1_000i128..=15_000i128,
+        ) {
+            let (lower, upper) = if u1 <= u2 { (u1, u2) } else { (u2, u1) };
+            let fee_low = fee_bps_at(&curve, lower);
+            let fee_high = fee_bps_at(&curve, upper);
+
+            prop_assert!(
+                fee_low <= fee_high,
+                "non-monotonic fee: fee({}) = {} > fee({}) = {}",
+                lower,
+                fee_low,
+                upper,
+                fee_high
+            );
+
+            // Invariant: fee is always clamped within [base_fee_bps, max_fee_bps]
+            prop_assert!(fee_low >= curve.base_fee_bps);
+            prop_assert!(fee_high <= curve.max_fee_bps);
+        }
     }
 }
