@@ -50,6 +50,28 @@ pub enum BridgeError {
     NonceAlreadyUsed = 10,
     NoFallbackAvailable = 11,
     ProviderDisabled = 12,
+    TimelockNotReady = 13,
+    NoPendingRemoval = 14,
+}
+
+// ── Bridge endpoint interface ──────────────────────────────────────────────
+
+/// Interface every bridge provider endpoint contract must expose.
+///
+/// The bridge layer keeps custody of the locked tokens (so failed transfers
+/// can be refunded) and notifies the endpoint to relay the message. Any
+/// error or panic from `send` is treated as a provider failure and the
+/// transfer is routed to the next eligible provider.
+#[contractclient(name = "BridgeEndpointClient")]
+pub trait BridgeEndpoint {
+    fn send(
+        env: Env,
+        transfer_id: u64,
+        token: Address,
+        amount: i128,
+        dest_chain: u32,
+        recipient: Bytes,
+    );
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -162,6 +184,7 @@ enum DataKey {
     Limits,
     DefaultProvider,
     TransferNonceFor(Address, u32),
+    PendingRemoval(u32),
 }
 
 #[contracttype]
@@ -177,6 +200,8 @@ const STELLAR_CHAIN_ID: u32 = 0;
 const BPS_DENOMINATOR: i128 = 10_000;
 const STORAGE_TTL_THRESHOLD: u32 = 10_000;
 const STORAGE_TTL_EXTENSION: u32 = 100_000;
+/// Delay between queueing and executing a provider removal.
+pub const PROVIDER_REMOVAL_DELAY: u64 = 86_400;
 
 // ── Contract ───────────────────────────────────────────────────────────────
 
@@ -317,6 +342,70 @@ impl BridgeCompat {
         Ok(())
     }
 
+    /// Queue removal of a provider. Admin-only; executable after
+    /// [`PROVIDER_REMOVAL_DELAY`]. Returns the earliest execution time.
+    pub fn queue_unregister_provider(env: Env, provider_id: u32) -> Result<u64, BridgeError> {
+        Self::require_admin(&env)?;
+        let _ = Self::get_provider(&env, provider_id)?; // validate exists
+        let eta = env
+            .ledger()
+            .timestamp()
+            .checked_add(PROVIDER_REMOVAL_DELAY)
+            .ok_or(BridgeError::InvalidAmount)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingRemoval(provider_id), &eta);
+        env.events()
+            .publish((symbol_short!("brgrmq"),), (provider_id, eta));
+        Ok(eta)
+    }
+
+    /// Cancel a queued provider removal. Admin-only.
+    pub fn cancel_unregister_provider(env: Env, provider_id: u32) -> Result<(), BridgeError> {
+        Self::require_admin(&env)?;
+        let key = DataKey::PendingRemoval(provider_id);
+        if !env.storage().instance().has(&key) {
+            return Err(BridgeError::NoPendingRemoval);
+        }
+        env.storage().instance().remove(&key);
+        env.events()
+            .publish((symbol_short!("brgrmc"),), (provider_id,));
+        Ok(())
+    }
+
+    /// Remove a provider once its queued removal timelock has elapsed.
+    /// Admin-only. Clears the default provider if it pointed at this one.
+    pub fn unregister_provider(env: Env, provider_id: u32) -> Result<(), BridgeError> {
+        Self::require_admin(&env)?;
+        let pending_key = DataKey::PendingRemoval(provider_id);
+        let eta: u64 = env
+            .storage()
+            .instance()
+            .get(&pending_key)
+            .ok_or(BridgeError::NoPendingRemoval)?;
+        if env.ledger().timestamp() < eta {
+            return Err(BridgeError::TimelockNotReady);
+        }
+        let _ = Self::get_provider(&env, provider_id)?;
+
+        let key = DataKey::Provider(provider_id);
+        env.storage().persistent().remove(&key);
+        env.storage().instance().remove(&pending_key);
+        if Self::default_provider(env.clone()) == Some(provider_id) {
+            env.storage().instance().remove(&DataKey::DefaultProvider);
+        }
+        env.events()
+            .publish((symbol_short!("brgrm"),), (provider_id,));
+        Ok(())
+    }
+
+    /// Returns the earliest execution time of a queued provider removal.
+    pub fn pending_unregister(env: Env, provider_id: u32) -> Option<u64> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingRemoval(provider_id))
+    }
+
     /// Returns a provider by ID.
     pub fn provider(env: Env, provider_id: u32) -> Option<BridgeProvider> {
         Self::get_provider(&env, provider_id).ok()
@@ -393,10 +482,12 @@ impl BridgeCompat {
 
     /// Initiate a cross-chain USDC transfer.
     ///
-    /// Pulls USDC from the sender, records the transfer, and (in production)
-    /// would call the bridge endpoint contract. This implementation handles
-    /// the vault-side accounting; the actual bridge call is abstracted for
-    /// testnet compatibility.
+    /// Pulls USDC from the sender into this contract's custody, then invokes
+    /// the selected provider's [`BridgeEndpoint::send`]. If the primary
+    /// endpoint fails, the transfer is routed to the next enabled provider
+    /// (ascending ID) that supports `dest_chain`; if none succeeds the call
+    /// reverts with [`BridgeError::NoFallbackAvailable`]. The recorded
+    /// transfer carries the provider that actually accepted it.
     pub fn transfer_out(
         env: Env,
         sender: Address,
@@ -447,23 +538,49 @@ impl BridgeCompat {
             return Err(BridgeError::InsufficientBalance);
         }
 
-        // Nonces are monotonic within a sender/provider domain. Transfer IDs
-        // additionally bind that nonce to both identities so they cannot be
-        // confused with replay nonces or reused across providers.
-        let nonce_key = DataKey::TransferNonceFor(sender.clone(), pid);
-        let previous_nonce = env
-            .storage()
-            .instance()
-            .get::<_, u64>(&nonce_key)
-            .unwrap_or(0);
-        let nonce = previous_nonce
-            .checked_add(1)
-            .ok_or(BridgeError::NonceAlreadyUsed)?;
-        let transfer_id = Self::derive_transfer_id(&env, &sender, nonce, pid);
-        let transfer_key = DataKey::Transfer(transfer_id);
-        if env.storage().instance().has(&transfer_key) {
-            return Err(BridgeError::NonceAlreadyUsed);
+        // Lock the sender's tokens before routing; any failure below reverts it.
+        token_client.transfer(&sender, &env.current_contract_address(), &amount);
+
+        // Primary first, then every other eligible provider as fallback.
+        let mut routed: Option<(u32, u64, u64)> = None;
+        let (nonce, transfer_id) = Self::next_transfer_id(&env, &sender, pid)?;
+        if Self::call_endpoint(
+            &env,
+            &provider,
+            transfer_id,
+            &token_addr,
+            amount,
+            dest_chain,
+            &recipient,
+        ) {
+            routed = Some((pid, nonce, transfer_id));
+        } else {
+            for fallback_id in 1..=Self::provider_count(env.clone()) {
+                if fallback_id == pid {
+                    continue;
+                }
+                let fallback = match Self::get_provider(&env, fallback_id) {
+                    Ok(p) if p.enabled && p.supported_chains.contains(&dest_chain) => p,
+                    _ => continue,
+                };
+                let (nonce, transfer_id) = Self::next_transfer_id(&env, &sender, fallback_id)?;
+                if Self::call_endpoint(
+                    &env,
+                    &fallback,
+                    transfer_id,
+                    &token_addr,
+                    amount,
+                    dest_chain,
+                    &recipient,
+                ) {
+                    env.events()
+                        .publish((symbol_short!("brgfbk"),), (pid, fallback_id, transfer_id));
+                    routed = Some((fallback_id, nonce, transfer_id));
+                    break;
+                }
+            }
         }
+        let (used_pid, nonce, transfer_id) = routed.ok_or(BridgeError::NoFallbackAvailable)?;
 
         let transfer = BridgeTransfer {
             transfer_id,
@@ -472,7 +589,7 @@ impl BridgeCompat {
             amount,
             source_chain: STELLAR_CHAIN_ID,
             dest_chain,
-            provider_id: pid,
+            provider_id: used_pid,
             status: TransferStatus::InFlight,
             created_at: env.ledger().timestamp(),
             completed_at: 0,
@@ -481,10 +598,10 @@ impl BridgeCompat {
 
         env.storage()
             .instance()
-            .set(&transfer_key, &transfer);
+            .set(&DataKey::Transfer(transfer_id), &transfer);
         env.storage()
             .instance()
-            .set(&nonce_key, &nonce);
+            .set(&DataKey::TransferNonceFor(sender.clone(), used_pid), &nonce);
 
         // Update user transfer count
         let user_count: i128 = env
@@ -499,12 +616,8 @@ impl BridgeCompat {
 
         env.events().publish(
             (symbol_short!("brgout"), sender.clone()),
-            (transfer_id, amount, dest_chain, pid),
+            (transfer_id, amount, dest_chain, used_pid),
         );
-
-        // Persist the nonce and transfer record before the token interaction.
-        // A callback therefore cannot observe or reuse an uncommitted nonce.
-        token_client.transfer(&sender, &env.current_contract_address(), &amount);
 
         Ok(transfer_id)
     }
@@ -639,6 +752,48 @@ impl BridgeCompat {
         );
     }
 
+    /// Next unused (nonce, transfer_id) for the sender/provider domain.
+    fn next_transfer_id(
+        env: &Env,
+        sender: &Address,
+        provider_id: u32,
+    ) -> Result<(u64, u64), BridgeError> {
+        // Nonces are monotonic within a sender/provider domain. Transfer IDs
+        // additionally bind that nonce to both identities so they cannot be
+        // confused with replay nonces or reused across providers.
+        let nonce = env
+            .storage()
+            .instance()
+            .get::<_, u64>(&DataKey::TransferNonceFor(sender.clone(), provider_id))
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(BridgeError::NonceAlreadyUsed)?;
+        let transfer_id = Self::derive_transfer_id(env, sender, nonce, provider_id);
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::Transfer(transfer_id))
+        {
+            return Err(BridgeError::NonceAlreadyUsed);
+        }
+        Ok((nonce, transfer_id))
+    }
+
+    /// Invoke the provider endpoint; `false` on any error or panic.
+    fn call_endpoint(
+        env: &Env,
+        provider: &BridgeProvider,
+        transfer_id: u64,
+        token: &Address,
+        amount: i128,
+        dest_chain: u32,
+        recipient: &Bytes,
+    ) -> bool {
+        BridgeEndpointClient::new(env, &provider.endpoint)
+            .try_send(&transfer_id, token, &amount, &dest_chain, recipient)
+            .is_ok()
+    }
+
     fn derive_transfer_id(env: &Env, sender: &Address, nonce: u64, provider_id: u32) -> u64 {
         let mut payload = sender.to_xdr(env);
         payload.append(&nonce.to_xdr(env));
@@ -707,6 +862,53 @@ impl BridgeCompat {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{contract, symbol_short};
+
+    /// Test endpoint: counts `send` calls, or panics when configured to fail.
+    #[contract]
+    pub struct MockEndpoint;
+
+    #[contractimpl]
+    impl MockEndpoint {
+        pub fn set_fail(env: Env, fail: bool) {
+            env.storage().instance().set(&symbol_short!("fail"), &fail);
+        }
+
+        pub fn calls(env: Env) -> u32 {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("calls"))
+                .unwrap_or(0)
+        }
+
+        pub fn send(
+            env: Env,
+            _transfer_id: u64,
+            _token: Address,
+            _amount: i128,
+            _dest_chain: u32,
+            _recipient: Bytes,
+        ) {
+            if env
+                .storage()
+                .instance()
+                .get(&symbol_short!("fail"))
+                .unwrap_or(false)
+            {
+                panic!("endpoint down");
+            }
+            let calls = Self::calls(env.clone()) + 1;
+            env.storage()
+                .instance()
+                .set(&symbol_short!("calls"), &calls);
+        }
+    }
+
+    fn mock_endpoint(env: &Env, fail: bool) -> Address {
+        let id = env.register(MockEndpoint, ());
+        MockEndpointClient::new(env, &id).set_fail(&fail);
+        id
+    }
 
     /// Register the contract and return a client for it.
     fn setup() -> (Env, BridgeCompatClient<'static>) {
@@ -818,6 +1020,9 @@ mod tests {
             assert!(!env.storage().instance().has(&DataKey::EpochStart));
             assert!(!env.storage().instance().has(&DataKey::EpochVolume));
         });
+    }
+
+    #[test]
     fn transfer_ids_are_context_bound_and_duplicate_ids_are_rejected() {
         let env = Env::default();
         env.mock_all_auths();
@@ -838,9 +1043,9 @@ mod tests {
         token_admin_client.mint(&sender_a, &300);
         token_admin_client.mint(&sender_b, &300);
 
-        let endpoint_a = Address::generate(&env);
-        let endpoint_b = Address::generate(&env);
-        let chains = Vec::from_array(&env, &[1u32]);
+        let endpoint_a = mock_endpoint(&env, false);
+        let endpoint_b = mock_endpoint(&env, false);
+        let chains = Vec::from_array(&env, [1u32]);
         let provider_a = client.register_provider(
             &String::from_str(&env, "provider-a"),
             &BridgeProviderKind::Wormhole,
@@ -891,12 +1096,14 @@ mod tests {
         );
         assert_eq!(duplicate, Err(Ok(BridgeError::NonceAlreadyUsed)));
         assert_eq!(client.transfer(&id_a), Some(transfer_a));
+    }
+
     // ── Acceptance Criteria Tests ────────────────────────────────────────────
 
     #[test]
     fn test_epoch_limit_exceeded() {
         let (env, client, _admin, token_addr, contract_id) = setup_with_token();
-        let endpoint = Address::generate(&env);
+        let endpoint = mock_endpoint(&env, false);
         let sender = Address::generate(&env);
         let recipient = Bytes::from_slice(&env, &[1, 2, 3, 4]);
 
@@ -926,7 +1133,7 @@ mod tests {
 
         // First transfer: 50,000 (epoch volume becomes 50,000 <= 80,000) -> succeeds
         let tx1 = client.transfer_out(&sender, &recipient, &50_000, &1, &Some(provider_id));
-        assert_eq!(tx1, 1);
+        assert_eq!(client.transfer(&tx1).unwrap().nonce, 1);
 
         // Second transfer: 40,000
         // Epoch volume would be 50,000 + 40,000 = 90,000 > 80,000 (epoch_volume_limit)
@@ -939,13 +1146,13 @@ mod tests {
 
         // Once epoch has reset, 40,000 transfer succeeds
         let tx2 = client.transfer_out(&sender, &recipient, &40_000, &1, &Some(provider_id));
-        assert_eq!(tx2, 2);
+        assert_eq!(client.transfer(&tx2).unwrap().nonce, 2);
     }
 
     #[test]
     fn test_fail_transfer_refund() {
         let (env, client, _admin, token_addr, contract_id) = setup_with_token();
-        let endpoint = Address::generate(&env);
+        let endpoint = mock_endpoint(&env, false);
         let sender = Address::generate(&env);
         let recipient = Bytes::from_slice(&env, &[9, 8, 7]);
 
@@ -969,7 +1176,10 @@ mod tests {
 
         // 1. Initiate transfer_out
         let transfer_id = client.transfer_out(&sender, &recipient, &transfer_amount, &1, &Some(provider_id));
-        assert_eq!(transfer_id, 1);
+        assert_eq!(
+            client.transfer(&transfer_id).unwrap().provider_id,
+            provider_id
+        );
 
         // Verify sender debited by transfer_amount
         assert_eq!(
@@ -1009,7 +1219,7 @@ mod tests {
     #[test]
     fn test_disabled_provider_rejection() {
         let (env, client, _admin, token_addr, contract_id) = setup_with_token();
-        let endpoint = Address::generate(&env);
+        let endpoint = mock_endpoint(&env, false);
         let sender = Address::generate(&env);
         let recipient = Bytes::from_slice(&env, &[4, 5, 6]);
 
@@ -1062,6 +1272,172 @@ mod tests {
         assert_eq!(estimate_ok.provider_id, provider_id);
 
         let tx_id = client.transfer_out(&sender, &recipient, &10_000, &1, &Some(provider_id));
-        assert_eq!(tx_id, 1);
+        assert_eq!(client.transfer(&tx_id).unwrap().provider_id, provider_id);
+    }
+
+    // ── Provider removal / fallback routing / endpoint invocation ───────────
+
+    fn register(client: &BridgeCompatClient, env: &Env, endpoint: &Address) -> u32 {
+        client.register_provider(
+            &String::from_str(env, "p"),
+            &BridgeProviderKind::Custom,
+            endpoint,
+            &0,
+            &1_000_000,
+            &Vec::from_array(env, [1u32]),
+        )
+    }
+
+    #[test]
+    fn test_transfer_out_invokes_provider_endpoint() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let endpoint = mock_endpoint(&env, false);
+        let pid = register(&client, &env, &endpoint);
+        let sender = Address::generate(&env);
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &1_000);
+        token_admin.mint(&contract_id, &1_000);
+
+        let id = client.transfer_out(&sender, &Bytes::new(&env), &500, &1, &None);
+
+        assert_eq!(MockEndpointClient::new(&env, &endpoint).calls(), 1);
+        assert_eq!(client.transfer(&id).unwrap().provider_id, pid);
+        let token = soroban_sdk::token::Client::new(&env, &token_addr);
+        assert_eq!(token.balance(&sender), 500);
+        assert_eq!(token.balance(&contract_id), 1_500);
+    }
+
+    #[test]
+    fn test_transfer_out_falls_back_when_primary_fails() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let primary = mock_endpoint(&env, true);
+        let disabled = mock_endpoint(&env, false);
+        let fallback = mock_endpoint(&env, false);
+        let primary_id = register(&client, &env, &primary);
+        let disabled_id = register(&client, &env, &disabled);
+        let fallback_id = register(&client, &env, &fallback);
+        client.set_provider_enabled(&disabled_id, &false);
+        let sender = Address::generate(&env);
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &1_000);
+        token_admin.mint(&contract_id, &1_000);
+
+        let id = client.transfer_out(&sender, &Bytes::new(&env), &500, &1, &Some(primary_id));
+
+        let record = client.transfer(&id).unwrap();
+        assert_eq!(record.provider_id, fallback_id);
+        assert_eq!(record.nonce, 1);
+        assert_eq!(MockEndpointClient::new(&env, &disabled).calls(), 0);
+        assert_eq!(MockEndpointClient::new(&env, &fallback).calls(), 1);
+    }
+
+    #[test]
+    fn test_transfer_out_reverts_when_no_provider_succeeds() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let primary = mock_endpoint(&env, true);
+        let backup = mock_endpoint(&env, true);
+        register(&client, &env, &primary);
+        register(&client, &env, &backup);
+        let sender = Address::generate(&env);
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &1_000);
+        token_admin.mint(&contract_id, &1_000);
+
+        let res = client.try_transfer_out(&sender, &Bytes::new(&env), &500, &1, &None);
+
+        assert_eq!(res, Err(Ok(BridgeError::NoFallbackAvailable)));
+        let token = soroban_sdk::token::Client::new(&env, &token_addr);
+        assert_eq!(token.balance(&sender), 1_000);
+        assert_eq!(client.user_transfer_count(&sender), 0);
+    }
+
+    #[test]
+    fn test_unregister_provider_requires_timelock() {
+        let (env, client, _admin, _token, _id) = setup_with_token();
+        let pid = register(&client, &env, &mock_endpoint(&env, false));
+
+        assert_eq!(
+            client.try_unregister_provider(&pid),
+            Err(Ok(BridgeError::NoPendingRemoval))
+        );
+        let eta = client.queue_unregister_provider(&pid);
+        assert_eq!(eta, env.ledger().timestamp() + PROVIDER_REMOVAL_DELAY);
+        assert_eq!(client.pending_unregister(&pid), Some(eta));
+        assert_eq!(
+            client.try_unregister_provider(&pid),
+            Err(Ok(BridgeError::TimelockNotReady))
+        );
+
+        env.ledger().set_timestamp(eta);
+        client.unregister_provider(&pid);
+
+        assert_eq!(client.provider(&pid), None);
+        assert_eq!(client.pending_unregister(&pid), None);
+        assert_eq!(client.default_provider(), None);
+        assert_eq!(
+            client.try_queue_unregister_provider(&pid),
+            Err(Ok(BridgeError::ProviderNotFound))
+        );
+    }
+
+    #[test]
+    fn test_cancel_unregister_provider() {
+        let (env, client, _admin, _token, _id) = setup_with_token();
+        let pid = register(&client, &env, &mock_endpoint(&env, false));
+
+        assert_eq!(
+            client.try_cancel_unregister_provider(&pid),
+            Err(Ok(BridgeError::NoPendingRemoval))
+        );
+        let eta = client.queue_unregister_provider(&pid);
+        client.cancel_unregister_provider(&pid);
+        env.ledger().set_timestamp(eta);
+
+        assert_eq!(
+            client.try_unregister_provider(&pid),
+            Err(Ok(BridgeError::NoPendingRemoval))
+        );
+        assert!(client.provider(&pid).is_some());
+    }
+
+    #[test]
+    fn test_unregister_provider_requires_admin_auth() {
+        let env = Env::default();
+        let id = env.register(BridgeCompat, ());
+        let client = BridgeCompatClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &Address::generate(&env));
+
+        env.mock_all_auths();
+        let pid = register(&client, &env, &Address::generate(&env));
+        env.set_auths(&[]);
+
+        assert!(client.try_queue_unregister_provider(&pid).is_err());
+        assert!(client.try_cancel_unregister_provider(&pid).is_err());
+        assert!(client.try_unregister_provider(&pid).is_err());
+    }
+
+    #[test]
+    fn test_removed_provider_skipped_by_fallback() {
+        let (env, client, _admin, token_addr, contract_id) = setup_with_token();
+        let primary = mock_endpoint(&env, true);
+        let removed = mock_endpoint(&env, false);
+        let backup = mock_endpoint(&env, false);
+        let primary_id = register(&client, &env, &primary);
+        let removed_id = register(&client, &env, &removed);
+        let backup_id = register(&client, &env, &backup);
+        let eta = client.queue_unregister_provider(&removed_id);
+        env.ledger().set_timestamp(eta);
+        client.unregister_provider(&removed_id);
+
+        let sender = Address::generate(&env);
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_addr);
+        token_admin.mint(&sender, &1_000);
+        token_admin.mint(&contract_id, &1_000);
+
+        let id = client.transfer_out(&sender, &Bytes::new(&env), &500, &1, &Some(primary_id));
+
+        assert_eq!(client.transfer(&id).unwrap().provider_id, backup_id);
+        assert_eq!(MockEndpointClient::new(&env, &removed).calls(), 0);
     }
 }

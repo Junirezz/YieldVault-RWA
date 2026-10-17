@@ -22,7 +22,8 @@ pub enum VaultError {
     ContractPaused = 4,
     /// Deposit would exceed per-user cap.
     ExceedsUserCap = 5,
-    /// Deposit is below minimum deposit threshold.
+    /// Deposit is below minimum deposit threshold, or is dust that would
+    /// mint zero shares at the current share price.
     MinDepositNotMet = 6,
     /// Large withdrawal timelock has not expired yet.
     TimelockNotExpired = 7,

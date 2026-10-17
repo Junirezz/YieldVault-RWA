@@ -135,6 +135,7 @@ pub fn assets_for_shares(state: &AccountingState, shares: i128) -> Result<i128, 
 ///
 /// # Errors
 /// - [`VaultError::InvalidAmount`] — non-positive amount.
+/// - [`VaultError::MinDepositNotMet`] — deposit would mint zero shares.
 /// - [`VaultError::InvalidFeeBps`] — fee outside `0..=10_000`.
 /// - [`VaultError::InsufficientShares`] — withdrawal exceeds shares outstanding.
 /// - [`VaultError::InsufficientLiquidity`] — withdrawal exceeds assets held.
@@ -149,7 +150,7 @@ pub fn apply(state: &AccountingState, step: Step) -> Result<AccountingState, Vau
             if minted <= 0 {
                 // The deposit is worth less than one share at the current price;
                 // accepting it would take the assets and mint nothing.
-                return Err(VaultError::InvalidAmount);
+                return Err(VaultError::MinDepositNotMet);
             }
             Ok(AccountingState {
                 total_shares: state
@@ -364,7 +365,7 @@ mod tests {
         assert_rejected_without_mutation(
             state,
             Step::Deposit { assets: 999 },
-            VaultError::InvalidAmount,
+            VaultError::MinDepositNotMet,
         );
     }
 
