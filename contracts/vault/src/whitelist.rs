@@ -86,7 +86,7 @@ mod tests {
     };
     use crate::upgrade::set_admin;
     use crate::DataKey;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
 
     #[test]
     fn test_whitelist_documentation_exists() {}

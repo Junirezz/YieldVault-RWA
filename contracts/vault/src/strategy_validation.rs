@@ -4,11 +4,14 @@
 //! cannot break vault logic through adversarial or corrupted payloads.
 
 use crate::VaultError;
-use soroban_sdk::{xdr::ScAddress, Address, Env, TryFromVal};
+use soroban_sdk::{Address, Env};
 
 /// Maximum allowed strategy total value to prevent overflow and unreasonable responses.
 /// Set conservatively to catch malicious responses while allowing legitimate vaults.
 pub const MAX_STRATEGY_VALUE: i128 = i128::MAX / 2;
+
+/// Strkey of the all-zero contract address (`ScAddress::Contract([0; 32])`).
+pub const ZERO_CONTRACT_STRKEY: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 
 /// Strategy response validator providing comprehensive payload validation.
 pub struct StrategyValidator;
@@ -154,13 +157,9 @@ impl StrategyValidator {
         // - Does it have the strategy interface?
         // For now, basic non-zero check.
         //
-        // The previous `Address::from_string(&String::new(_env))` could not
-        // build the SDK `String` type at all. Building the all-zero contract
-        // address from its `ScAddress` avoids strkey decoding, which rejects
-        // an empty string outright.
-        let zero =
-            Address::try_from_val(env, &ScAddress::Contract(soroban_sdk::xdr::Hash([0u8; 32])))
-                .map_err(|_| VaultError::InvalidAmount)?;
+        // `Address: TryFromVal<Env, ScAddress>` is host-only (not available on
+        // wasm), so the all-zero contract address is parsed from its strkey.
+        let zero = Address::from_str(env, ZERO_CONTRACT_STRKEY);
         if strategy == &zero {
             return Err(VaultError::InvalidAmount);
         }
