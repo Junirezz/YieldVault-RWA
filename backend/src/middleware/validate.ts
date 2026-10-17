@@ -253,8 +253,6 @@ export function validate(schemas: ValidateTargets) {
           code: 'VALIDATION_ERROR',
           summary: 'Request validation failed',
           message: formatZodError(issues),
-          summary: 'Request validation failed',
-          errors: details,
           details,
           errors: details,
           retryable: false,

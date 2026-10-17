@@ -3,7 +3,7 @@ import { referralService } from './referralService';
 import { logger } from './middleware/structuredLogging';
 import { normalizeWalletAddress } from './walletUtils';
 import { cacheMiddleware } from './middleware/cache';
-import { buildApiErrorBody, type ApiErrorBody } from './middleware/apiError';
+import { buildApiErrorBody, type ApiErrorBody, sendApiError } from './middleware/apiError';
 
 const router = Router();
 const REFERRAL_CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || '30000', 10);
@@ -61,7 +61,8 @@ router.get('/:wallet', cacheMiddleware({ ttl: REFERRAL_CACHE_TTL_MS }), async (r
   const { wallet } = req.params;
 
   if (!wallet) {
-    return res.status(400).json(buildReferralWalletRequiredBody());
+    sendApiError(req, res, { status: 400, code: 'BAD_REQUEST', message: WALLET_REQUIRED_MESSAGE });
+    return;
   }
 
   const normalizedWallet = normalizeWalletAddress(wallet);
@@ -70,7 +71,8 @@ router.get('/:wallet', cacheMiddleware({ ttl: REFERRAL_CACHE_TTL_MS }), async (r
     const stats = await referralService.getReferralStats(normalizedWallet);
 
     if (!stats) {
-      return res.status(404).json(buildReferralStatsNotFoundBody());
+      sendApiError(req, res, { status: 404, code: 'NOT_FOUND', message: REFERRAL_STATS_NOT_FOUND_MESSAGE });
+      return;
     }
 
     return res.status(200).json(stats);
@@ -79,7 +81,8 @@ router.get('/:wallet', cacheMiddleware({ ttl: REFERRAL_CACHE_TTL_MS }), async (r
       error: error instanceof Error ? error.message : String(error),
       wallet: normalizedWallet,
     });
-    return res.status(500).json(buildReferralStatsErrorBody());
+    sendApiError(req, res, { status: 500, code: 'INTERNAL_SERVER_ERROR', message: REFERRAL_STATS_ERROR_MESSAGE });
+    return;
   }
 });
 
@@ -112,7 +115,8 @@ router.get('/code/:wallet', cacheMiddleware({ ttl: REFERRAL_CACHE_TTL_MS }), asy
   const { wallet } = req.params;
 
   if (!wallet) {
-    return res.status(400).json(buildReferralWalletRequiredBody());
+    sendApiError(req, res, { status: 400, code: 'BAD_REQUEST', message: WALLET_REQUIRED_MESSAGE });
+    return;
   }
 
   const normalizedWallet = normalizeWalletAddress(wallet);
@@ -125,7 +129,8 @@ router.get('/code/:wallet', cacheMiddleware({ ttl: REFERRAL_CACHE_TTL_MS }), asy
       error: error instanceof Error ? error.message : String(error),
       wallet: normalizedWallet,
     });
-    return res.status(500).json(buildReferralCodeErrorBody());
+    sendApiError(req, res, { status: 500, code: 'INTERNAL_SERVER_ERROR', message: REFERRAL_CODE_ERROR_MESSAGE });
+    return;
   }
 });
 

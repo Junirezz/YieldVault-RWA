@@ -20,6 +20,7 @@
  */
 
 import express, { Request, Response, NextFunction, RequestHandler, ErrorRequestHandler } from 'express';
+import { sendApiError } from './apiError';
 
 // ─── Tier Definitions ─────────────────────────────────────────────────────────
 
@@ -90,21 +91,35 @@ export function resolvePayloadTier(req: Request): Tier {
 
 // ─── 413 Error Handler ────────────────────────────────────────────────────────
 
+interface PayloadTooLargeError {
+  status?: number;
+  statusCode?: number;
+  type?: string;
+  message?: string;
+}
+
+function isPayloadTooLargeError(err: unknown): err is PayloadTooLargeError {
+  if (!err || typeof err !== 'object') return false;
+  const candidate = err as Record<string, unknown>;
+  return (
+    candidate.status === 413 ||
+    candidate.statusCode === 413 ||
+    candidate.type === 'entity.too.large'
+  );
+}
+
 function makePayloadErrorHandler(tier: Tier): ErrorRequestHandler {
   const limit = resolveTierLimit(tier);
 
-  return (err: any, _req: Request, res: Response, next: NextFunction): void => {
-    if (
-      err &&
-      (err.status === 413 ||
-        err.statusCode === 413 ||
-        err.type === 'entity.too.large')
-    ) {
-      res.status(413).json({
-        error: 'Payload Too Large',
+  return (err: unknown, req: Request, res: Response, next: NextFunction): void => {
+    if (isPayloadTooLargeError(err)) {
+      sendApiError(req, res, {
         status: 413,
+        code: 'PAYLOAD_TOO_LARGE',
         message: `Request body exceeds the ${limit} limit for ${tier} routes. Reduce the payload size and retry.`,
         limit,
+        details: { limit, tier },
+        retryable: false,
       });
       return;
     }

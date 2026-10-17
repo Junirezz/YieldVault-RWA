@@ -136,8 +136,11 @@ function getInstanceId(): string {
  * the failure surfaces as a `Cannot read properties of undefined` TypeError
  * deep inside fire-and-forget writes, where callers only log it.
  */
-export function assertEventOutboxModelAvailable(client: unknown = prisma): void {
-  const delegate = (client as { eventOutbox?: { create?: unknown } } | null | undefined)?.eventOutbox;
+export function assertEventOutboxModelAvailable(client?: unknown): void {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prisma } = require('./prisma') as typeof import('./prisma');
+  const c = client ?? prisma;
+  const delegate = (c as { eventOutbox?: { create?: unknown } } | null | undefined)?.eventOutbox;
   if (!delegate || typeof delegate.create !== 'function') {
     throw new Error(
       'Prisma client is missing the eventOutbox model. Run `prisma generate` and ensure the EventOutbox migration is applied.',
@@ -170,14 +173,9 @@ class EventOutboxService {
    * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
-    if (!prisma.eventOutbox) {
-      throw new Error('prisma.eventOutbox is not initialized. Ensure Prisma schema includes eventOutbox model.');
-    }
-
     assertEventOutboxModelAvailable();
     const now = new Date();
     const vaultId = input.vaultId ?? input.aggregateId;
-    const record = await prisma.eventOutbox.create({
     const record = await getEventOutboxDelegate().create({
       data: {
         id: `obx-${crypto.randomUUID()}`,
@@ -186,7 +184,6 @@ class EventOutboxService {
         status: 'pending',
         aggregateType: input.aggregateType,
         aggregateId: input.aggregateId,
-        vaultId,
         sequence: await this.nextSequenceForVault(vaultId),
         attemptCount: 0,
         maxAttempts: input.maxAttempts ?? getMaxAttempts(),
@@ -222,7 +219,6 @@ class EventOutboxService {
       //    We select the head-of-line event per vault to enforce strict
       //    per-vault ordering (a vault's next event is only processed after
       //    its predecessor has been relayed or dead-lettered).
-      const candidates = await prisma.eventOutbox.findMany({
       // 1. Find eligible entries: pending or failed entries whose lock is expired
       const candidates = await getEventOutboxDelegate().findMany({
         where: {
@@ -233,7 +229,7 @@ class EventOutboxService {
           ],
         },
         orderBy: [
-          { vaultId: 'asc' },
+          { aggregateId: 'asc' },
           { sequence: 'asc' },
           { createdAt: 'asc' },
         ],
@@ -248,25 +244,23 @@ class EventOutboxService {
       //     process the lowest-sequence eligible event. This guarantees a
       //     consumer tracking vault.version never observes sequence N+1
       //     before sequence N for the same vault.
-      const headOfLine = new Map<string, typeof candidates[number]>();
+      const headOfLine = new Map<string, (typeof candidates)[number]>();
       for (const c of candidates) {
-        const key = c.vaultId ?? c.aggregateId;
+        const key = c.aggregateId;
         const existing = headOfLine.get(key);
         if (!existing || c.sequence < existing.sequence) {
           headOfLine.set(key, c);
         }
       }
       const orderedCandidates = Array.from(headOfLine.values()).sort((a, b) => {
-        const va = a.vaultId ?? a.aggregateId;
-        const vb = b.vaultId ?? b.aggregateId;
+        const va = a.aggregateId;
+        const vb = b.aggregateId;
         if (va !== vb) return va < vb ? -1 : 1;
         return a.sequence - b.sequence;
       });
 
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
       const candidateIds = orderedCandidates.map((e) => e.id);
-      await prisma.eventOutbox.updateMany({
-      const candidateIds = candidates.map((e) => e.id);
       await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
@@ -290,7 +284,7 @@ class EventOutboxService {
           lockedAt: now,
         },
         orderBy: [
-          { vaultId: 'asc' },
+          { aggregateId: 'asc' },
           { sequence: 'asc' },
           { createdAt: 'asc' },
         ],
@@ -318,12 +312,11 @@ class EventOutboxService {
             payload,
           );
 
-          await getEventOutboxDelegate().update({
           // Do not write the mark-as-sent update after abort; the event will be
           // re-relayed after restart (at-least-once delivery).
           if (signal?.aborted) break;
 
-          await prisma.eventOutbox.update({
+          await getEventOutboxDelegate().update({
             where: { id: entry.id },
             data: {
               status: 'relayed',
@@ -488,7 +481,6 @@ class EventOutboxService {
    */
   async replayOnStartup(): Promise<OutboxRelayResult> {
     assertEventOutboxModelAvailable();
-    const pendingCount = await prisma.eventOutbox.count({
     const pendingCount = await getEventOutboxDelegate().count({
       where: { status: { in: ['pending', 'failed'] } },
     });
@@ -738,15 +730,12 @@ class EventOutboxService {
    * concurrent writers.
    */
   private async nextSequenceForVault(vaultId: string): Promise<number> {
-    const result = await prisma.$transaction(async (tx) => {
-      const latest = await tx.eventOutbox.findFirst({
-        where: { vaultId },
-        orderBy: { sequence: 'desc' },
-        select: { sequence: true },
-      });
-      return (latest?.sequence ?? 0) + 1;
+    const latest = await getEventOutboxDelegate().findFirst({
+      where: { aggregateId: vaultId },
+      orderBy: { sequence: 'desc' },
+      select: { sequence: true },
     });
-    return result;
+    return (latest?.sequence ?? 0) + 1;
   }
 }
 

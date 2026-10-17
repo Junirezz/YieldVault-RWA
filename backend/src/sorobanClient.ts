@@ -337,7 +337,7 @@ export async function submitVaultOperation(
 
     // assembleTransaction injects the resource footprint and auth entries.
     // .build() gives a Transaction; it must be signed before submission.
-    const assembled = rpc.assembleTransaction(tx, simulated).build();
+    const assembled = rpc.assembleTransaction(tx, simulated).build() as any;
     const signature = await sourceSigner.sign(assembled.hash());
     assembled.addSignature(sourceSigner.publicKey, Buffer.from(signature));
 

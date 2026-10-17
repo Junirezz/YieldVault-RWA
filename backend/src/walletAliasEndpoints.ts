@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { walletAliasMappingService } from './walletAliasService';
 import { validate, WalletAliasLinkSchema, WalletAliasResolveQuerySchema } from './middleware/validate';
 import { readsLimiter } from './rateLimiter';
+import { sendApiError } from './middleware/apiError';
 
 const router = Router();
 
@@ -40,9 +41,9 @@ router.post(
         canonicalWallet,
       });
     } catch (err) {
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'WALLET_ALIAS_LINK_FAILED',
         message: err instanceof Error ? err.message : 'Failed to link wallet aliases',
       });
     }
@@ -62,9 +63,9 @@ router.get(
     const mapping = await walletAliasMappingService.resolveAlias(alias, source);
 
     if (!mapping) {
-      res.status(404).json({
-        error: 'Not Found',
+      sendApiError(req, res, {
         status: 404,
+        code: 'WALLET_ALIAS_NOT_FOUND',
         message: 'No identity linkage found for the provided alias',
       });
       return;
@@ -87,9 +88,9 @@ router.get('/:canonicalId', readsLimiter, async (req: Request, res: Response) =>
   const mapping = await walletAliasMappingService.getIdentityLinks(req.params.canonicalId);
 
   if (!mapping) {
-    res.status(404).json({
-      error: 'Not Found',
+    sendApiError(req, res, {
       status: 404,
+      code: 'CANONICAL_IDENTITY_NOT_FOUND',
       message: 'Canonical identity not found',
     });
     return;

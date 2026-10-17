@@ -353,23 +353,16 @@ export function triggerCacheInvalidation(
       }
 
       if (!Array.isArray(hookPatterns)) {
-        throw new TypeError('invalidation hook must return an array of patterns');
-      }
-
-      if (!Array.isArray(hookPatterns)) {
         console.error(
           JSON.stringify({
             level: 'error',
-            event: 'invalidation_hook_error',
-            error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
-            eventType,
             event: 'invalidation_hook_invalid_return',
             error: 'Invalidation hook must return an array of cache key patterns',
+            eventType,
           }),
         );
         continue;
       }
-      patterns.push(...hookPatterns);
       patterns.push(...hookPatterns.filter((pattern): pattern is string => typeof pattern === 'string'));
     } catch (err) {
       console.error(

@@ -22,7 +22,6 @@ import {
   revokeAllSessions,
 } from './auth';
 import vaultListRouter from './routes/vaults';
-import { loginHandler, nonceHandler, refreshHandler, requireAuth, verifyJwt } from './auth';
 import {
   authLimiter,
   authIpLimiter,
@@ -115,7 +114,6 @@ import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
-import vaultsListRouter from './routes/vaults';
 import walletAliasRouter from './walletAliasEndpoints';
 import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
@@ -650,7 +648,7 @@ async function handleTransactionExport(req: Request, res: Response): Promise<voi
   };
 
   try {
-    const artifact = buildTransactionExportArtifact(format, exportQuery);
+    const artifact = await buildTransactionExportArtifact(format, exportQuery);
     const fileName = buildTransactionExportFilename(format);
     const job = await recordExportJob({
       format,
@@ -822,14 +820,35 @@ app.use(maintenanceModeMiddleware);
  * GET /metrics
  * Exposes Prometheus metrics for operational monitoring
  */
-app.get('/metrics', async (_req: Request, res: Response) => {
+app.get('/metrics', async (req: Request, res: Response) => {
+  const scrapeToken =
+    process.env.METRICS_AUTH_TOKEN ||
+    process.env.METRICS_SCRAPE_TOKEN ||
+    process.env.PROMETHEUS_BEARER_TOKEN;
+
+  if (scrapeToken) {
+    const authHeader = req.headers.authorization;
+    const apiKeyHeader = req.headers['x-api-key'] || req.headers['apikey'];
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const apiKeyMatch = authHeader?.match(/^ApiKey\s+(.+)$/i);
+    const provided =
+      bearerMatch?.[1] ||
+      apiKeyMatch?.[1] ||
+      (typeof apiKeyHeader === 'string' ? apiKeyHeader : undefined);
+
+    if (!provided || provided !== scrapeToken) {
+      res.status(401).type('text/plain').send('Unauthorized');
+      return;
+    }
+  }
+
   try {
     syncJobGovernanceMetrics();
     latencyMonitoringService.syncSloMetrics();
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   } catch (err) {
-    res.status(500).end(err);
+    res.status(500).type('text/plain').send(err instanceof Error ? err.message : String(err));
   }
 });
 
@@ -987,7 +1006,6 @@ app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);
-apiV1.use('/vaults', vaultsListRouter);
 apiV1.use('/vaults', vaultListRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
@@ -2185,11 +2203,27 @@ app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: R
       message: 'Email requeued successfully',
       email,
     });
-  } catch {
-    res.status(404).json({
-      error: 'Not Found',
-      status: 404,
-      message: 'Email queue item not found',
+  } catch (err: unknown) {
+    const isNotFound =
+      (err && typeof err === 'object' && 'code' in err && (err as { code: unknown }).code === 'P2025') ||
+      (err instanceof Error &&
+        (err.name === 'NotFoundError' ||
+          err.message.includes('No EmailQueue found') ||
+          err.message.includes('not found')));
+
+    if (isNotFound) {
+      sendApiError(req, res, {
+        status: 404,
+        code: 'EMAIL_NOT_FOUND',
+        message: 'Email queue item not found',
+      });
+      return;
+    }
+
+    sendApiError(req, res, {
+      status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
+      message: err instanceof Error ? err.message : 'Failed to replay email',
     });
   }
 });
