@@ -91,3 +91,6 @@ jobs:
 
       - name: Check for database schema drift
         run: npm run db:check-drift
+
+      - name: Check dev (SQLite) vs prod (PostgreSQL) column type mapping
+        run: npm run db:check-types
