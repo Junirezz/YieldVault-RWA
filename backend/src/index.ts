@@ -4165,22 +4165,6 @@ app.get('/admin/jobs/dashboard', validateApiKey, async (_req: Request, res: Resp
 // ─── Dead-Letter Queue Admin Endpoints ─────────────────────────────────────
 
 /**
- * GET /admin/jobs/metrics
- * Returns background job runtime and governance metrics.
- */
-app.get('/admin/jobs/metrics', validateApiKey, (_req: Request, res: Response) => {
-  const metrics = getJobMetrics();
-  const health = getJobHealthStatus();
-
-  res.status(200).json({
-    summary: { health },
-    metrics,
-    prisma: getPrismaConfig(),
-    timestamp: new Date().toISOString(),
-  });
-});
-
-/**
  * GET /admin/jobs/dead-letters
  * Lists dead-letter queue records with optional filtering (jobName, status, limit, offset).
  * Requires API key authentication.
