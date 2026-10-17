@@ -653,6 +653,77 @@ fn test_strategy_response_rejects_negative_total_value() {
     assert_eq!(result, Err(VaultError::InvalidAmount));
 }
 
+/// Registers a `MaliciousStrategy` reporting `value` in `asset`.
+fn seeded_strategy(env: &Env, vault_id: &Address, asset: &Address, value: i128) -> Address {
+    let strategy_id = env.register(MaliciousStrategy, ());
+    env.as_contract(&strategy_id, || {
+        let storage = env.storage().instance();
+        storage.set(&StrategyTestKey::Vault, vault_id);
+        storage.set(&StrategyTestKey::Asset, asset);
+        storage.set(&StrategyTestKey::Value, &value);
+    });
+    strategy_id
+}
+
+/// Issue #1530: strategy reads enforce the full `StrategyValidator` bounds.
+#[test]
+fn test_strategy_response_value_bounds() {
+    use crate::strategy_validation::MAX_STRATEGY_VALUE;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
+    for (value, expected) in [
+        (0, Ok(0)),
+        (MAX_STRATEGY_VALUE, Ok(MAX_STRATEGY_VALUE)),
+        (MAX_STRATEGY_VALUE + 1, Err(VaultError::MathOverflow)),
+        (i128::MAX, Err(VaultError::MathOverflow)),
+        (-1, Err(VaultError::InvalidAmount)),
+    ] {
+        let strategy = seeded_strategy(&env, &vault_id, &usdc.address, value);
+        assert_eq!(
+            YieldVault::validate_strategy_response(&env, &strategy, &usdc.address),
+            expected,
+            "value {value}"
+        );
+    }
+}
+
+#[test]
+fn test_strategy_response_rejects_zero_strategy_address() {
+    use crate::strategy_validation::ZERO_CONTRACT_STRKEY;
+
+    let env = Env::default();
+    let usdc = create_token(&env, &Address::generate(&env));
+    let zero = Address::from_str(&env, ZERO_CONTRACT_STRKEY);
+    assert_eq!(
+        YieldVault::validate_strategy_response(&env, &zero, &usdc.address),
+        Err(VaultError::InvalidAmount)
+    );
+}
+
+#[test]
+fn test_total_assets_rejects_strategy_value_above_max() {
+    use crate::strategy_validation::MAX_STRATEGY_VALUE;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
+    let strategy = seeded_strategy(&env, &vault_id, &usdc.address, MAX_STRATEGY_VALUE + 1);
+    vault.whitelist_strategy(&strategy, &true);
+    vault.set_strategy(&strategy);
+
+    assert!(vault.try_total_assets().is_err());
+}
+
 #[test]
 #[should_panic]
 fn test_report_benji_yield_before_strategy_configured_panics_on_missing_key() {

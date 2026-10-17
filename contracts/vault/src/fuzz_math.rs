@@ -43,7 +43,9 @@ fn mint(env: &Env, token_addr: &Address, _admin: &Address, recipient: &Address, 
 
 // ── pure math helpers (delegates to centralized math module) ──────────────────
 
-use crate::math::{try_assets_to_shares as shares_for, try_shares_to_assets as assets_for};
+use crate::math::{
+    try_assets_to_shares as shares_for, try_shares_to_assets as assets_for, MathError,
+};
 
 // ── property strategies ───────────────────────────────────────────────────────
 

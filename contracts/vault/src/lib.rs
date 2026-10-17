@@ -126,6 +126,7 @@ pub use risk_limits::ProtocolRiskLimits;
 
 use crate::strategy::StrategyClient;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
+use crate::strategy_validation::StrategyValidator;
 use crate::upgrade::{
     get_admin, get_pending_admin, get_storage_version, is_initialized, set_admin, set_initialized,
     set_pending_admin, set_storage_version,
@@ -891,16 +892,17 @@ impl YieldVault {
         strategy_addr: &Address,
         expected_asset: &Address,
     ) -> Result<i128, VaultError> {
+        StrategyValidator::validate_strategy_address(env, strategy_addr)?;
         let strategy_client = StrategyClient::new(env, strategy_addr);
         let actual_asset = strategy_client.asset();
         if actual_asset != *expected_asset {
             return Err(VaultError::UnauthorizedStrategy);
         }
+        StrategyValidator::validate_decimals(token::Client::new(env, &actual_asset).decimals())?;
 
+        // Non-negative and at most `MAX_STRATEGY_VALUE` (issue #1530).
         let value = strategy_client.total_value();
-        if value < 0 {
-            return Err(VaultError::InvalidAmount);
-        }
+        StrategyValidator::validate_total_value(value)?;
 
         Ok(value)
     }
@@ -1379,17 +1381,12 @@ impl YieldVault {
                     let token = Self::token(env.clone());
                     let price_data = oracle_client.get_price(&token, &token);
                     let max_age = Self::oracle_heartbeat(env.clone());
-                    let last: Option<oracle::PriceData> = env
-                        .storage()
-                        .instance()
-                        .get(&DataKeyExt::Risk(RiskExtKey::LastPx));
                     let last_price = Self::last_oracle_price(&env);
                     oracle::OracleValidator::validate_price_data(
                         &env,
                         &price_data,
                         max_age,
                         Some(oracle::MAX_PRICE_DEVIATION_BPS),
-                        last.as_ref(),
                         last_price.as_ref(),
                     )
                     .map_err(|_| VaultError::OracleValidationFailed)?;
@@ -1560,6 +1557,7 @@ impl YieldVault {
         if harvested <= 0 {
             return Err(VaultError::InvalidYieldAmount);
         }
+        StrategyValidator::validate_total_value(harvested)?;
 
         // Issue #1230: Performance fee — redirect portion of yield above watermark
         let perf_enabled: bool = env
@@ -1712,10 +1710,11 @@ impl YieldVault {
     /// During migration, accepts signatures from either active or previous signer sets.
     ///
     /// ### Parameters
-    /// * `approvals` - Vector of addresses that have approved the operation
+    /// * `approvals` - Vector of addresses that have approved the operation;
+    ///   every approver must authorize this invocation (`require_auth`)
     ///
     /// ### Returns
-    /// Ok if threshold is met, panics otherwise
+    /// Ok if threshold is met, otherwise the `MultiSignerValidator` error
     pub fn require_governance_threshold(
         env: Env,
         approvals: Vec<Address>,
@@ -1734,30 +1733,19 @@ impl YieldVault {
         // During migration, accept both old and new signer sets
         let is_migration = current_time < migration_deadline && !config.previous_signers.is_empty();
 
-        if is_migration {
-            let old_signers = config.previous_signers;
-
-            // Try new signer set first, then fall back to old set
-            if permissions::MultiSignerValidator::verify_threshold(&signers, threshold, &approvals)
-                .is_ok()
-            {
-                return Ok(());
-            }
-            if permissions::MultiSignerValidator::verify_threshold(
-                &old_signers,
-                threshold,
-                &approvals,
+        // During migration either set may satisfy the threshold. The set is
+        // chosen without auth checks so each approver signs exactly once.
+        let active = if is_migration
+            && permissions::MultiSignerValidator::check_threshold(
+                &env, &signers, threshold, &approvals,
             )
-            .is_ok()
-            {
-                return Ok(());
-            }
-            return Err(VaultError::GovernanceThresholdNotMet);
+            .is_err()
+        {
+            config.previous_signers
         } else {
-            permissions::MultiSignerValidator::verify_threshold(&signers, threshold, &approvals)
-                .map_err(|_| VaultError::GovernanceThresholdNotMet)?;
-        }
-        Ok(())
+            signers
+        };
+        permissions::MultiSignerValidator::verify_threshold(&env, &active, threshold, &approvals)
     }
 
     /// Clear migration state. Called after old signer set is no longer needed.
@@ -3276,6 +3264,11 @@ impl YieldVault {
         // Verify invest slippage
         let to_strategy_val_after =
             Self::validate_strategy_response(&env, &to_strategy, &token_addr)?;
+        StrategyValidator::validate_deposit_result(
+            withdrawn_assets,
+            to_strategy_val_before,
+            to_strategy_val_after,
+        )?;
         let invested_value = to_strategy_val_after
             .checked_sub(to_strategy_val_before)
             .unwrap_or(0);

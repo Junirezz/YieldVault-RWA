@@ -209,7 +209,7 @@ export function parsePaginationQuery(
     query.cursor = req.query.cursor;
   }
 
-  // Parse page (1-based, clamped — never rejected)
+  // Parse page (1-based, clamped to 1..maxPage — never rejected, Issue #1430)
   if (req.query.page !== undefined) {
     const parsedPage = parseInt(req.query.page as string, 10);
     if (!Number.isNaN(parsedPage) && parsedPage > 0) {

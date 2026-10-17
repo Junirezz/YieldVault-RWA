@@ -61,6 +61,8 @@ pub fn is_valid_delay(delay_secs: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
     use proptest::prelude::*;
     use soroban_sdk::testutils::{Address as _, Ledger};

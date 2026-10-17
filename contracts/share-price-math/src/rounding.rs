@@ -3,8 +3,6 @@
 //! The vault must never round in the user's favour: rounding always leaves the
 //! residual dust with the vault, so `deposit -> withdraw` round trips can never
 //! mint value out of nothing.
-
-use crate::MathError;
 //!
 //! | Operation  | Direction | Rounding |
 //! |------------|-----------|----------|
@@ -17,6 +15,8 @@ use crate::MathError;
 //! vectors are published as `fixtures/rounding_fixtures.json` so that the
 //! TypeScript SDK and the backend quote service can assert byte-identical
 //! results against this implementation.
+
+use crate::MathError;
 
 /// Rounding direction applied to the residual of an integer division.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

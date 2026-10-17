@@ -79,21 +79,6 @@ export function buildApiErrorBody(options: BuildApiErrorBodyOptions): ApiErrorBo
     ...(options.correlationId ? { correlationId: options.correlationId } : {}),
     ...(options.traceId ? { traceId: options.traceId } : {}),
   };
-  /**
-   * Short, stable headline for the failure. Part of the published error
-   * contract (see `ErrorEnvelope` in openapi.json) alongside `message`.
-   */
-  summary?: string;
-  /**
-   * Field-level failures, surfaced at the top level for clients that read
-   * `errors` directly. `details` carries the same payload for the generic
-   * envelope.
-   */
-  errors?: unknown[];
-  /** Request path, echoed on routing failures so clients can log it directly. */
-  path?: string;
-  summary?: string;
-  errors?: unknown;
 }
 
 export function sendApiError(
