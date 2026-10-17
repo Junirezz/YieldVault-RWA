@@ -50,6 +50,8 @@ pub enum BridgeError {
     NonceAlreadyUsed = 10,
     NoFallbackAvailable = 11,
     ProviderDisabled = 12,
+    ArithmeticOverflow = 13,
+    InvalidLimits = 14,
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -238,13 +240,18 @@ impl BridgeCompat {
         if !(0..=BPS_DENOMINATOR).contains(&fee_bps) {
             return Err(BridgeError::InvalidAmount);
         }
+        // Bound max_transfer so fee math (amount * fee_bps) cannot overflow.
+        if max_transfer <= 0 || max_transfer > i128::MAX / BPS_DENOMINATOR {
+            return Err(BridgeError::InvalidLimits);
+        }
 
         let provider_id = env
             .storage()
             .instance()
             .get::<_, u32>(&DataKey::ProviderNonce)
             .unwrap_or(0)
-            + 1;
+            .checked_add(1)
+            .ok_or(BridgeError::ArithmeticOverflow)?;
 
         let provider = BridgeProvider {
             id: provider_id,
@@ -340,6 +347,13 @@ impl BridgeCompat {
     /// Update transfer limits. Admin-only.
     pub fn set_transfer_limits(env: Env, limits: TransferLimits) -> Result<(), BridgeError> {
         Self::require_admin(&env)?;
+        if limits.per_transfer_limit <= 0
+            || limits.epoch_volume_limit <= 0
+            || limits.per_transfer_limit > limits.epoch_volume_limit
+            || limits.epoch_duration == 0
+        {
+            return Err(BridgeError::InvalidLimits);
+        }
         env.storage().instance().set(&DataKey::Limits, &limits);
         Ok(())
     }
@@ -380,8 +394,13 @@ impl BridgeCompat {
             return Err(BridgeError::InvalidAmount);
         }
 
-        let fee_amount = amount * provider.fee_bps / BPS_DENOMINATOR;
-        let receive_amount = amount - fee_amount;
+        let fee_amount = amount
+            .checked_mul(provider.fee_bps)
+            .ok_or(BridgeError::ArithmeticOverflow)?
+            / BPS_DENOMINATOR;
+        let receive_amount = amount
+            .checked_sub(fee_amount)
+            .ok_or(BridgeError::ArithmeticOverflow)?;
 
         Ok(TransferEstimate {
             provider_id: pid,
@@ -492,9 +511,12 @@ impl BridgeCompat {
             .instance()
             .get(&DataKey::UserTransferCount(sender.clone()))
             .unwrap_or(0);
+        let new_user_count = user_count
+            .checked_add(1)
+            .ok_or(BridgeError::ArithmeticOverflow)?;
         env.storage().instance().set(
             &DataKey::UserTransferCount(sender.clone()),
-            &(user_count + 1),
+            &new_user_count,
         );
 
         env.events().publish(
@@ -679,7 +701,11 @@ impl BridgeCompat {
         };
 
         // Reset epoch if expired
-        if now >= accounting.start + limits.epoch_duration {
+        let epoch_end = accounting
+            .start
+            .checked_add(limits.epoch_duration)
+            .ok_or(BridgeError::ArithmeticOverflow)?;
+        if now >= epoch_end {
             accounting.volume = 0;
             accounting.start = now;
         }
@@ -818,6 +844,9 @@ mod tests {
             assert!(!env.storage().instance().has(&DataKey::EpochStart));
             assert!(!env.storage().instance().has(&DataKey::EpochVolume));
         });
+    }
+
+    #[test]
     fn transfer_ids_are_context_bound_and_duplicate_ids_are_rejected() {
         let env = Env::default();
         env.mock_all_auths();
@@ -840,7 +869,7 @@ mod tests {
 
         let endpoint_a = Address::generate(&env);
         let endpoint_b = Address::generate(&env);
-        let chains = Vec::from_array(&env, &[1u32]);
+        let chains = Vec::from_array(&env, [1u32]);
         let provider_a = client.register_provider(
             &String::from_str(&env, "provider-a"),
             &BridgeProviderKind::Wormhole,
@@ -891,6 +920,8 @@ mod tests {
         );
         assert_eq!(duplicate, Err(Ok(BridgeError::NonceAlreadyUsed)));
         assert_eq!(client.transfer(&id_a), Some(transfer_a));
+    }
+
     // ── Acceptance Criteria Tests ────────────────────────────────────────────
 
     #[test]
@@ -1063,5 +1094,56 @@ mod tests {
 
         let tx_id = client.transfer_out(&sender, &recipient, &10_000, &1, &Some(provider_id));
         assert_eq!(tx_id, 1);
+    }
+
+    #[test]
+    fn test_checked_math_and_limit_validation() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let endpoint = Address::generate(&env);
+        client.initialize(&admin, &token);
+
+        let chains = Vec::from_array(&env, [1]);
+        let name = String::from_str(&env, "P");
+
+        // max_transfer must be positive and bounded so fee math cannot overflow.
+        for bad in [0, -1, i128::MAX] {
+            let r = client.try_register_provider(
+                &name,
+                &BridgeProviderKind::Custom,
+                &endpoint,
+                &10_000,
+                &bad,
+                &chains,
+            );
+            assert_eq!(r, Err(Ok(BridgeError::InvalidLimits)));
+        }
+        let id = client.register_provider(
+            &name,
+            &BridgeProviderKind::Custom,
+            &endpoint,
+            &10_000,
+            &(i128::MAX / BPS_DENOMINATOR),
+            &chains,
+        );
+
+        // amount = i128::MAX returns an error instead of aborting.
+        let r = client.try_estimate_transfer(&i128::MAX, &1, &Some(id));
+        assert!(r.is_err());
+
+        // epoch_duration = 0 and non-positive limits are rejected.
+        let mut limits = client.transfer_limits();
+        limits.epoch_duration = 0;
+        assert_eq!(
+            client.try_set_transfer_limits(&limits),
+            Err(Ok(BridgeError::InvalidLimits))
+        );
+        let mut limits = client.transfer_limits();
+        limits.per_transfer_limit = 0;
+        assert_eq!(
+            client.try_set_transfer_limits(&limits),
+            Err(Ok(BridgeError::InvalidLimits))
+        );
     }
 }
