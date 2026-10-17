@@ -19,6 +19,7 @@ import { writeAheadAuditLog } from '../writeAheadAuditLog';
 
 // Issue #719: Health probe decomposition
 import { healthProbeService } from '../healthProbe';
+import { DatabaseManager, NoopDatabasePool } from '../database';
 
 // Issue #723: Scoped admin tokens
 import { scopedAdminTokenStore } from '../scopedAdminTokens';
@@ -402,6 +403,41 @@ describe('Issue #719: Health probe decomposition for dependencies', () => {
     const state = await healthProbeService.checkDependency('queue');
     expect(state.status).toBe('down');
     expect(state.lastError).toBe('Probe not registered');
+  });
+
+  it('marks the test no-op database pool as degraded instead of healthy', async () => {
+    const pool = new NoopDatabasePool('primary', 'test-noop');
+
+    await expect(pool.isHealthy()).resolves.toBe(false);
+    expect(pool.getHealthState()).toBe('degraded');
+
+    process.env.NODE_ENV = 'test';
+    delete process.env.DATABASE_URL;
+    const manager = new DatabaseManager();
+    await expect(manager.getHealth()).resolves.toMatchObject({
+      primary: 'degraded',
+      replica: 'degraded',
+    });
+  });
+
+  it('keeps production misconfiguration down instead of treating it as healthy', async () => {
+    const pool = new NoopDatabasePool('primary', 'misconfigured');
+
+    await expect(pool.isHealthy()).resolves.toBe(false);
+    expect(pool.getHealthState()).toBe('down');
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalDatabaseUrl = process.env.DATABASE_URL;
+
+    process.env.NODE_ENV = 'production';
+    delete process.env.DATABASE_URL;
+
+    try {
+      expect(() => new DatabaseManager()).toThrow(/DATABASE_URL is required in production/i);
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv;
+      if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = originalDatabaseUrl;
+    }
   });
 });
 

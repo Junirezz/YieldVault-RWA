@@ -28,15 +28,6 @@
         "argsIgnorePattern": "^_"
       }
     ],
-    "no-console": [
-      "warn",
-      {
-        "allow": [
-          "warn",
-          "error",
-          "log"
-        ]
-      }
-    ]
+    "no-console": "error"
   }
 }

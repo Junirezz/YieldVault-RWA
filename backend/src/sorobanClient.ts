@@ -65,22 +65,95 @@ function resolveNetworkPassphrase(): string {
   return NETWORK_PASSPHRASES[network] ?? NETWORK_PASSPHRASES.testnet;
 }
 
-function validateEnvironment(): void {
-  if (!process.env.STELLAR_SECRET_KEY) {
-    throw new Error('STELLAR_SECRET_KEY environment variable is not set');
-  }
-  // Validate contract ID is resolvable early so the error message is clear.
-  resolveContractId();
+export interface StellarSigner {
+  publicKey: string;
+  sign(payload: Uint8Array): Promise<Uint8Array>;
 }
 
-function getSourceKeypair(): Keypair {
+let configuredSignerPair: { active: StellarSigner; standby: StellarSigner } | undefined;
+
+/**
+ * Configure an active and standby signer. KMS/HSM adapters implement StellarSigner
+ * and return the raw Ed25519 signature for the transaction hash passed to sign().
+ * The returned function restores environment-based signer resolution.
+ */
+export function configureStellarSigners(
+  active: StellarSigner,
+  standby: StellarSigner,
+): () => void {
+  if (active.publicKey === standby.publicKey) {
+    throw new Error('Active and standby Stellar signers must have different public keys');
+  }
+  const pair = { active, standby };
+  configuredSignerPair = pair;
+  return () => {
+    if (configuredSignerPair === pair) configuredSignerPair = undefined;
+  };
+}
+
+/**
+ * Rotate to the prepared standby signer without dropping the previous signer.
+ * Operationally, authorize the standby public key on the Stellar account first,
+ * configure both signers, rotate, and verify a successful signed transaction.
+ * Persist the new active signer in deployment configuration before removing the
+ * old key from the signer pair.
+ */
+export function rotateStellarSigner(): string {
+  if (configuredSignerPair) {
+    [configuredSignerPair.active, configuredSignerPair.standby] = [
+      configuredSignerPair.standby,
+      configuredSignerPair.active,
+    ];
+    return configuredSignerPair.active.publicKey;
+  }
+
+  const activeSlot = process.env.STELLAR_ACTIVE_SIGNER === 'next' ? 'next' : 'primary';
+  const standbySlot = activeSlot === 'primary' ? 'next' : 'primary';
+  const standbySecret = standbySlot === 'next'
+    ? process.env.STELLAR_SECRET_KEY_NEXT
+    : process.env.STELLAR_SECRET_KEY;
+  if (!standbySecret) {
+    throw new Error('A standby Stellar signer must be configured before rotation');
+  }
+  process.env.STELLAR_ACTIVE_SIGNER = standbySlot;
+  return createEnvironmentSigner(standbySecret).publicKey;
+}
+
+function createEnvironmentSigner(secret: string): StellarSigner {
   try {
-    return Keypair.fromSecret(process.env.STELLAR_SECRET_KEY!);
+    const keypair = Keypair.fromSecret(secret);
+    return {
+      publicKey: keypair.publicKey(),
+      sign: async (payload) => keypair.sign(Buffer.from(payload)),
+    };
   } catch (err) {
     throw new Error(
-      `Invalid STELLAR_SECRET_KEY: ${err instanceof Error ? err.message : String(err)}`,
+      `Invalid Stellar secret key: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+function getSourceSigner(): StellarSigner {
+  if (configuredSignerPair) return configuredSignerPair.active;
+
+  const activeSlot = process.env.STELLAR_ACTIVE_SIGNER === 'next' ? 'next' : 'primary';
+  const secret = activeSlot === 'next'
+    ? process.env.STELLAR_SECRET_KEY_NEXT
+    : process.env.STELLAR_SECRET_KEY;
+  if (!secret) {
+    throw new Error(
+      activeSlot === 'next'
+        ? 'STELLAR_SECRET_KEY_NEXT is not set for the selected signer'
+        : 'STELLAR_SECRET_KEY environment variable is not set',
+    );
+  }
+  return createEnvironmentSigner(secret);
+}
+
+function validateEnvironment(): void {
+  getSourceSigner();
+  // Validate contract ID is resolvable early so the error message is clear.
+  resolveContractId();
 }
 
 // ─── Error types ─────────────────────────────────────────────────────────────
@@ -178,7 +251,7 @@ export async function submitVaultOperation(
     validateEnvironment();
 
     const rpcClient = getRpcClient();
-    const sourceKeypair = getSourceKeypair();
+    const sourceSigner = getSourceSigner();
     const contractId = resolveContractId();
     const networkPassphrase = resolveNetworkPassphrase();
 
@@ -198,7 +271,7 @@ export async function submitVaultOperation(
       traceId: getCurrentTraceId(),
     });
 
-    const sourceAccount = await rpcClient.getAccount(sourceKeypair.publicKey());
+    const sourceAccount = await rpcClient.getAccount(sourceSigner.publicKey);
     const contract = new Contract(contractId);
 
     // Convert the decimal token amount to exact 7-decimal base units.
@@ -265,7 +338,8 @@ export async function submitVaultOperation(
     // assembleTransaction injects the resource footprint and auth entries.
     // .build() gives a Transaction; it must be signed before submission.
     const assembled = rpc.assembleTransaction(tx, simulated).build();
-    assembled.sign(sourceKeypair);
+    const signature = await sourceSigner.sign(assembled.hash());
+    assembled.addSignature(sourceSigner.publicKey, Buffer.from(signature));
 
     logger.log('debug', `Submitting assembled Soroban transaction for ${operationType}`, {
       traceId: getCurrentTraceId(),

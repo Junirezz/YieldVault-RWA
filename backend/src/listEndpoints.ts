@@ -15,6 +15,7 @@ import {
   parsePaginationQuery,
   clampLimitNumber,
   clampPageNumber,
+  validateSortBy,
   paginateWithCursor,
   paginateWithOffset,
   sortItems,
@@ -40,6 +41,7 @@ import {
 import { tenantGuard } from './middleware/tenantGuard';
 import { createTimeoutFor } from './middleware/timeoutMiddleware';
 import { validate, PaginationQuerySchema, TransactionListQuerySchema } from './middleware/validate';
+import { logger } from './middleware/structuredLogging';
 import { getPrismaClient } from './prismaClient';
 
 const router = Router();
@@ -202,6 +204,7 @@ export const TRANSACTION_PAGINATION_CONFIG: Partial<PaginationConfig> = {
   defaultLimit: 20,
   maxLimit: 100,
   defaultSortBy: 'timestamp',
+  allowedSortBy: ['timestamp', 'type', 'status', 'amount', 'asset', 'walletAddress', 'id'],
   defaultSortOrder: 'desc',
 };
 
@@ -209,6 +212,7 @@ const PORTFOLIO_PAGINATION_CONFIG: Partial<PaginationConfig> = {
   defaultLimit: 20,
   maxLimit: 100,
   defaultSortBy: 'valueUsd',
+  allowedSortBy: ['valueUsd', 'asset', 'vaultName', 'status', 'walletAddress', 'id'],
   defaultSortOrder: 'desc',
 };
 
@@ -216,6 +220,7 @@ const VAULT_HISTORY_PAGINATION_CONFIG: Partial<PaginationConfig> = {
   defaultLimit: 30,
   maxLimit: 365,
   defaultSortBy: 'date',
+  allowedSortBy: ['date', 'value', 'id'],
   defaultSortOrder: 'desc',
 };
 
@@ -467,8 +472,19 @@ export async function buildTransactionsResponse(
   const page = clampPageNumber(query.page);
   const normalizedDateRange = parseDateRangeOrThrow({ from: query.from, to: query.to });
 
-  const sortBy = query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy ?? 'timestamp';
+  const sortBy = validateSortBy(
+    query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy ?? 'timestamp',
+    TRANSACTION_PAGINATION_CONFIG,
+  );
   const sortOrder = query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc';
+  const orderByField =
+    sortBy === 'type' ? 'type' :
+    sortBy === 'status' ? 'status' :
+    sortBy === 'amount' ? 'amount' :
+    sortBy === 'asset' ? 'asset' :
+    sortBy === 'walletAddress' ? 'user' :
+    sortBy === 'id' ? 'id' :
+    'timestamp';
 
   const where = {
     ...(query.type ? { type: query.type } : {}),
@@ -488,7 +504,7 @@ export async function buildTransactionsResponse(
     prisma.transaction.count({ where: where as any }),
     prisma.transaction.findMany({
       where: where as any,
-      orderBy: { [sortBy === 'timestamp' ? 'timestamp' : 'timestamp']: sortOrder },
+      orderBy: { [orderByField]: sortOrder },
       take: limit + 1,
       ...(query.cursor
         ? { cursor: { id: Buffer.from(query.cursor, 'base64url').toString('utf-8') }, skip: 1 }
@@ -527,7 +543,10 @@ export function getTransactionsForExport(query: TransactionExportQuery): Transac
     to: query.endDate ?? query.to,
     walletAddress: query.walletAddress,
   };
-  const sortBy = query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy;
+  const sortBy = validateSortBy(
+    query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy,
+    TRANSACTION_PAGINATION_CONFIG,
+  );
   const sortOrder = query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc';
 
   let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
@@ -633,10 +652,14 @@ function escapeCsvValue(value: unknown): string {
 export function buildPortfolioHoldingsResponse(
   query: WalletStateQuery
 ): PaginatedResponse<PortfolioHolding> {
+  const sortBy = validateSortBy(
+    query.sortBy ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortBy,
+    PORTFOLIO_PAGINATION_CONFIG,
+  );
   const pagination = {
     limit: clampLimitNumber(query.limit, PORTFOLIO_PAGINATION_CONFIG),
     cursor: query.cursor,
-    sortBy: query.sortBy ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortBy,
+    sortBy,
     sortOrder: query.sortOrder ?? PORTFOLIO_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
   };
   const filters = {
@@ -659,10 +682,14 @@ export function buildPortfolioHoldingsResponse(
 export function buildVaultHistoryResponse(
   query: Pick<WalletStateQuery, 'limit' | 'cursor' | 'sortBy' | 'sortOrder' | 'from' | 'to'>
 ): PaginatedResponse<VaultHistoryPoint> {
+  const sortBy = validateSortBy(
+    query.sortBy ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortBy,
+    VAULT_HISTORY_PAGINATION_CONFIG,
+  );
   const pagination = {
     limit: clampLimitNumber(query.limit, VAULT_HISTORY_PAGINATION_CONFIG),
     cursor: query.cursor,
-    sortBy: query.sortBy ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortBy,
+    sortBy,
     sortOrder: query.sortOrder ?? VAULT_HISTORY_PAGINATION_CONFIG.defaultSortOrder ?? 'desc',
   };
   const filters = {
@@ -771,7 +798,23 @@ router.get('/transactions',
       });
       return;
     }
-    console.error('Error fetching transactions:', error);
+    if (error instanceof Error && /Invalid sortBy value/.test(error.message)) {
+      logger.log('warn', 'Rejected invalid transaction sort field', {
+        requestedSortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
+        allowedSortBy: TRANSACTION_PAGINATION_CONFIG.allowedSortBy,
+        error: error.message,
+      });
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: error.message,
+      });
+      return;
+    }
+    logger.log('error', 'Error fetching transactions', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
@@ -910,7 +953,23 @@ router.get('/portfolio/holdings',
 
     sendPaginatedResponse(res, response.data, response.pagination);
   } catch (error) {
-    console.error('Error fetching portfolio holdings:', error);
+    if (error instanceof Error && /Invalid sortBy value/.test(error.message)) {
+      logger.log('warn', 'Rejected invalid portfolio sort field', {
+        requestedSortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
+        allowedSortBy: PORTFOLIO_PAGINATION_CONFIG.allowedSortBy,
+        error: error.message,
+      });
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: error.message,
+      });
+      return;
+    }
+    logger.log('error', 'Error fetching portfolio holdings', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
@@ -963,7 +1022,23 @@ router.get('/vault/history',
       });
       return;
     }
-    console.error('Error fetching vault history:', error);
+    if (error instanceof Error && /Invalid sortBy value/.test(error.message)) {
+      logger.log('warn', 'Rejected invalid vault history sort field', {
+        requestedSortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
+        allowedSortBy: VAULT_HISTORY_PAGINATION_CONFIG.allowedSortBy,
+        error: error.message,
+      });
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: error.message,
+      });
+      return;
+    }
+    logger.log('error', 'Error fetching vault history', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
@@ -1022,7 +1097,10 @@ router.get('/vault/apy/history',
       count: data.length,
     });
   } catch (err) {
-    console.error('Error fetching APY history:', err);
+    logger.log('error', 'Error fetching APY history', {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     res.status(500).json({
       error: 'Internal Server Error',
       status: 500,
