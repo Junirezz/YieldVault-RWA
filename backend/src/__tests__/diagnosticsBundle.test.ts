@@ -105,9 +105,11 @@ describe('diagnosticsBundleHandler', () => {
     expect(deps).toHaveProperty('jobs');
   });
 
-  it('redacts sensitive environment variables', async () => {
-    // Set a sensitive env var to test redaction
+  it('redacts sensitive environment variables and fully masks secrets without partial disclosure', async () => {
+    // Set sensitive env vars to test redaction
     process.env.NODE_ENV = 'test';
+    process.env.JWT_SECRET = 'super-secret-jwt-token-key-12345';
+    process.env.RATE_LIMIT_REDIS_URL = 'redis://user:secretpassword123@localhost:6379';
     process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '5';
 
     const req = mockReq();
@@ -117,6 +119,13 @@ describe('diagnosticsBundleHandler', () => {
 
     const config = res.body.config;
     expect(config.NODE_ENV).toBe('test');
+    // JWT_SECRET should never appear in diagnostics bundle
+    expect(config).not.toHaveProperty('JWT_SECRET');
+    // Sensitive keys under allowed prefixes must be fully masked
+    if (config.RATE_LIMIT_REDIS_URL) {
+      expect(config.RATE_LIMIT_REDIS_URL).toBe('***REDACTED***');
+      expect(config.RATE_LIMIT_REDIS_URL).not.toContain('secretpassword');
+    }
     // Non-allowed keys should not appear
     expect(config).not.toHaveProperty('HOME');
     expect(config).not.toHaveProperty('PATH');

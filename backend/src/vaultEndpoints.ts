@@ -956,7 +956,6 @@ router.get('/receipts', readsLimiter, async (req: Request, res: Response) => {
     req.query.limit === undefined ? undefined : parseInt(req.query.limit as string, 10),
     RECEIPTS_PAGINATION_CONFIG
   );
-  const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 100);
   const cursor = req.query.cursor as string | undefined;
 
   const where = wallet ? { user: wallet } : {};

@@ -83,7 +83,6 @@ export function initTracing(): void {
   const exporter = new OTLPTraceExporter({ url: `${OTLP_ENDPOINT}/v1/traces` });
 
   sdk = new NodeSDK({
-    resource: buildResource({
     resource: new Resource({
       [ATTR_SERVICE_NAME]: SERVICE_NAME,
       [ATTR_SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',

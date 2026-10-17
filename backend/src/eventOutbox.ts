@@ -36,9 +36,14 @@ import {
  * Resolving the delegate at call time (with a clear error if unavailable)
  * makes the failure mode explicit and robust across runtime paths.
  */
-function getEventOutboxDelegate() {
+function getPrismaClient() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { prisma } = require('./prisma') as typeof import('./prisma');
+  return prisma;
+}
+
+function getEventOutboxDelegate() {
+  const prisma = getPrismaClient();
   const delegate = prisma?.eventOutbox;
   if (!delegate) {
     throw new Error(
@@ -136,8 +141,9 @@ function getInstanceId(): string {
  * the failure surfaces as a `Cannot read properties of undefined` TypeError
  * deep inside fire-and-forget writes, where callers only log it.
  */
-export function assertEventOutboxModelAvailable(client: unknown = prisma): void {
-  const delegate = (client as { eventOutbox?: { create?: unknown } } | null | undefined)?.eventOutbox;
+export function assertEventOutboxModelAvailable(client?: unknown): void {
+  const target = (client ?? getPrismaClient()) as { eventOutbox?: { create?: unknown } } | null | undefined;
+  const delegate = target?.eventOutbox;
   if (!delegate || typeof delegate.create !== 'function') {
     throw new Error(
       'Prisma client is missing the eventOutbox model. Run `prisma generate` and ensure the EventOutbox migration is applied.',
@@ -170,14 +176,9 @@ class EventOutboxService {
    * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
-    if (!prisma.eventOutbox) {
-      throw new Error('prisma.eventOutbox is not initialized. Ensure Prisma schema includes eventOutbox model.');
-    }
-
     assertEventOutboxModelAvailable();
     const now = new Date();
     const vaultId = input.vaultId ?? input.aggregateId;
-    const record = await prisma.eventOutbox.create({
     const record = await getEventOutboxDelegate().create({
       data: {
         id: `obx-${crypto.randomUUID()}`,
@@ -222,7 +223,6 @@ class EventOutboxService {
       //    We select the head-of-line event per vault to enforce strict
       //    per-vault ordering (a vault's next event is only processed after
       //    its predecessor has been relayed or dead-lettered).
-      const candidates = await prisma.eventOutbox.findMany({
       // 1. Find eligible entries: pending or failed entries whose lock is expired
       const candidates = await getEventOutboxDelegate().findMany({
         where: {
@@ -265,8 +265,6 @@ class EventOutboxService {
 
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
       const candidateIds = orderedCandidates.map((e) => e.id);
-      await prisma.eventOutbox.updateMany({
-      const candidateIds = candidates.map((e) => e.id);
       await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
@@ -318,12 +316,11 @@ class EventOutboxService {
             payload,
           );
 
-          await getEventOutboxDelegate().update({
           // Do not write the mark-as-sent update after abort; the event will be
           // re-relayed after restart (at-least-once delivery).
           if (signal?.aborted) break;
 
-          await prisma.eventOutbox.update({
+          await getEventOutboxDelegate().update({
             where: { id: entry.id },
             data: {
               status: 'relayed',
@@ -488,7 +485,6 @@ class EventOutboxService {
    */
   async replayOnStartup(): Promise<OutboxRelayResult> {
     assertEventOutboxModelAvailable();
-    const pendingCount = await prisma.eventOutbox.count({
     const pendingCount = await getEventOutboxDelegate().count({
       where: { status: { in: ['pending', 'failed'] } },
     });
@@ -738,7 +734,7 @@ class EventOutboxService {
    * concurrent writers.
    */
   private async nextSequenceForVault(vaultId: string): Promise<number> {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await getPrismaClient().$transaction(async (tx) => {
       const latest = await tx.eventOutbox.findFirst({
         where: { vaultId },
         orderBy: { sequence: 'desc' },

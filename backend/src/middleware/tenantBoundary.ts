@@ -17,6 +17,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './structuredLogging';
 import { prisma } from '../prisma';
+import { formatWalletForLog } from '../walletUtils';
 
 // ─── Extended Express Request Interface ──────────────────────────────────────
 
@@ -177,7 +178,7 @@ export function validateTenantOwnership(
     if (req.tenantId !== requestedTenantId) {
       logger.log('warn', 'Tenant boundary violation detected', {
         action: 'tenant_boundary_violation',
-        actor: req.authApiKeyHash || req.walletAddress,
+        actor: req.authApiKeyHash || (req.walletAddress ? formatWalletForLog(req.walletAddress) : undefined),
         tenantId: req.tenantId,
         requestedTenantId,
         resource: resourceName,

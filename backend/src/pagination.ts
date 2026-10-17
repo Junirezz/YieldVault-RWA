@@ -218,7 +218,6 @@ export function parsePaginationQuery(
       query.page = 1;
     }
   }
-  }
 
   // Parse sortBy
   if (req.query.sortBy !== undefined && typeof req.query.sortBy === 'string') {
