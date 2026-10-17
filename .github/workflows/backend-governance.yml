@@ -62,6 +62,9 @@ jobs:
       - name: Type-check backend
         run: npm run build
 
+      - name: Validate Prometheus alert rules
+        run: docker run --rm --entrypoint=/bin/promtool -v "${{ github.workspace }}:/workspace" prom/prometheus:v2.55.0 check rules /workspace/backend/monitoring/prometheus-alerts.yml
+
       - name: Validate Prisma schema and migration consistency
         run: npm run prisma:schema-check
 

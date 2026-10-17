@@ -1,5 +1,7 @@
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
 
+const NAV_SCALE: i128 = 1_000_000_000_000_000_000;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MockBenjiDataKey {
@@ -40,6 +42,7 @@ impl MockBenjiStrategy {
             panic!("already initialized");
         }
         admin.require_auth();
+        assert!(base_nav > 0, "NAV must be positive");
 
         env.storage()
             .instance()
@@ -71,6 +74,7 @@ impl MockBenjiStrategy {
             .get(&MockBenjiDataKey::Admin)
             .unwrap();
         admin.require_auth();
+        assert!(base_nav > 0, "NAV must be positive");
 
         env.storage()
             .instance()
@@ -133,12 +137,17 @@ impl MockBenjiStrategy {
             .instance()
             .get(&MockBenjiDataKey::BenjiToken)
             .unwrap();
+        let nav = Self::nav(env.clone());
 
         let asset_client = token::Client::new(&env, &asset_addr);
         asset_client.transfer(&vault, &env.current_contract_address(), &amount);
 
         let benji_client = token::StellarAssetClient::new(&env, &benji_addr);
-        benji_client.mint(&env.current_contract_address(), &amount);
+        let benji_amount = amount
+            .checked_mul(NAV_SCALE)
+            .expect("BENJI amount overflow")
+            / nav;
+        benji_client.mint(&env.current_contract_address(), &benji_amount);
     }
 
     /// Withdraws underlying asset from the strategy.
@@ -157,13 +166,27 @@ impl MockBenjiStrategy {
             .instance()
             .get(&MockBenjiDataKey::Asset)
             .unwrap();
+        let benji_addr: Address = env
+            .storage()
+            .instance()
+            .get(&MockBenjiDataKey::BenjiToken)
+            .unwrap();
+        let nav = Self::nav(env.clone());
         let asset_client = token::Client::new(&env, &asset_addr);
         asset_client.transfer(&env.current_contract_address(), &vault, &amount);
+
+        let scaled_amount = amount
+            .checked_mul(NAV_SCALE)
+            .and_then(|scaled| scaled.checked_add(nav - 1))
+            .expect("BENJI amount overflow");
+        let benji_amount = scaled_amount / nav;
+        let benji_client = token::StellarAssetClient::new(&env, &benji_addr);
+        benji_client.burn(&env.current_contract_address(), &benji_amount);
     }
 
     /// Returns the total value of assets held by this strategy.
     ///
-    /// Measured as the mock BENJI token balance of this contract.
+    /// Measured as the BENJI balance multiplied by the configured NAV.
     pub fn total_value(env: Env) -> i128 {
         let benji_addr: Address = env
             .storage()
@@ -171,7 +194,10 @@ impl MockBenjiStrategy {
             .get(&MockBenjiDataKey::BenjiToken)
             .unwrap();
         let benji_client = token::Client::new(&env, &benji_addr);
-        benji_client.balance(&env.current_contract_address())
+        benji_client
+            .balance(&env.current_contract_address())
+            .saturating_mul(Self::nav(env))
+            / NAV_SCALE
     }
 
     /// Returns the address of the underlying asset token.
@@ -261,19 +287,38 @@ mod tests {
         // Deposit: vault -> strategy (asset), strategy mints BENJI 1:1
         client.deposit(&deposit_amount);
 
-        // total_value returns BENJI token balance
+        // At the initial 1:1 NAV, total value matches the BENJI token balance.
         assert_eq!(client.total_value(), deposit_amount);
 
-        // Withdraw: strategy -> vault (asset). BENJI is NOT burned
-        // (matches production BenjiStrategy behavior).
+        // Withdraw returns the underlying asset and burns the corresponding BENJI.
         client.withdraw(&deposit_amount);
 
-        // BENJI balance unchanged after withdraw
-        assert_eq!(client.total_value(), deposit_amount);
+        assert_eq!(client.total_value(), 0);
+        let benji_client = token::Client::new(&env, &benji_token);
+        assert_eq!(benji_client.balance(&contract_addr), 0);
 
         // Asset was returned to vault: strategy holds 0 asset
         let asset_client = token::Client::new(&env, &asset);
         assert_eq!(asset_client.balance(&contract_addr), 0);
+    }
+
+    #[test]
+    fn test_nav_accrual_and_withdrawal_burn_are_reflected_in_total_value() {
+        let (env, admin, vault, asset, benji_token) = setup();
+        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let client = MockBenjiStrategyClient::new(&env, &contract_addr);
+
+        client.initialize(&admin, &vault, &asset, &benji_token, &NAV_SCALE);
+        client.deposit(&100);
+        assert_eq!(client.total_value(), 100);
+
+        client.set_nav(&(2 * NAV_SCALE));
+        assert_eq!(client.total_value(), 200);
+
+        client.withdraw(&50);
+        assert_eq!(client.total_value(), 150);
+        let benji_client = token::Client::new(&env, &benji_token);
+        assert_eq!(benji_client.balance(&contract_addr), 75);
     }
 
     #[test]

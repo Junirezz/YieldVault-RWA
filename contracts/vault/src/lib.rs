@@ -3305,7 +3305,7 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
-        let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        let fee_bps = Self::effective_fee_bps(env.clone())?;
         let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps)?;
 
         let token_addr = Self::token(env.clone());
@@ -3703,10 +3703,16 @@ impl YieldVault {
     pub fn effective_fee_bps(env: Env) -> Result<i128, VaultError> {
         let curve = Self::fee_curve(env.clone());
         let static_fee_bps = Self::fee_bps(env.clone());
-        if !curve.enabled {
-            return Ok(static_fee_bps);
-        }
-        Ok(fee_curve::fee_bps_at(&curve, Self::utilization_bps(env)?))
+        let utilization = if curve.enabled {
+            Self::utilization_bps(env)?
+        } else {
+            0
+        };
+        Ok(fee_curve::effective_fee_bps(
+            &curve,
+            static_fee_bps,
+            utilization,
+        ))
     }
 
     /// Queue a new dynamic fee curve. Takes effect once
@@ -4564,9 +4570,15 @@ impl YieldVault {
         let static_fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         let (fee_bps, utilization) = if curve.enabled {
             let utilization = Self::utilization_bps(env.clone())?;
-            (fee_curve::fee_bps_at(&curve, utilization), utilization)
+            (
+                fee_curve::effective_fee_bps(&curve, static_fee_bps, utilization),
+                utilization,
+            )
         } else {
-            (static_fee_bps, 0)
+            (
+                fee_curve::effective_fee_bps(&curve, static_fee_bps, 0),
+                0,
+            )
         };
 
         let token_addr = Self::token(env.clone());
