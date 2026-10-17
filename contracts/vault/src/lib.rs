@@ -127,8 +127,9 @@ pub use risk_limits::ProtocolRiskLimits;
 use crate::strategy::StrategyClient;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
 use crate::upgrade::{
-    get_admin, get_pending_admin, get_storage_version, is_initialized, set_admin, set_initialized,
-    set_pending_admin, set_storage_version,
+    get_admin, get_implementation, get_pending_admin, get_pending_upgrade, get_storage_version,
+    is_initialized, set_admin, set_implementation, set_initialized, set_pending_admin,
+    set_pending_upgrade, set_storage_version, PendingUpgrade, MIN_UPGRADE_DELAY_SECS,
 };
 use crate::whitelist::SecureWhitelist;
 use soroban_sdk::{
@@ -529,14 +530,71 @@ impl YieldVault {
         Ok(())
     }
 
-    /// Upgrades the contract code to a new WASM hash.
+    /// Queues an upgrade to `new_wasm_hash`, replacing any queued one.
     /// Only the Admin can call this.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+    ///
+    /// The upgrade becomes executable after the larger of
+    /// [`upgrade::MIN_UPGRADE_DELAY_SECS`] and the sensitive-parameter timelock.
+    /// Emits `upg_prop` with `(new_wasm_hash, eta)` and returns the eta.
+    pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) -> u64 {
         let admin = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 
+        let delay = Self::sensitive_timelock_delay(env.clone()).max(MIN_UPGRADE_DELAY_SECS);
+        let eta = timelock::compute_eta(&env, delay);
+        set_pending_upgrade(
+            &env,
+            &Some(PendingUpgrade {
+                wasm_hash: new_wasm_hash.clone(),
+                eta,
+            }),
+        );
+        env.events()
+            .publish((symbol_short!("upg_prop"), admin), (new_wasm_hash, eta));
+        eta
+    }
+
+    /// Cancels the queued upgrade. Only the Admin can call this.
+    /// Emits `upg_cncl` with the cancelled WASM hash.
+    pub fn cancel_upgrade(env: Env) -> Result<(), VaultError> {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let pending = get_pending_upgrade(&env).ok_or(VaultError::NoPendingWithdrawal)?;
+        set_pending_upgrade(&env, &None);
+        env.events()
+            .publish((symbol_short!("upg_cncl"), admin), pending.wasm_hash);
+        Ok(())
+    }
+
+    /// Returns the queued upgrade, if any.
+    pub fn pending_upgrade(env: Env) -> Option<PendingUpgrade> {
+        get_pending_upgrade(&env)
+    }
+
+    /// Returns the WASM hash recorded in the implementation slot by the last upgrade.
+    pub fn implementation(env: Env) -> Option<BytesN<32>> {
+        get_implementation(&env)
+    }
+
+    /// Executes the queued upgrade once its timelock has elapsed.
+    /// Only the Admin can call this.
+    ///
+    /// Runs storage migrations, swaps the WASM, then writes and verifies the
+    /// implementation slot. Emits `upgraded` with `(previous, new_wasm_hash)`.
+    ///
+    /// # Errors
+    /// * `VaultError::NoPendingWithdrawal` - nothing is queued.
+    /// * `VaultError::TimelockNotExpired` - the eta has not been reached.
+    pub fn execute_upgrade(env: Env) -> Result<(), VaultError> {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let pending = get_pending_upgrade(&env).ok_or(VaultError::NoPendingWithdrawal)?;
+        Self::assert_timelock_ready(&env, pending.eta)?;
+
         let pre_version = get_storage_version(&env);
-        Self::run_storage_migration(&env, STORAGE_VERSION).expect("storage migration failed");
+        Self::run_storage_migration(&env, STORAGE_VERSION)?;
         // Checkpoint: storage version must equal STORAGE_VERSION after migration.
         let post_version = get_storage_version(&env);
         assert_eq!(
@@ -552,7 +610,22 @@ impl YieldVault {
             post_version
         );
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        set_pending_upgrade(&env, &None);
+        Self::apply_upgrade(&env, &admin, pending.wasm_hash);
+        Ok(())
+    }
+
+    /// Swaps the contract WASM, records it in the implementation slot and
+    /// emits `upgraded` with `(previous, new_wasm_hash)`.
+    fn apply_upgrade(env: &Env, caller: &Address, new_wasm_hash: BytesN<32>) {
+        let previous = get_implementation(env);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        set_implementation(env, &new_wasm_hash);
+        env.events().publish(
+            (symbol_short!("upgraded"), caller.clone()),
+            (previous, new_wasm_hash),
+        );
     }
 
     /// Runs storage schema migrations up to the requested target version.
@@ -1131,7 +1204,7 @@ impl YieldVault {
 
             emergency::EmergencyActionKind::ForceUpgrade => {
                 let hash = proposal.wasm_hash.clone().expect("wasm hash required");
-                env.deployer().update_current_contract_wasm(hash);
+                Self::apply_upgrade(&env, &confirmer, hash);
             }
         }
 
@@ -1379,17 +1452,12 @@ impl YieldVault {
                     let token = Self::token(env.clone());
                     let price_data = oracle_client.get_price(&token, &token);
                     let max_age = Self::oracle_heartbeat(env.clone());
-                    let last: Option<oracle::PriceData> = env
-                        .storage()
-                        .instance()
-                        .get(&DataKeyExt::Risk(RiskExtKey::LastPx));
                     let last_price = Self::last_oracle_price(&env);
                     oracle::OracleValidator::validate_price_data(
                         &env,
                         &price_data,
                         max_age,
                         Some(oracle::MAX_PRICE_DEVIATION_BPS),
-                        last.as_ref(),
                         last_price.as_ref(),
                     )
                     .map_err(|_| VaultError::OracleValidationFailed)?;
