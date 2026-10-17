@@ -73,7 +73,7 @@ import { geofencingMiddleware } from './middleware/geofencing';
 import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema } from './middleware/validate';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, TransferResolveBodySchema, TransferResolveParamsSchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware, createTimeoutFor } from './middleware/timeoutMiddleware';
@@ -146,6 +146,12 @@ import {
   rateLimitEvents,
   httpErrorCount,
   httpClientErrorCount,
+  eventOutboxPendingCount,
+  eventOutboxOldestPendingAgeSeconds,
+  emailQueuePendingCount,
+  emailQueueOldestPendingAgeSeconds,
+  webhookDeliveryPendingCount,
+  webhookDeliveryFailedCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -251,6 +257,10 @@ import {
   startIdempotencyRetentionScheduler,
 } from './idempotencyRetention';
 import { scopedAdminTokenStore } from './scopedAdminTokens';
+import {
+  listInDoubtTransfers,
+  resolveInDoubtTransfer,
+} from './transferOrchestrator';
 
 declare global {
   namespace Express {
@@ -826,6 +836,23 @@ app.get('/metrics', async (_req: Request, res: Response) => {
   try {
     syncJobGovernanceMetrics();
     latencyMonitoringService.syncSloMetrics();
+    try {
+      const [outbox, emails] = await Promise.all([
+        eventOutboxService.getMetrics(),
+        emailQueueService.getQueueMetrics(),
+      ]);
+      const webhooks = getWebhookDeliveryMetrics();
+      eventOutboxPendingCount.set(outbox.pending + outbox.failed);
+      eventOutboxOldestPendingAgeSeconds.set(outbox.oldestPendingAgeSeconds);
+      emailQueuePendingCount.set(emails.pending);
+      emailQueueOldestPendingAgeSeconds.set(emails.oldestPendingAgeSeconds);
+      webhookDeliveryPendingCount.set(webhooks.pending);
+      webhookDeliveryFailedCount.set(webhooks.failed);
+    } catch (error) {
+      logger.log('warn', 'Failed to refresh queue Prometheus gauges', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   } catch (err) {
@@ -859,6 +886,47 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
     generatedAt: new Date().toISOString(),
   });
 });
+
+app.get('/admin/transfers/in-doubt', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({ transfers: listInDoubtTransfers() });
+});
+
+app.post(
+  '/admin/transfers/:key/resolve',
+  validateApiKey,
+  validate({ params: TransferResolveParamsSchema, body: TransferResolveBodySchema }),
+  async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const resolution = req.body as
+      | { transactionHash: string }
+      | { discard: true };
+    const action = 'discard' in resolution ? 'discard' : 'confirm';
+
+    try {
+      const resolved = await resolveInDoubtTransfer(key, resolution);
+      const statusCode = resolved ? 200 : 404;
+      await recordAdminAuditLog(req, `transfers.in_doubt.${action}`, statusCode, {
+        storeKey: key,
+        resolution: action,
+      });
+      if (!resolved) {
+        res.status(404).json({ error: 'In-doubt transfer not found' });
+        return;
+      }
+      res.status(200).json({ resolved: true, storeKey: key, resolution: action });
+    } catch (error) {
+      await recordAdminAuditLog(req, `transfers.in_doubt.${action}`, 500, {
+        storeKey: key,
+        resolution: action,
+      });
+      logger.log('error', 'Failed to resolve in-doubt transfer', {
+        storeKey: key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: 'Failed to resolve in-doubt transfer' });
+    }
+  },
+);
 
 /**
  * GET /admin/rate-limits

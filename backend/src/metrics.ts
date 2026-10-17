@@ -101,6 +101,42 @@ export const dbSlowQueryAlertTotal = new Counter({
   registers: [register],
 });
 
+export const eventOutboxPendingCount = new Gauge({
+  name: 'event_outbox_pending_count',
+  help: 'Event outbox entries awaiting relay, including retryable failures',
+  registers: [register],
+});
+
+export const eventOutboxOldestPendingAgeSeconds = new Gauge({
+  name: 'event_outbox_oldest_pending_age_seconds',
+  help: 'Age of the oldest event outbox entry awaiting relay',
+  registers: [register],
+});
+
+export const emailQueuePendingCount = new Gauge({
+  name: 'email_queue_pending_count',
+  help: 'Emails queued or waiting for retry',
+  registers: [register],
+});
+
+export const emailQueueOldestPendingAgeSeconds = new Gauge({
+  name: 'email_queue_oldest_pending_age_seconds',
+  help: 'Age of the oldest email queued or waiting for retry',
+  registers: [register],
+});
+
+export const webhookDeliveryPendingCount = new Gauge({
+  name: 'webhook_delivery_pending_count',
+  help: 'Webhook deliveries waiting to complete',
+  registers: [register],
+});
+
+export const webhookDeliveryFailedCount = new Gauge({
+  name: 'webhook_delivery_failed_count',
+  help: 'Webhook deliveries that failed',
+  registers: [register],
+});
+
 export const cacheHitCount = new Counter({
   name: 'cache_hit_count',
   help: 'Number of cache hits for GET requests',
@@ -224,13 +260,22 @@ export function syncJobGovernanceMetrics(): void {
   const metrics = getJobMetrics();
   const failureCounts = metrics.failureCounts as Record<string, number>;
   const recurringFailures = metrics.recurringFailures as Partial<Record<JobName, number>>;
+  const deadLetterCounts: Record<string, number> = {};
 
-  for (const [jobName, count] of Object.entries(failureCounts)) {
-    jobDeadLetterCount.set({ job_name: jobName }, count);
-    jobHealthStatus.set(
-      { job_name: jobName },
-      jobName in recurringFailures ? 0 : 1,
-    );
+  for (const record of metrics.deadLetters) {
+    if (record.status === 'dead-letter') {
+      deadLetterCounts[record.jobName] = (deadLetterCounts[record.jobName] ?? 0) + 1;
+    }
+  }
+
+  const jobNames = new Set([
+    ...Object.keys(metrics.runtime),
+    ...Object.keys(failureCounts),
+    ...Object.keys(deadLetterCounts),
+  ]);
+  for (const jobName of jobNames) {
+    jobDeadLetterCount.set({ job_name: jobName }, deadLetterCounts[jobName] ?? 0);
+    jobHealthStatus.set({ job_name: jobName }, jobName in recurringFailures ? 0 : 1);
   }
 }
 
