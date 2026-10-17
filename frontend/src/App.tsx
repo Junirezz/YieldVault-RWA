@@ -221,14 +221,6 @@ function AppContent() {
                     </RouteErrorBoundary>
                   }
                 />
-                <Route path="/transactions" element={<ErrorBoundary><LazyTransactionHistory walletAddress={walletAddress} /></ErrorBoundary>} />
-                <Route path="/compare" element={<ErrorBoundary><LazyVaultComparison /></ErrorBoundary>} />
-                <Route path="/strategies/:strategyId" element={<ErrorBoundary><StrategyDetail walletAddress={walletAddress} /></ErrorBoundary>} />
-                <Route path="/receipt/:txHash" element={<ErrorBoundary><TransactionReceipt /></ErrorBoundary>} />
-                <Route path="/settings" element={<ErrorBoundary><LazySettings /></ErrorBoundary>} />
-                <Route path="/vault-health" element={<ErrorBoundary><VaultHealthDashboard /></ErrorBoundary>} />
-                <Route path="/audit-log" element={<ErrorBoundary><AuditLog /></ErrorBoundary>} />
-                <Route path="/ui-kit" element={<ErrorBoundary><LazyUIPreview /></ErrorBoundary>} />
                 <Route
                   path="/admin"
                   element={
@@ -304,16 +296,13 @@ function AppContent() {
                   }
                 />
                 <Route
-                  path="/admin"
+                  path="*"
                   element={
-                    <ProtectedRoute role={role} allow={["admin"]}>
-                      <RouteErrorBoundary routeName="admin">
-                        <Admin walletAddress={walletAddress} />
-                      </RouteErrorBoundary>
-                    </ProtectedRoute>
+                    <RouteErrorBoundary routeName="not-found">
+                      <Navigate to="/" replace />
+                    </RouteErrorBoundary>
                   }
                 />
-                <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
               </SentryRoutes>
             </Suspense>
             </PageTransition>
