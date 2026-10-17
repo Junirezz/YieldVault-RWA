@@ -29,3 +29,15 @@ GEMINI.md
 # Playwright
 test-results/
 playwright-report/
+
+# Generated lint / test / bundle reports (run locally, never commit)
+lint-output*.txt
+lint.txt
+test-results.txt
+test-output.txt
+test_output.json
+vitest-results*.json
+bundle-stats.html
+
+# Local backups
+*.bak
