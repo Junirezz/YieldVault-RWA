@@ -993,6 +993,7 @@ apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
 apiV1.use('/audit-logs', auditLogRouter);
+apiV1.get('/admin/diagnostics', validateApiKey, diagnosticsBundleHandler);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks

@@ -3,7 +3,7 @@
   "info": {
     "title": "YieldVault Stellar RWA API",
     "version": "1.0.0",
-    "description": "API documentation for the YieldVault Stellar RWA backend. The API exposes vault deposits/withdrawals, portfolio reads, referrals, webhooks, and operational admin endpoints. All responses use the standard error envelope `{ status, message, error: { code, message, correlationId } }`.\n\n**Rate limiting:** Global limiter is 100 requests / 15 minutes per IP; authenticated API endpoints are limited to 30 requests / minute per API key. Exceeding a limit returns `429` with the standard error envelope and a `retryAfter` detail.",
+    "description": "API documentation for the YieldVault Stellar RWA backend. The API exposes vault deposits/withdrawals, portfolio reads, referrals, webhooks, and operational admin endpoints. Errors use the standard envelope `{ error, status, code, message, retryable, correlationId }`.\n\n**Rate limiting:** Global limiter is 100 requests / 15 minutes per IP; authenticated API endpoints are limited to 30 requests / minute per API key. Exceeding a limit returns `429` with the standard error envelope and a `retryAfter` detail.",
     "license": {
       "name": "MIT",
       "url": "https://spdx.org/licenses/MIT.html"
@@ -442,145 +442,86 @@
         "tags": [
           "Vault"
         ],
-        "summary": "List vaults with a cached total count",
-        "description": "Send Authorization: ApiKey <key>. Non-admin keys are restricted to their tenant; admin keys may filter tenantId or list all tenants. Excludes soft-deleted vaults. Rows are fresh; totals use a process-local 500-entry LRU for five seconds, invalidated on successful Prisma vault writes. Also available at /api/vaults and /vaults. Rate limited: global 100 req / 15 min per IP; authenticated APIs 30 req / min per key. `429` responses follow the standard error envelope with a `retryAfter` detail.",
-        "security": [
-          {
-            "apiKeyAuth": []
-          }
-        ],
+        "summary": "List vaults",
+        "description": "Paginated listing of active (non-deleted) vaults. `limit` is capped at 50 and `page` at 1000; exceeding `limit` fails fast with `400` / `LIMIT_EXCEEDED` instead of silently clamping, so a client that asks for an oversized page is never handed a response that looks complete. Rate limited: global 100 req / 15 min per IP; authenticated APIs 30 req / min per key. `429` responses follow the standard error envelope with a `retryAfter` detail.",
         "parameters": [
           {
-            "name": "tenantId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
+            "$ref": "#/components/parameters/pageSize"
           },
           {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            }
+            "$ref": "#/components/parameters/pageNumber"
           },
           {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1
-            }
-          },
-          {
-            "name": "sortBy",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "createdAt",
-                "updatedAt",
-                "id",
-                "aum"
-              ],
-              "default": "createdAt"
-            }
-          },
-          {
-            "name": "sortOrder",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "asc",
-                "desc"
-              ],
-              "default": "desc"
-            }
+            "$ref": "#/components/parameters/correlationId"
           }
         ],
         "responses": {
           "200": {
-            "description": "Paginated vault records (offset pagination only)",
-            "headers": {
-              "X-Cache": {
-                "description": "Whether the total count was reused",
-                "schema": {
-                  "type": "string",
-                  "enum": [
-                    "HIT",
-                    "MISS"
-                  ]
-                }
-              }
-            },
+            "description": "One page of vaults",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "tenantId": {
-                            "type": "string"
-                          },
-                          "aum": {
-                            "type": "number"
-                          },
-                          "tvlUsd": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "deletedAt": {
-                            "type": "null"
-                          }
-                        }
-                      }
-                    },
-                    "pagination": {
-                      "$ref": "#/components/schemas/PaginationMeta"
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time"
+                  "$ref": "#/components/schemas/VaultListResponse"
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": "0f1b3a2c-6d4e-4a1b-9f0e-2c5d7e8b9a01",
+                      "aum": 1250000,
+                      "tvlUsd": "1250000.00",
+                      "createdAt": "2026-01-01T00:00:00.000Z",
+                      "updatedAt": "2026-01-02T00:00:00.000Z"
                     }
-                  }
+                  ],
+                  "pagination": {
+                    "count": 1,
+                    "limit": 20,
+                    "total": 1,
+                    "nextCursor": null,
+                    "prevCursor": null,
+                    "currentPage": 1,
+                    "totalPages": 1,
+                    "hasNextPage": false,
+                    "hasPrevPage": false
+                  },
+                  "timestamp": "2026-01-01T00:00:00.000Z"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid query or unsupported cursor pagination"
+            "description": "`limit` above the published ceiling",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": "Bad Request",
+                  "status": 400,
+                  "code": "LIMIT_EXCEEDED",
+                  "message": "limit must not exceed 50 (received 100000).",
+                  "retryable": false,
+                  "details": {
+                    "field": "limit",
+                    "requested": 100000,
+                    "maxLimit": 50,
+                    "defaultLimit": 20,
+                    "maxPage": 1000
+                  }
+                }
+              }
+            }
           },
-          "401": {
-            "description": "Missing or invalid API key"
-          },
-          "403": {
-            "description": "Missing or mismatched authenticated tenant"
-          },
-          "500": {
-            "description": "Database query failed"
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -813,95 +754,6 @@
         }
       }
     },
-    "/api/v1/vaults": {
-      "get": {
-        "tags": [
-          "Vault"
-        ],
-        "summary": "List vaults",
-        "description": "Paginated listing of active (non-deleted) vaults. `limit` is capped at 50 and `page` at 1000; exceeding `limit` fails fast with `400` / `LIMIT_EXCEEDED` instead of silently clamping, so a client that asks for an oversized page is never handed a response that looks complete. Rate limited: global 100 req / 15 min per IP; authenticated APIs 30 req / min per key. `429` responses follow the standard error envelope with a `retryAfter` detail.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/pageSize"
-          },
-          {
-            "$ref": "#/components/parameters/pageNumber"
-          },
-          {
-            "$ref": "#/components/parameters/correlationId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "One page of vaults",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultListResponse"
-                },
-                "example": {
-                  "data": [
-                    {
-                      "id": "0f1b3a2c-6d4e-4a1b-9f0e-2c5d7e8b9a01",
-                      "aum": 1250000,
-                      "tvlUsd": "1250000.00",
-                      "createdAt": "2026-01-01T00:00:00.000Z",
-                      "updatedAt": "2026-01-02T00:00:00.000Z"
-                    }
-                  ],
-                  "pagination": {
-                    "count": 1,
-                    "limit": 20,
-                    "total": 1,
-                    "nextCursor": null,
-                    "prevCursor": null,
-                    "currentPage": 1,
-                    "totalPages": 1,
-                    "hasNextPage": false,
-                    "hasPrevPage": false
-                  },
-                  "timestamp": "2026-01-01T00:00:00.000Z"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`limit` above the published ceiling",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                },
-                "example": {
-                  "error": "Bad Request",
-                  "status": 400,
-                  "code": "LIMIT_EXCEEDED",
-                  "message": "limit must not exceed 50 (received 100000).",
-                  "retryable": false,
-                  "details": {
-                    "field": "limit",
-                    "requested": 100000,
-                    "maxLimit": 50,
-                    "defaultLimit": 20,
-                    "maxPage": 1000
-                  }
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limited",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/vault/deposits": {
       "post": {
         "tags": [
@@ -1014,6 +866,17 @@
             "description": "Strategy"
           }
         }
+      },
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/vault/strategy",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
       }
     },
     "/api/transactions": {
@@ -1027,7 +890,6 @@
           {
             "name": "cursor",
             "in": "query",
-            "description": "Preferred pagination. Opaque cursor in the form `<timestamp>_<id>` returned as `meta.nextCursor`. Rows are ordered by `timestamp` desc then `id` desc and filtered to `(timestamp, id) < cursor`, so newly inserted transactions do not cause skipped or duplicated rows.",
             "schema": {
               "type": "string"
             }
@@ -1035,8 +897,6 @@
           {
             "name": "page",
             "in": "query",
-            "deprecated": true,
-            "description": "Deprecated offset-based pagination (`skip: (page-1)*limit`). Kept for backward compatibility only; may skip or duplicate rows when new transactions are inserted between fetches. Use `cursor` instead.",
             "schema": {
               "type": "integer"
             }
@@ -1059,9 +919,7 @@
                   "meta": {
                     "count": 0,
                     "total": 0,
-                    "hasNextPage": false,
-                    "nextCursor": null,
-                    "prevCursor": null
+                    "hasNextPage": false
                   }
                 }
               }
@@ -1278,6 +1136,2235 @@
         "responses": {
           "200": {
             "description": "Audit logs"
+          }
+        }
+      }
+    },
+    "/admin/latency-status": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/latency-status",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/sla/registry": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/sla/registry",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/rate-limits": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/rate-limits",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/maintenance/status": {
+      "get": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "GET /maintenance/status",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/docs/openapi.json": {
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "GET /docs/openapi.json",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/deposits/v2": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/vault/deposits/v2",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/strategy/cooldown": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/strategy/cooldown",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/gasless-deposits": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/vault/gasless-deposits",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/receipts": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/receipts",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/wallet-aliases/link": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/wallet-aliases/link",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/wallet-aliases/resolve": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/wallet-aliases/resolve",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/wallet-aliases/{canonicalId}": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/wallet-aliases/{canonicalId}",
+        "parameters": [
+          {
+            "name": "canonicalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/referrals/{wallet}": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/referrals/{wallet}",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/referrals/code/{wallet}": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/referrals/code/{wallet}",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/transactions": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/transactions",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/audit-logs": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/audit-logs",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/diagnostics": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/admin/diagnostics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/transactions/export": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/transactions/export",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/portfolio/holdings": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/portfolio/holdings",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/history": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/history",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/apy/history": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/apy/history",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/nonce": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/auth/nonce",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/auth/login",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/auth/refresh",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/webhooks",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/webhooks",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/auth/logout",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/auth/logout-all",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/versions": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/versions",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/vault/transactions/export": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/vault/transactions/export",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/vaults": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/vaults",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/vaults": {
+      "get": {
+        "tags": [
+          "vaults"
+        ],
+        "summary": "GET /vaults",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /auth/logout",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/auth/logout-all": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /auth/logout-all",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/vault/summary": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/vault/summary",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/vault/metrics": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/vault/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/vault/apy": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/vault/apy",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/webhooks/verify": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "POST /webhooks/verify",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vaults/{id}/health": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vaults/{id}/health",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v2/vaults/{id}/health": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v2/vaults/{id}/health",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/metrics": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/vault/apy": {
+      "get": {
+        "tags": [
+          "api"
+        ],
+        "summary": "GET /api/v1/vault/apy",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/apy/backfill": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/apy/backfill",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/maintenance": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/maintenance",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/maintenance",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/maintenance/windows": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/maintenance/windows",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/maintenance/windows",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/maintenance/windows/{windowId}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/maintenance/windows/{windowId}",
+        "parameters": [
+          {
+            "name": "windowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/config-changes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/config-changes",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/feature-flags/overrides": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/feature-flags/overrides",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/feature-flags/overrides",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/feature-flags/overrides/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/feature-flags/overrides/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/cache/stats": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/cache/stats",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/cache/redis-status": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/cache/redis-status",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/cache": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/cache",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/cache/invalidate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/cache/invalidate",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/events/replay": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/events/replay",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawal-limits/override": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/withdrawal-limits/override",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawal-limits/audit": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/withdrawal-limits/audit",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/emails/queue": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/emails/queue",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/emails/replay/{id}": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/emails/replay/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/allowlist/add": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/allowlist/add",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/allowlist/remove": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/allowlist/remove",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wallet-aliases": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/wallet-aliases",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wallet-aliases/{canonicalId}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/wallet-aliases/{canonicalId}",
+        "parameters": [
+          {
+            "name": "canonicalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/impersonate/sessions": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/impersonate/sessions",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/impersonate/sessions",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/impersonate/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/impersonate/sessions/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/impersonate/{wallet}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/impersonate/{wallet}",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/receipts": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/receipts",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/receipts/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/receipts/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/receipts/{id}/verify": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/receipts/{id}/verify",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/api-keys/register": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/api-keys/register",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/api-keys/rotate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/api-keys/rotate",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/api-keys/revoke": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/api-keys/revoke",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/api-keys/audit-events": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/api-keys/audit-events",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/{id}/verify": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/webhooks/{id}/verify",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "PATCH /admin/webhooks/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/webhooks/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/{id}/restore": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/webhooks/{id}/restore",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/dead-letter": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/webhooks/dead-letter",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/dead-letter/{id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/webhooks/dead-letter/{id}/retry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/deliveries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/webhooks/deliveries",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/v1/webhooks/verify": {
+      "post": {
+        "tags": [
+          "api"
+        ],
+        "summary": "POST /api/v1/webhooks/verify",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/audit/logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/audit/logs",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/exports/jobs",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/jobs/{id}/verify": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/exports/jobs/{id}/verify",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/bulk": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/exports/bulk",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/bulk/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/exports/bulk/jobs",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/bulk/jobs/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/exports/bulk/jobs/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/bulk/jobs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/exports/bulk/jobs/{id}/cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/exports/bulk/artifacts/{artifactId}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/exports/bulk/artifacts/{artifactId}",
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/prisma/config": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/prisma/config",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/monitor": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/jobs/monitor",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/jobs/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/transactions/backfill": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/transactions/backfill",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/transactions/backfill",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/transactions/backfill/{jobId}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/transactions/backfill/{jobId}",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/governance/snapshots": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/governance/snapshots",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/governance/snapshots/export": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/governance/snapshots/export",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/reports/exports": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/reports/exports",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/reports/exports/manifests": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/reports/exports/manifests",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/reports/exports/manifests/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/reports/exports/manifests/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/reports/exports/manifests/{id}/verify": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/reports/exports/manifests/{id}/verify",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dashboard": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/jobs/dashboard",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/jobs/dead-letters",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/jobs/dead-letters/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/jobs/dead-letters/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/{id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/jobs/dead-letters/{id}/retry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/{id}/resolve": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/jobs/dead-letters/{id}/resolve",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/bulk-retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/jobs/dead-letters/bulk-retry",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/bulk-discard": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/jobs/dead-letters/bulk-discard",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/jobs/dead-letters/process": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/jobs/dead-letters/process",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/idempotency/keys": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/idempotency/keys",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/idempotency/keys",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/idempotency/keys/{key}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/idempotency/keys/{key}",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/idempotency/retention/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/idempotency/retention/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/idempotency/retention/cleanup": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/idempotency/retention/cleanup",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/idempotency/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/idempotency/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/deduplication/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/webhooks/deduplication/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/deduplication/entries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/webhooks/deduplication/entries",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/deduplication/{eventId}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/webhooks/deduplication/{eventId}",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/deduplication": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /admin/webhooks/deduplication",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/analytics/wallet-activity/heatmap": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/analytics/wallet-activity/heatmap",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/health/probes": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "GET /health/probes",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wal/entries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/wal/entries",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wal/entries/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/wal/entries/{id}",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wal/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/wal/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/wal/pending": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/wal/pending",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens/permissions": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/scoped-tokens/permissions",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/scoped-tokens",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/scoped-tokens",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens/{keyId}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/scoped-tokens/{keyId}",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens/{keyId}/rotations": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/scoped-tokens/{keyId}/rotations",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens/{keyId}/rotate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/scoped-tokens/{keyId}/rotate",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/scoped-tokens/{keyId}/revoke": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/scoped-tokens/{keyId}/revoke",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/withdrawals/recovery",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/withdrawals/recovery/metrics",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery/{sagaId}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /admin/withdrawals/recovery/{sagaId}",
+        "parameters": [
+          {
+            "name": "sagaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery/{sagaId}/resume": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/withdrawals/recovery/{sagaId}/resume",
+        "parameters": [
+          {
+            "name": "sagaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery/{sagaId}/resolve": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/withdrawals/recovery/{sagaId}/resolve",
+        "parameters": [
+          {
+            "name": "sagaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/withdrawals/recovery/sweep": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/withdrawals/recovery/sweep",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/admin/vaults": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /admin/vaults",
+        "responses": {
+          "200": {
+            "description": "Successful response"
           }
         }
       }

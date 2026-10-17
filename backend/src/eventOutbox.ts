@@ -15,6 +15,7 @@
  */
 
 import crypto from 'crypto';
+import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 import {
   emitTransactionEvent,
@@ -170,14 +171,9 @@ class EventOutboxService {
    * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
-    if (!prisma.eventOutbox) {
-      throw new Error('prisma.eventOutbox is not initialized. Ensure Prisma schema includes eventOutbox model.');
-    }
-
     assertEventOutboxModelAvailable();
     const now = new Date();
     const vaultId = input.vaultId ?? input.aggregateId;
-    const record = await prisma.eventOutbox.create({
     const record = await getEventOutboxDelegate().create({
       data: {
         id: `obx-${crypto.randomUUID()}`,
@@ -222,8 +218,6 @@ class EventOutboxService {
       //    We select the head-of-line event per vault to enforce strict
       //    per-vault ordering (a vault's next event is only processed after
       //    its predecessor has been relayed or dead-lettered).
-      const candidates = await prisma.eventOutbox.findMany({
-      // 1. Find eligible entries: pending or failed entries whose lock is expired
       const candidates = await getEventOutboxDelegate().findMany({
         where: {
           status: { in: ['pending', 'failed'] },
@@ -265,8 +259,6 @@ class EventOutboxService {
 
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
       const candidateIds = orderedCandidates.map((e) => e.id);
-      await prisma.eventOutbox.updateMany({
-      const candidateIds = candidates.map((e) => e.id);
       await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
@@ -318,12 +310,11 @@ class EventOutboxService {
             payload,
           );
 
-          await getEventOutboxDelegate().update({
           // Do not write the mark-as-sent update after abort; the event will be
           // re-relayed after restart (at-least-once delivery).
           if (signal?.aborted) break;
 
-          await prisma.eventOutbox.update({
+          await getEventOutboxDelegate().update({
             where: { id: entry.id },
             data: {
               status: 'relayed',
@@ -488,7 +479,6 @@ class EventOutboxService {
    */
   async replayOnStartup(): Promise<OutboxRelayResult> {
     assertEventOutboxModelAvailable();
-    const pendingCount = await prisma.eventOutbox.count({
     const pendingCount = await getEventOutboxDelegate().count({
       where: { status: { in: ['pending', 'failed'] } },
     });

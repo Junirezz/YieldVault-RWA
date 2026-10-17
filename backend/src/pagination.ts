@@ -176,17 +176,10 @@ export function parsePaginationQuery(
     query.cursor = req.query.cursor;
   }
 
-  // Parse page (1-based, clamped — never rejected)
+  // Parse page (1-based, clamped to 1..maxPage — never rejected, Issue #1430)
   if (req.query.page !== undefined) {
-    query.page = clampPageNumber(parseInt(req.query.page as string, 10));
-  // Parse page (1-based, clamped to 1..maxPage — Issue #1430)
-  if (req.query.page !== undefined) {
-    const page = parseInt(req.query.page as string, 10);
-    if (!isNaN(page) && page > 0) {
-      query.page = Math.min(page, mergedConfig.maxPage);
-    } else {
-      query.page = 1;
-    }
+    const page = clampPageNumber(parseInt(req.query.page as string, 10)) ?? 1;
+    query.page = Math.min(page, mergedConfig.maxPage);
   }
 
   // Parse sortBy
