@@ -239,6 +239,9 @@ pub struct UserBalanceKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RiskExtKey {
+    /// Legacy last-price slot superseded by [`DataKeyExt::LastOraclePrice`].
+    /// Never written; only read once by `last_oracle_price` to migrate any
+    /// value left by older deployments into the canonical key.
     LastPx,
     MaxTvl,
     MaxConc,
@@ -749,6 +752,7 @@ impl YieldVault {
     pub fn set_strategy(env: Env, strategy: Address) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
+        let now = env.ledger().timestamp();
 
         // Strategy switch cooldown enforcement
         let cooldown: u64 = env
@@ -763,7 +767,7 @@ impl YieldVault {
                 .get(&DataKey::LastStrategySwitchTime)
                 .unwrap_or(0);
             let earliest_switch = last_switch.checked_add(cooldown).expect("overflow");
-            if env.ledger().timestamp() < earliest_switch {
+            if now < earliest_switch {
                 return Err(VaultError::AdminParamChangeTooSoon);
             }
         }
@@ -811,7 +815,6 @@ impl YieldVault {
         env.storage().instance().set(&DataKey::Strategy, &strategy);
 
         // Record switch timestamp and emit events
-        let now = env.ledger().timestamp();
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
@@ -822,13 +825,7 @@ impl YieldVault {
             (previous_strategy.clone(), strategy.clone()),
         );
 
-        crate::audit_events::emit_strategy_switch(
-            &env,
-            &admin,
-            &previous_strategy,
-            &strategy,
-            env.ledger().timestamp(),
-        );
+        crate::audit_events::emit_strategy_switch(&env, &admin, &previous_strategy, &strategy, now);
 
         Ok(())
     }
@@ -1372,31 +1369,26 @@ impl YieldVault {
         let state = Self::get_state(&env);
         let idle_assets = state.total_assets;
 
+        // Each config key is read at most once per call (issue #1538).
         let strategy_assets = if let Some(strategy_addr) = Self::strategy(env.clone()) {
+            let token = Self::token(env.clone());
             if Self::is_oracle_enabled(env.clone()) {
                 if let Some(oracle_addr) = Self::price_oracle(env.clone()) {
                     let oracle_client = OracleClient::new(&env, &oracle_addr);
-                    let token = Self::token(env.clone());
                     let price_data = oracle_client.get_price(&token, &token);
                     let max_age = Self::oracle_heartbeat(env.clone());
-                    let last: Option<oracle::PriceData> = env
-                        .storage()
-                        .instance()
-                        .get(&DataKeyExt::Risk(RiskExtKey::LastPx));
                     let last_price = Self::last_oracle_price(&env);
                     oracle::OracleValidator::validate_price_data(
                         &env,
                         &price_data,
                         max_age,
                         Some(oracle::MAX_PRICE_DEVIATION_BPS),
-                        last.as_ref(),
                         last_price.as_ref(),
                     )
                     .map_err(|_| VaultError::OracleValidationFailed)?;
                     Self::set_last_oracle_price(&env, &price_data);
                 }
             }
-            let token = Self::token(env.clone());
             Self::require_valid_strategy_response(&env, &strategy_addr, &token)
         } else {
             0
@@ -1407,14 +1399,33 @@ impl YieldVault {
             .ok_or(VaultError::MathOverflow)
     }
 
+    /// Last validated oracle price. `DataKeyExt::LastOraclePrice` is the single
+    /// canonical key; a value under the legacy `Risk(LastPx)` slot is migrated
+    /// into it on first read and the legacy slot is removed (issue #1525).
     fn last_oracle_price(env: &Env) -> Option<oracle::PriceData> {
-        env.storage().instance().get(&DataKeyExt::LastOraclePrice)
+        let storage = env.storage().instance();
+        if let Some(price) = storage.get(&DataKeyExt::LastOraclePrice) {
+            return Some(price);
+        }
+        let legacy_key = DataKeyExt::Risk(RiskExtKey::LastPx);
+        let legacy: Option<oracle::PriceData> = storage.get(&legacy_key);
+        if let Some(price) = legacy.as_ref() {
+            storage.set(&DataKeyExt::LastOraclePrice, price);
+            storage.remove(&legacy_key);
+        }
+        legacy
     }
 
     fn set_last_oracle_price(env: &Env, price_data: &oracle::PriceData) {
         env.storage()
             .instance()
             .set(&DataKeyExt::LastOraclePrice, price_data);
+    }
+
+    fn clear_last_oracle_price(env: &Env) {
+        let storage = env.storage().instance();
+        storage.remove(&DataKeyExt::LastOraclePrice);
+        storage.remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
     }
 
     /// Returns the current vault share price scaled to 10^18.
@@ -2123,7 +2134,8 @@ impl YieldVault {
     ///
     /// ### Rounding
     /// Uses round-down conversion (see [`math::assets_to_shares`]).
-    /// Rejects deposits that would mint zero shares to prevent silent loss of funds.
+    /// Rejects deposits that would mint zero shares with
+    /// [`VaultError::MinDepositNotMet`] to prevent silent loss of funds.
     ///
     /// ### Events
     /// Publishes a `(symbol_short!("deposit"),)` event with `(amount, shares_minted)`.
@@ -2161,7 +2173,7 @@ impl YieldVault {
 
         // Prevent silent loss of funds if shares round down to 0
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(&env, &user, amount, &state));
         }
 
         let deposit_key = DataKey::UserDeposit(user.clone());
@@ -2357,7 +2369,7 @@ impl YieldVault {
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(&env, &user, amount, &state));
         }
 
         // Per-user deposit cap check
@@ -2620,6 +2632,24 @@ impl YieldVault {
         })
     }
 
+    /// Rejects a deposit that would mint zero shares (issue #1536).
+    ///
+    /// Publishes `("dep_dust", user)` with `(amount, total_shares, total_assets)`
+    /// and returns [`VaultError::MinDepositNotMet`]: the amount is below the
+    /// smallest deposit that mints one share at the current price.
+    fn reject_dust_deposit(
+        env: &Env,
+        user: &Address,
+        amount: i128,
+        state: &VaultState,
+    ) -> VaultError {
+        env.events().publish(
+            (symbol_short!("dep_dust"), user.clone()),
+            (amount, state.total_shares, state.total_assets),
+        );
+        VaultError::MinDepositNotMet
+    }
+
     /// Internal helper: validates and applies a single deposit within a batch.
     ///
     /// State fields `total_assets` and `total_shares` on `state` are updated
@@ -2650,7 +2680,7 @@ impl YieldVault {
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(env, user, amount, state));
         }
 
         // Per-user deposit cap check
@@ -4288,9 +4318,7 @@ impl YieldVault {
         env.storage()
             .instance()
             .remove(&DataKeyExt::PendingPriceOracle);
-        env.storage()
-            .instance()
-            .remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
+        Self::clear_last_oracle_price(&env);
         env.events()
             .publish((symbol_short!("oraclech"),), pending.new_value);
         Ok(())
