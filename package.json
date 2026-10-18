@@ -1,7 +1,7 @@
 {
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22",
     "pnpm": ">=9.12"
   },
   "name": "yieldvault-rwa",
@@ -78,6 +78,5 @@
   },
   "resolutions": {
     "lodash": "^4.17.21"
-  },
-  
+  }
 }

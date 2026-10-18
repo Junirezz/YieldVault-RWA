@@ -29,10 +29,11 @@ jobs:
 
       - name: Install Soroban CLI
         run: |
-          cargo install --locked soroban-cli
+          cargo install --locked soroban-cli --version 21.0.0
 
       - name: Deploy Contracts to Testnet
         id: deploy_contracts
+        if: env.SOROBAN_SECRET_KEY != ''
         env:
           SOROBAN_SECRET_KEY: ${{ secrets.STAGING_SOROBAN_SECRET_KEY }}
           SOROBAN_NETWORK: testnet
@@ -46,37 +47,41 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - name: Deploy Backend
+        if: env.DATABASE_URL != '' && env.VERCEL_TOKEN != ''
         working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VAULT_CONTRACT_ID: ${{ steps.deploy_contracts.outputs.vault_id }}
         run: |
           npm ci
           npx prisma migrate deploy
-          # Replace with your actual backend deployment command (e.g., Vercel, Railway, Render)
-          # Example: npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
-          echo "Backend deployment simulated"
+          npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
           echo "BACKEND_URL=https://yieldvault-backend-staging.vercel.app" >> $GITHUB_ENV
 
       - name: Deploy Frontend
+        if: env.VERCEL_TOKEN != ''
         working-directory: frontend
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VITE_VAULT_CONTRACT_ID: ${{ steps.deploy_contracts.outputs.vault_id }}
           VITE_API_URL: ${{ env.BACKEND_URL }}
         run: |
           npm ci
           npm run build
-          # Replace with your actual frontend deployment command
-          # Example: npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
-          echo "Frontend deployment simulated"
+          npx vercel --token ${{ secrets.VERCEL_TOKEN }} --prod --yes
           echo "STAGING_URL=https://yieldvault-staging.vercel.app" >> $GITHUB_ENV
 
       - name: Post Staging URL to PR
+        if: env.STAGING_URL != ''
         uses: actions/github-script@v7
+        env:
+          STAGING_URL: ${{ env.STAGING_URL }}
+          BACKEND_URL: ${{ env.BACKEND_URL }}
         with:
           script: |
             const { owner, repo } = context.repo;
