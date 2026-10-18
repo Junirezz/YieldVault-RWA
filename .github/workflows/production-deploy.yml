@@ -103,11 +103,11 @@ jobs:
 
       - name: Build (production mode)
         env:
-          VITE_SOROBAN_RPC_URL: ${{ secrets.PROD_SOROBAN_RPC_URL }}
-          VITE_STELLAR_NETWORK_PASSPHRASE: ${{ secrets.PROD_STELLAR_NETWORK_PASSPHRASE }}
-          VITE_VAULT_CONTRACT_ID: ${{ inputs.vault_contract_id || secrets.PROD_VAULT_CONTRACT_ID }}
-          VITE_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
-          VITE_SENTRY_DSN: ${{ secrets.PROD_SENTRY_DSN }}
+          VITE_SOROBAN_RPC_URL: ${{ vars.PROD_SOROBAN_RPC_URL || secrets.PROD_SOROBAN_RPC_URL }}
+          VITE_STELLAR_NETWORK_PASSPHRASE: ${{ vars.PROD_STELLAR_NETWORK_PASSPHRASE || secrets.PROD_STELLAR_NETWORK_PASSPHRASE }}
+          VITE_VAULT_CONTRACT_ID: ${{ inputs.vault_contract_id || vars.PROD_VAULT_CONTRACT_ID || secrets.PROD_VAULT_CONTRACT_ID }}
+          VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL || secrets.PROD_API_BASE_URL }}
+          VITE_SENTRY_DSN: ${{ vars.PROD_SENTRY_DSN || secrets.PROD_SENTRY_DSN }}
           VITE_SENTRY_ENVIRONMENT: production
           VITE_SENTRY_TRACES_SAMPLE_RATE: '0.1'
           VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE: '0.1'
@@ -160,13 +160,17 @@ jobs:
 
       - name: Pull Vercel environment info
         working-directory: frontend
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production
 
       - name: Deploy to Vercel (production)
         id: deploy
         working-directory: frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} 2>&1 | tail -1)
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod 2>&1 | tail -1)
           echo "production_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
           echo "Deployed to: $DEPLOY_URL"
 

@@ -744,10 +744,10 @@ impl YieldVault {
     /// * `env` - Soroban environment
     /// * `strategy` - Strategy address to set as active
     ///
-    /// # Panics
-    /// Panics if the strategy is not whitelisted
+    /// # Errors
+    /// Returns `Err(VaultError::StrategyNotWhitelisted)` if the strategy is not whitelisted.
     pub fn set_strategy(env: Env, strategy: Address) -> Result<(), VaultError> {
-        let admin: Address = get_admin(&env).expect("Admin not set");
+        let admin: Address = get_admin(&env).ok_or(VaultError::GovernanceSignersNotConfigured)?;
         admin.require_auth();
 
         // Strategy switch cooldown enforcement
@@ -762,7 +762,7 @@ impl YieldVault {
                 .instance()
                 .get(&DataKey::LastStrategySwitchTime)
                 .unwrap_or(0);
-            let earliest_switch = last_switch.checked_add(cooldown).expect("overflow");
+            let earliest_switch = last_switch.saturating_add(cooldown);
             if env.ledger().timestamp() < earliest_switch {
                 return Err(VaultError::AdminParamChangeTooSoon);
             }
@@ -943,9 +943,9 @@ impl YieldVault {
         caller: Address,
         reason: PauseReason,
     ) -> Result<(), VaultError> {
-        let admin = get_admin(&env).expect("Admin not set");
+        let admin = get_admin(&env).ok_or(VaultError::GovernanceSignersNotConfigured)?;
         let pauser_addr = Self::pauser(env.clone());
-        permissions::require_pauser_or_admin_auth(&caller, &admin, pauser_addr.as_ref());
+        permissions::require_pauser_or_admin_auth(&caller, &admin, pauser_addr.as_ref())?;
 
         let mut state = Self::get_state(&env);
         state.is_paused = true;
@@ -959,9 +959,9 @@ impl YieldVault {
     /// Unpauses the contract with role-restricted authorization.
     /// Caller must be either the Admin or the assigned Pauser role address.
     pub fn unpause_with_role(env: Env, caller: Address) -> Result<(), VaultError> {
-        let admin = get_admin(&env).expect("Admin not set");
+        let admin = get_admin(&env).ok_or(VaultError::GovernanceSignersNotConfigured)?;
         let pauser_addr = Self::pauser(env.clone());
-        permissions::require_pauser_or_admin_auth(&caller, &admin, pauser_addr.as_ref());
+        permissions::require_pauser_or_admin_auth(&caller, &admin, pauser_addr.as_ref())?;
 
         let mut state = Self::get_state(&env);
         state.is_paused = false;
@@ -1149,11 +1149,13 @@ impl YieldVault {
     /// Once the dispute window closes the proposal can no longer be cancelled
     /// and must proceed through secondary confirmation.
     pub fn cancel_emergency_action(env: Env, proposal_id: u32) -> Result<(), VaultError> {
-        let admin: Address = get_admin(&env).expect("Admin not set");
+        let admin: Address = get_admin(&env).ok_or(VaultError::GovernanceSignersNotConfigured)?;
         admin.require_auth();
 
-        let mut proposal = emergency::read_proposal(&env, proposal_id).expect("proposal not found");
-        assert!(!proposal.executed, "proposal already executed");
+        let mut proposal = emergency::read_proposal(&env, proposal_id).ok_or(VaultError::NoPendingWithdrawal)?;
+        if proposal.executed {
+            return Err(VaultError::ProposalAlreadyExecuted);
+        }
 
         if proposal.cancelled {
             return Err(VaultError::ProposalCancelled);
@@ -1172,14 +1174,17 @@ impl YieldVault {
     /// Sets the dispute window duration (in seconds) for new emergency proposals.
     ///
     /// Only the admin may configure this. Defaults to `3600` (1 hour) if never set.
-    pub fn set_emergency_dispute_window(env: Env, seconds: u64) {
-        let admin: Address = get_admin(&env).expect("Admin not set");
+    pub fn set_emergency_dispute_window(env: Env, seconds: u64) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).ok_or(VaultError::GovernanceSignersNotConfigured)?;
         admin.require_auth();
-        assert!(seconds > 0, "dispute window must be positive");
+        if seconds == 0 {
+            return Err(VaultError::InvalidAmount);
+        }
         env.storage().instance().set(
             &DataKey::Emergency(EmergencyStorageKey::DisputeWindow),
             &seconds,
         );
+        Ok(())
     }
 
     /// Returns the configured dispute window in seconds (default 3600).
@@ -1383,14 +1388,13 @@ impl YieldVault {
                         .storage()
                         .instance()
                         .get(&DataKeyExt::Risk(RiskExtKey::LastPx));
-                    let last_price = Self::last_oracle_price(&env);
+                    let _last_price = Self::last_oracle_price(&env);
                     oracle::OracleValidator::validate_price_data(
                         &env,
                         &price_data,
                         max_age,
                         Some(oracle::MAX_PRICE_DEVIATION_BPS),
                         last.as_ref(),
-                        last_price.as_ref(),
                     )
                     .map_err(|_| VaultError::OracleValidationFailed)?;
                     Self::set_last_oracle_price(&env, &price_data);
@@ -1486,13 +1490,16 @@ impl YieldVault {
             .unwrap_or(0)
     }
 
-    pub fn snapshot_user_balance(env: Env, user: Address) {
+    pub fn snapshot_user_balance(env: Env, user: Address) -> Result<(), VaultError> {
         user.require_auth();
-        let checkpoint_id = env
+        let checkpoint_id = match env
             .storage()
             .instance()
             .get::<_, u32>(&DataKey::CheckpointNonce)
-            .expect("no checkpoint");
+        {
+            Some(id) => id,
+            None => return Err(VaultError::NoPendingWithdrawal),
+        };
         let balance = Self::balance(env.clone(), user.clone());
         env.storage()
             .instance()
@@ -1504,6 +1511,7 @@ impl YieldVault {
             }),
             &balance,
         );
+        Ok(())
     }
 
     pub fn balance_at(env: Env, user: Address, checkpoint_id: u32) -> i128 {
@@ -1553,7 +1561,7 @@ impl YieldVault {
             .get(&DataKey::ConfiguredStrategy(soroban_sdk::symbol_short!(
                 "Korean"
             )))
-            .unwrap();
+            .ok_or(VaultError::StrategyNotConfigured)?;
         let strategy_client = KoreanDebtStrategyClient::new(&env, &strategy);
         let harvested = strategy_client.harvest_yield();
 
@@ -2797,6 +2805,15 @@ impl YieldVault {
             return Err(VaultError::TimelockNotExpired);
         }
 
+        let current_balance = Self::balance(env.clone(), user.clone());
+        if current_balance < pending.shares {
+            return Err(VaultError::InsufficientShares);
+        }
+
+        if pending.shares <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
         env.storage()
             .instance()
             .remove(&DataKey::PendingWithdrawal(user.clone()));
@@ -2822,7 +2839,11 @@ impl YieldVault {
         shares: i128,
         assets_to_return: i128,
     ) -> Result<i128, VaultError> {
-        let token_addr = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
+        let token_addr = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenAsset)
+            .ok_or(VaultError::GovernanceSignersNotConfigured)?;
         let token_client = token::Client::new(env, &token_addr);
 
         // Check if vault has enough idle assets, otherwise queue the withdrawal
@@ -3018,7 +3039,10 @@ impl YieldVault {
             return 0;
         }
 
-        let token_addr = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
+        let token_addr: Address = match env.storage().instance().get(&DataKey::TokenAsset) {
+            Some(addr) => addr,
+            None => return 0,
+        };
         let token_client = token::Client::new(&env, &token_addr);
         let mut processed: u32 = 0;
         let mut head = Self::withdrawal_queue_head(&env);

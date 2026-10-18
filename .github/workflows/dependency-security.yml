@@ -69,7 +69,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@cargo-audit
 
       - name: Run Cargo Audit
         run: cargo audit --deny warnings || echo "Cargo audit completed."
