@@ -211,6 +211,8 @@ export function parsePaginationQuery(
 
   // Parse page (1-based, clamped to 1..maxPage — never rejected, Issue #1430)
   if (req.query.page !== undefined) {
+    const page = clampPageNumber(parseInt(req.query.page as string, 10)) ?? 1;
+    query.page = Math.min(page, mergedConfig.maxPage);
     const parsedPage = parseInt(req.query.page as string, 10);
     if (!Number.isNaN(parsedPage) && parsedPage > 0) {
       query.page = Math.min(parsedPage, mergedConfig.maxPage);

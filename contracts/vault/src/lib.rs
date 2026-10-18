@@ -128,8 +128,9 @@ use crate::strategy::StrategyClient;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
 use crate::strategy_validation::StrategyValidator;
 use crate::upgrade::{
-    get_admin, get_pending_admin, get_storage_version, is_initialized, set_admin, set_initialized,
-    set_pending_admin, set_storage_version,
+    get_admin, get_implementation, get_pending_admin, get_pending_upgrade, get_storage_version,
+    is_initialized, set_admin, set_implementation, set_initialized, set_pending_admin,
+    set_pending_upgrade, set_storage_version, PendingUpgrade, MIN_UPGRADE_DELAY_SECS,
 };
 use crate::whitelist::SecureWhitelist;
 use soroban_sdk::{
@@ -240,6 +241,9 @@ pub struct UserBalanceKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RiskExtKey {
+    /// Legacy last-price slot superseded by [`DataKeyExt::LastOraclePrice`].
+    /// Never written; only read once by `last_oracle_price` to migrate any
+    /// value left by older deployments into the canonical key.
     LastPx,
     MaxTvl,
     MaxConc,
@@ -530,14 +534,71 @@ impl YieldVault {
         Ok(())
     }
 
-    /// Upgrades the contract code to a new WASM hash.
+    /// Queues an upgrade to `new_wasm_hash`, replacing any queued one.
     /// Only the Admin can call this.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+    ///
+    /// The upgrade becomes executable after the larger of
+    /// [`upgrade::MIN_UPGRADE_DELAY_SECS`] and the sensitive-parameter timelock.
+    /// Emits `upg_prop` with `(new_wasm_hash, eta)` and returns the eta.
+    pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) -> u64 {
         let admin = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 
+        let delay = Self::sensitive_timelock_delay(env.clone()).max(MIN_UPGRADE_DELAY_SECS);
+        let eta = timelock::compute_eta(&env, delay);
+        set_pending_upgrade(
+            &env,
+            &Some(PendingUpgrade {
+                wasm_hash: new_wasm_hash.clone(),
+                eta,
+            }),
+        );
+        env.events()
+            .publish((symbol_short!("upg_prop"), admin), (new_wasm_hash, eta));
+        eta
+    }
+
+    /// Cancels the queued upgrade. Only the Admin can call this.
+    /// Emits `upg_cncl` with the cancelled WASM hash.
+    pub fn cancel_upgrade(env: Env) -> Result<(), VaultError> {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let pending = get_pending_upgrade(&env).ok_or(VaultError::NoPendingWithdrawal)?;
+        set_pending_upgrade(&env, &None);
+        env.events()
+            .publish((symbol_short!("upg_cncl"), admin), pending.wasm_hash);
+        Ok(())
+    }
+
+    /// Returns the queued upgrade, if any.
+    pub fn pending_upgrade(env: Env) -> Option<PendingUpgrade> {
+        get_pending_upgrade(&env)
+    }
+
+    /// Returns the WASM hash recorded in the implementation slot by the last upgrade.
+    pub fn implementation(env: Env) -> Option<BytesN<32>> {
+        get_implementation(&env)
+    }
+
+    /// Executes the queued upgrade once its timelock has elapsed.
+    /// Only the Admin can call this.
+    ///
+    /// Runs storage migrations, swaps the WASM, then writes and verifies the
+    /// implementation slot. Emits `upgraded` with `(previous, new_wasm_hash)`.
+    ///
+    /// # Errors
+    /// * `VaultError::NoPendingWithdrawal` - nothing is queued.
+    /// * `VaultError::TimelockNotExpired` - the eta has not been reached.
+    pub fn execute_upgrade(env: Env) -> Result<(), VaultError> {
+        let admin = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        let pending = get_pending_upgrade(&env).ok_or(VaultError::NoPendingWithdrawal)?;
+        Self::assert_timelock_ready(&env, pending.eta)?;
+
         let pre_version = get_storage_version(&env);
-        Self::run_storage_migration(&env, STORAGE_VERSION).expect("storage migration failed");
+        Self::run_storage_migration(&env, STORAGE_VERSION)?;
         // Checkpoint: storage version must equal STORAGE_VERSION after migration.
         let post_version = get_storage_version(&env);
         assert_eq!(
@@ -553,7 +614,22 @@ impl YieldVault {
             post_version
         );
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        set_pending_upgrade(&env, &None);
+        Self::apply_upgrade(&env, &admin, pending.wasm_hash);
+        Ok(())
+    }
+
+    /// Swaps the contract WASM, records it in the implementation slot and
+    /// emits `upgraded` with `(previous, new_wasm_hash)`.
+    fn apply_upgrade(env: &Env, caller: &Address, new_wasm_hash: BytesN<32>) {
+        let previous = get_implementation(env);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        set_implementation(env, &new_wasm_hash);
+        env.events().publish(
+            (symbol_short!("upgraded"), caller.clone()),
+            (previous, new_wasm_hash),
+        );
     }
 
     /// Runs storage schema migrations up to the requested target version.
@@ -750,6 +826,7 @@ impl YieldVault {
     pub fn set_strategy(env: Env, strategy: Address) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
+        let now = env.ledger().timestamp();
 
         // Strategy switch cooldown enforcement
         let cooldown: u64 = env
@@ -764,7 +841,7 @@ impl YieldVault {
                 .get(&DataKey::LastStrategySwitchTime)
                 .unwrap_or(0);
             let earliest_switch = last_switch.checked_add(cooldown).expect("overflow");
-            if env.ledger().timestamp() < earliest_switch {
+            if now < earliest_switch {
                 return Err(VaultError::AdminParamChangeTooSoon);
             }
         }
@@ -812,7 +889,6 @@ impl YieldVault {
         env.storage().instance().set(&DataKey::Strategy, &strategy);
 
         // Record switch timestamp and emit events
-        let now = env.ledger().timestamp();
         env.storage()
             .instance()
             .set(&DataKey::LastStrategySwitchTime, &now);
@@ -823,13 +899,7 @@ impl YieldVault {
             (previous_strategy.clone(), strategy.clone()),
         );
 
-        crate::audit_events::emit_strategy_switch(
-            &env,
-            &admin,
-            &previous_strategy,
-            &strategy,
-            env.ledger().timestamp(),
-        );
+        crate::audit_events::emit_strategy_switch(&env, &admin, &previous_strategy, &strategy, now);
 
         Ok(())
     }
@@ -1133,7 +1203,7 @@ impl YieldVault {
 
             emergency::EmergencyActionKind::ForceUpgrade => {
                 let hash = proposal.wasm_hash.clone().expect("wasm hash required");
-                env.deployer().update_current_contract_wasm(hash);
+                Self::apply_upgrade(&env, &confirmer, hash);
             }
         }
 
@@ -1374,11 +1444,12 @@ impl YieldVault {
         let state = Self::get_state(&env);
         let idle_assets = state.total_assets;
 
+        // Each config key is read at most once per call (issue #1538).
         let strategy_assets = if let Some(strategy_addr) = Self::strategy(env.clone()) {
+            let token = Self::token(env.clone());
             if Self::is_oracle_enabled(env.clone()) {
                 if let Some(oracle_addr) = Self::price_oracle(env.clone()) {
                     let oracle_client = OracleClient::new(&env, &oracle_addr);
-                    let token = Self::token(env.clone());
                     let price_data = oracle_client.get_price(&token, &token);
                     let max_age = Self::oracle_heartbeat(env.clone());
                     let last_price = Self::last_oracle_price(&env);
@@ -1393,7 +1464,6 @@ impl YieldVault {
                     Self::set_last_oracle_price(&env, &price_data);
                 }
             }
-            let token = Self::token(env.clone());
             Self::require_valid_strategy_response(&env, &strategy_addr, &token)
         } else {
             0
@@ -1404,14 +1474,33 @@ impl YieldVault {
             .ok_or(VaultError::MathOverflow)
     }
 
+    /// Last validated oracle price. `DataKeyExt::LastOraclePrice` is the single
+    /// canonical key; a value under the legacy `Risk(LastPx)` slot is migrated
+    /// into it on first read and the legacy slot is removed (issue #1525).
     fn last_oracle_price(env: &Env) -> Option<oracle::PriceData> {
-        env.storage().instance().get(&DataKeyExt::LastOraclePrice)
+        let storage = env.storage().instance();
+        if let Some(price) = storage.get(&DataKeyExt::LastOraclePrice) {
+            return Some(price);
+        }
+        let legacy_key = DataKeyExt::Risk(RiskExtKey::LastPx);
+        let legacy: Option<oracle::PriceData> = storage.get(&legacy_key);
+        if let Some(price) = legacy.as_ref() {
+            storage.set(&DataKeyExt::LastOraclePrice, price);
+            storage.remove(&legacy_key);
+        }
+        legacy
     }
 
     fn set_last_oracle_price(env: &Env, price_data: &oracle::PriceData) {
         env.storage()
             .instance()
             .set(&DataKeyExt::LastOraclePrice, price_data);
+    }
+
+    fn clear_last_oracle_price(env: &Env) {
+        let storage = env.storage().instance();
+        storage.remove(&DataKeyExt::LastOraclePrice);
+        storage.remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
     }
 
     /// Returns the current vault share price scaled to 10^18.
@@ -2111,7 +2200,8 @@ impl YieldVault {
     ///
     /// ### Rounding
     /// Uses round-down conversion (see [`math::assets_to_shares`]).
-    /// Rejects deposits that would mint zero shares to prevent silent loss of funds.
+    /// Rejects deposits that would mint zero shares with
+    /// [`VaultError::MinDepositNotMet`] to prevent silent loss of funds.
     ///
     /// ### Events
     /// Publishes a `(symbol_short!("deposit"),)` event with `(amount, shares_minted)`.
@@ -2149,7 +2239,7 @@ impl YieldVault {
 
         // Prevent silent loss of funds if shares round down to 0
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(&env, &user, amount, &state));
         }
 
         let deposit_key = DataKey::UserDeposit(user.clone());
@@ -2345,7 +2435,7 @@ impl YieldVault {
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(&env, &user, amount, &state));
         }
 
         // Per-user deposit cap check
@@ -2608,6 +2698,24 @@ impl YieldVault {
         })
     }
 
+    /// Rejects a deposit that would mint zero shares (issue #1536).
+    ///
+    /// Publishes `("dep_dust", user)` with `(amount, total_shares, total_assets)`
+    /// and returns [`VaultError::MinDepositNotMet`]: the amount is below the
+    /// smallest deposit that mints one share at the current price.
+    fn reject_dust_deposit(
+        env: &Env,
+        user: &Address,
+        amount: i128,
+        state: &VaultState,
+    ) -> VaultError {
+        env.events().publish(
+            (symbol_short!("dep_dust"), user.clone()),
+            (amount, state.total_shares, state.total_assets),
+        );
+        VaultError::MinDepositNotMet
+    }
+
     /// Internal helper: validates and applies a single deposit within a batch.
     ///
     /// State fields `total_assets` and `total_shares` on `state` are updated
@@ -2638,7 +2746,7 @@ impl YieldVault {
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
-            return Err(VaultError::InvalidAmount);
+            return Err(Self::reject_dust_deposit(env, user, amount, state));
         }
 
         // Per-user deposit cap check
@@ -4281,9 +4389,7 @@ impl YieldVault {
         env.storage()
             .instance()
             .remove(&DataKeyExt::PendingPriceOracle);
-        env.storage()
-            .instance()
-            .remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
+        Self::clear_last_oracle_price(&env);
         env.events()
             .publish((symbol_short!("oraclech"),), pending.new_value);
         Ok(())

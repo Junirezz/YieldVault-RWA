@@ -30,8 +30,11 @@ use super::*;
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
 use crate::strategy::{StrategyClient, StrategyTrait};
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Vec};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::xdr::{ContractEventBody, ScSymbol, ScVal};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, Env, IntoVal, TryFromVal, Vec,
+};
 
 #[contract]
 struct MaliciousStrategy;
@@ -341,10 +344,97 @@ fn test_deposit_tiny_amount_after_large_yield_mints_zero_shares() {
                                     // Depositing 1 asset: 1 * 1 / 1_000_001 = 0 shares — should fail.
     let deposit_result = vault.try_deposit(&user, &1_000_000);
     // Deposit should now fail to prevent silent loss of funds
-    assert!(
-        deposit_result.is_err(),
-        "deposit should fail when shares would round to 0"
+    assert_eq!(deposit_result, Err(Ok(VaultError::MinDepositNotMet)));
+}
+
+/// Issue #1536: fixture `deposit-dust-rounds-to-zero` (1 asset into a vault
+/// holding 1_000 shares / 1_000_000 assets) must be rejected with a typed
+/// error, emit `dep_dust`, and leave balances and accounting untouched.
+#[test]
+fn test_dust_deposit_rejected_with_typed_error_and_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let seed = Address::generate(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&seed, &1_000);
+    usdc_sa.mint(&admin, &999_000);
+    usdc_sa.mint(&user, &1_000);
+    vault.deposit(&seed, &1_000);
+    vault.accrue_yield(&999_000);
+    assert_eq!(vault.total_shares(), 1_000);
+    assert_eq!(vault.total_assets(), 1_000_000);
+
+    assert_eq!(
+        vault.try_deposit(&user, &1),
+        Err(Ok(VaultError::MinDepositNotMet))
     );
+
+    // The rejection event is published before the call reverts; Soroban keeps
+    // it in the (diagnostic) event buffer flagged as part of a failed call.
+    let dust_symbol = ScVal::Symbol(ScSymbol("dep_dust".try_into().unwrap()));
+    let dust_events: std::vec::Vec<_> = env
+        .host()
+        .get_events()
+        .unwrap()
+        .0
+        .into_iter()
+        .filter(|e| {
+            matches!(&e.event.body, ContractEventBody::V0(body)
+                if body.topics.first() == Some(&dust_symbol))
+        })
+        .collect();
+    assert_eq!(dust_events.len(), 1);
+    assert!(dust_events[0].failed_call);
+
+    assert_eq!(usdc.balance(&user), 1_000);
+    assert_eq!(vault.balance(&user), 0);
+    assert_eq!(vault.total_shares(), 1_000);
+    assert_eq!(vault.total_assets(), 1_000_000);
+
+    // One share's worth (1_000 assets) is the smallest accepted deposit.
+    assert_eq!(
+        vault.try_deposit(&user, &999),
+        Err(Ok(VaultError::MinDepositNotMet))
+    );
+    assert_eq!(vault.deposit(&user, &1_000), 1);
+}
+
+/// Issue #1536: a dust entry in a batch fails with the typed error and the
+/// `dep_dust` event persists because the batch itself succeeds.
+#[test]
+fn test_batch_dust_entry_rejected_with_typed_error_and_event() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let seed = Address::generate(&env);
+    let dust_user = Address::generate(&env);
+    let (vault, _usdc, usdc_sa, admin, relayer) =
+        setup_vault_with_relayer(&env, &[(seed.clone(), 1_000), (dust_user.clone(), 10)]);
+    usdc_sa.mint(&admin, &999_000);
+    vault.deposit(&seed, &1_000);
+    vault.accrue_yield(&999_000);
+
+    let mut entries = Vec::new(&env);
+    entries.push_back(DepositEntry {
+        user: dust_user.clone(),
+        amount: 1,
+    });
+    let result = vault.batch_deposit(&relayer, &entries);
+    let dust_events = env.events().all();
+
+    assert_eq!(result.success_count, 0);
+    assert_eq!(result.failure_count, 1);
+    let r0 = result.results.get(0).unwrap();
+    assert_eq!(r0.error_code, VaultError::MinDepositNotMet as u32);
+    assert_eq!(r0.shares_minted, 0);
+    assert!(dust_events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("dep_dust"), dust_user.clone()).into_val(&env)
+            && <(i128, i128, i128)>::try_from_val(&env, &data) == Ok((1, 1_000, 1_000_000))
+    }));
+    assert_eq!(vault.balance(&dust_user), 0);
 }
 
 // ─── 3. withdraw ─────────────────────────────────────────────────────────────

@@ -266,4 +266,72 @@ mod tests {
         let result = StrategyValidator::validate_price_response(-1_000_000, 6);
         assert!(result.is_err());
     }
+
+    // ── Exact error per validation path (issue #1526) ──────────────────────
+
+    #[test]
+    fn test_validation_error_paths_return_expected_variants() {
+        assert_eq!(
+            StrategyValidator::validate_total_value(-1),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_total_value(MAX_STRATEGY_VALUE + 1),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            StrategyValidator::validate_deposit_result(0, 10, 10),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_deposit_result(1, 10, 9),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_withdrawal_result(0, 10, 9),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_withdrawal_result(1, 10, 11),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_decimals(31),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(0, 6),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(MAX_STRATEGY_VALUE + 1, 6),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(1, 31),
+            Err(VaultError::InvalidAmount)
+        );
+    }
+
+    #[test]
+    fn test_validate_strategy_address_rejects_zero_contract() {
+        use soroban_sdk::testutils::Address as _;
+        use soroban_sdk::{xdr::ScAddress, TryFromVal};
+
+        let env = Env::default();
+        let zero = Address::try_from_val(
+            &env,
+            &ScAddress::Contract(soroban_sdk::xdr::Hash([0u8; 32])),
+        )
+        .unwrap();
+        assert_eq!(Address::from_str(&env, ZERO_CONTRACT_STRKEY), zero);
+        assert_eq!(
+            StrategyValidator::validate_strategy_address(&env, &zero),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_strategy_address(&env, &Address::generate(&env)),
+            Ok(())
+        );
+    }
 }

@@ -8,6 +8,7 @@ dotenv.config();
 import { initTracing, shutdownTracing, getCurrentTraceId } from './tracing';
 initTracing();
 
+import 'express-async-errors';
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { loginHandler, nonceHandler, refreshHandler, requireAuth, revokeAccessToken, revokeAllAccessTokens, revokeCurrentSession, revokeAllSessions } from './auth';
 import vaultListRouter from './routes/vaults';
@@ -25,6 +26,23 @@ import {
 } from './rateLimiter';
 import { createAdminAuditMiddleware } from './auditLog';
 import { getActorFromRequest } from './adminConfigChangeAudit';
+import { idempotencyStore } from './idempotency';
+import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
+import { AuditLogQuerySchema } from './middleware/validate';
+import { recordAdminAuditLog, recordAdminAuditLogInBackground } from './adminAudit';
+import {
+  recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
+} from './adminConfigChangeAudit';
+import { featureFlags } from './featureFlags';
+import {
+  startImpersonationSession,
+  endImpersonationSession,
+  validateImpersonationSession,
+  listImpersonationSessions,
+  resolveImpersonationSessionContext,
+  type ImpersonationSessionRecord,
+} from './impersonationSessionService';
+import { generateAdminReceipt, getAdminReceipt, listAdminReceipts, verifyReceiptSignature } from './adminReceipt';
 import { startApySnapshotScheduler } from './apySnapshot';
 import { startDbBackupScheduler } from './dbBackupJob';
 import { startPositionReconciliationScheduler, startLedgerReconciliationScheduler } from './positionReconciliationJob';
@@ -126,6 +144,15 @@ const drainTimeout = parseInt(process.env.DRAIN_TIMEOUT_MS || '30000', 10);
 
 // Configure logger
 logger.configure(logLevel);
+
+if (nodeEnv !== 'test') {
+  process.on('unhandledRejection', (reason: unknown) => {
+    logger.error('Unhandled promise rejection', {
+      error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  });
+}
 
 // Coordinates SIGTERM/SIGINT: stops new requests immediately, drains
 // in-flight ones, then runs DB/job cleanup — see onShutdown registrations
@@ -440,6 +467,7 @@ apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
 apiV1.use('/audit-logs', auditLogRouter);
+apiV1.get('/admin/diagnostics', validateApiKey, diagnosticsBundleHandler);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks
@@ -672,7 +700,7 @@ if (process.env.NODE_ENV !== 'test') {
 
   try {
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'apy.backfill.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'apy.backfill.dry_run', 200, {
         start,
         end,
         actor,
@@ -705,7 +733,7 @@ if (process.env.NODE_ENV !== 'test') {
       },
     });
 
-    void recordAdminAuditLog(req, 'apy.backfill', 200, {
+    recordAdminAuditLogInBackground(req, 'apy.backfill', 200, {
       start,
       end,
       created: result.created,
@@ -779,7 +807,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
   };
 
   if (dryRun) {
-    void recordAdminAuditLog(req, 'maintenance.toggle.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'maintenance.toggle.dry_run', 200, {
       enabled: preview.enabled,
       previousEnabled: previous.enabled,
       reason: preview.reason,
@@ -829,7 +857,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
     previousEnabled: previous.enabled,
   });
 
-  void recordAdminAuditLog(req, 'maintenance.toggle', 200, {
+  recordAdminAuditLogInBackground(req, 'maintenance.toggle', 200, {
     enabled: next.enabled,
     previousEnabled: previous.enabled,
     reason: next.reason,
@@ -1245,7 +1273,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
 
     const actor = resolveActingAdminAddress(req);
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'events.replay.manual.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'events.replay.manual.dry_run', 200, {
         fromLedger,
         toLedger,
         ledgerCount: toLedger - fromLedger + 1,
@@ -1284,7 +1312,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     });
     
     // Record replay job metadata
-    void recordAdminAuditLog(req, 'events.replay.manual', 200, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual', 200, {
       fromLedger,
       toLedger,
       processedCount: result.processedCount,
@@ -1308,7 +1336,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     const errorMessage = err instanceof Error ? err.message : String(err);
     
     // Record failed replay attempt
-    void recordAdminAuditLog(req, 'events.replay.manual.failed', 500, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual.failed', 500, {
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
@@ -1439,7 +1467,7 @@ app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalle
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.add', added ? 201 : 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.add', added ? 201 : 200, {
     walletAddress,
     added,
     actor,
@@ -1483,7 +1511,7 @@ app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: Allowlist
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.remove', 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.remove', 200, {
     walletAddress,
     actor,
     receiptId: receipt.id,
@@ -1552,7 +1580,7 @@ app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Req
   }
 
   const actor = resolveActingAdminAddress(req);
-  void recordAdminAuditLog(req, 'wallet-alias.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'wallet-alias.delete', 200, {
     actor,
     canonicalId,
     aliases: existing.aliases,
@@ -2321,7 +2349,7 @@ app.delete('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSche
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.delete', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -2349,7 +2377,7 @@ app.post('/admin/webhooks/:id/restore', validateApiKey, validate({ params: IdPar
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.restore', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.restore', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -2549,7 +2577,7 @@ app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySche
   const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
-  void recordAdminAuditLog(req, 'audit-logs.read', 200, {
+  recordAdminAuditLogInBackground(req, 'audit-logs.read', 200, {
     limit,
     returned: data.length,
   });
@@ -2717,7 +2745,12 @@ app.post('/admin/exports/bulk', validateApiKey, validate({ body: BulkExportBodyS
       filters: filters || {},
     });
 
-    void processBulkExportJob(job.id).catch(() => {});
+    void processBulkExportJob(job.id).catch((error: unknown) => {
+      logger.error('Bulk export job failed', {
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     res.status(201).json({
       message: 'Bulk export job created',
@@ -2854,7 +2887,7 @@ app.get('/admin/jobs/metrics', validateApiKey, (req: Request, res: Response) => 
     activeJobs: Object.values(metrics.runtime).filter((job) => job.inFlight > 0).length,
   };
 
-  void recordAdminAuditLog(req, 'jobs.metrics.read', 200);
+  recordAdminAuditLogInBackground(req, 'jobs.metrics.read', 200);
 
   res.json({
     summary,
@@ -3450,7 +3483,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   const actor = resolveActingAdminAddress(req);
 
   if (isDryRunRequest(req)) {
-    void recordAdminAuditLog(req, 'jobs.dlq.retry.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'jobs.dlq.retry.dry_run', 200, {
       id: req.params.id,
       jobName: record.jobName,
       actor,
@@ -3467,7 +3500,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   }
 
   const outcome = await retryDeadLetter(req.params.id);
-  void recordAdminAuditLog(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
     id: req.params.id,
     jobName: record.jobName,
     success: outcome.success,
@@ -3513,7 +3546,7 @@ app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ para
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.resolve', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.resolve', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -3559,7 +3592,7 @@ app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: R
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.discard', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -3605,7 +3638,7 @@ app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, validate({ body:
 
   const summary = await bulkRetryDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_retry', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_retry', 200, {
     requestedCount: ids.length,
     retried: summary.retried,
     failed: summary.failed,
@@ -3654,7 +3687,7 @@ app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, validate({ bod
 
   const summary = bulkDiscardDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_discard', 200, {
     requestedCount: ids.length,
     discardedCount: summary.discarded,
     actor,
@@ -3691,7 +3724,7 @@ app.post('/admin/jobs/dead-letters/process', validateApiKey, validate({ body: De
 
   const summary = await processDeadLetterQueue(batchSize);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.process', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.process', 200, {
     batchSize,
     processed: summary.processed,
     succeeded: summary.succeeded,
@@ -3901,7 +3934,7 @@ app.delete('/admin/webhooks/deduplication/:eventId', validateApiKey, (req: Reque
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.dedup.entry.removed', 200, { eventId });
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.entry.removed', 200, { eventId });
 
   res.status(200).json({
     message: `Deduplication entry '${eventId}' removed`,
@@ -3940,7 +3973,7 @@ app.delete('/admin/webhooks/deduplication', validateApiKey, (req: Request, res: 
 
   webhookDeduplicationStore.flush();
 
-  void recordAdminAuditLog(req, 'webhook.dedup.store.flushed', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.store.flushed', 200, {
     flushedCount: metrics.activeFingerprints,
   });
 
@@ -4280,6 +4313,424 @@ app.get('/health/probes', async (_req: Request, res: Response) => {
   });
 });
 
+// â”€â”€â”€ Write-Ahead Audit Log Endpoints (Issue #707) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/**
+ * GET /admin/wal/entries
+ * Lists write-ahead audit log entries with optional filters.
+ */
+app.get('/admin/wal/entries', validateApiKey, async (req: Request, res: Response) => {
+  const configType = typeof req.query.configType === 'string' ? req.query.configType : undefined;
+  const actor = typeof req.query.actor === 'string' ? req.query.actor : undefined;
+  const status = typeof req.query.status === 'string' ? req.query.status as 'pending' | 'committed' | 'rolled_back' : undefined;
+  const limit = parseLimited(req.query.limit, 50, 1, 200);
+
+  try {
+    const entries = await writeAheadAuditLog.list({ configType, actor, status, limit });
+    const metrics = await writeAheadAuditLog.getMetrics();
+
+    res.status(200).json({
+      entries,
+      count: entries.length,
+      metrics,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: error instanceof Error ? error.message : 'Failed to list write-ahead audit log entries',
+    });
+  }
+});
+
+/**
+ * GET /admin/wal/entries/:id
+ * Returns a specific write-ahead audit log entry.
+ */
+app.get('/admin/wal/entries/:id', validateApiKey, async (req: Request, res: Response) => {
+  try {
+    const entry = await writeAheadAuditLog.getEntry(req.params.id);
+    if (!entry) {
+      res.status(404).json({
+        error: 'Not Found',
+        status: 404,
+        message: 'Write-ahead audit log entry not found',
+      });
+      return;
+    }
+    res.status(200).json({ entry });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: error instanceof Error ? error.message : 'Failed to fetch write-ahead audit log entry',
+    });
+  }
+});
+
+/**
+ * GET /admin/wal/metrics
+ * Returns metrics for the write-ahead audit log.
+ */
+app.get('/admin/wal/metrics', validateApiKey, async (_req: Request, res: Response) => {
+  try {
+    const metrics = await writeAheadAuditLog.getMetrics();
+    res.status(200).json({
+      metrics,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: error instanceof Error ? error.message : 'Failed to fetch write-ahead audit log metrics',
+    });
+  }
+});
+
+/**
+ * GET /admin/wal/pending
+ * Returns currently pending (uncommitted) write-ahead entries.
+ */
+app.get('/admin/wal/pending', validateApiKey, async (_req: Request, res: Response) => {
+  try {
+    const pending = await writeAheadAuditLog.getPendingEntries();
+    res.status(200).json({
+      entries: pending,
+      count: pending.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: error instanceof Error ? error.message : 'Failed to fetch pending write-ahead audit log entries',
+    });
+  }
+});
+
+// ─── Scoped Admin Token Endpoints (Issue #723 / #858) ───────────────────────
+// All endpoints are async – store operations now hit Prisma for cluster-wide durability.
+
+/**
+ * GET /admin/scoped-tokens/permissions
+ * Returns the list of valid permissions for scoped tokens.
+ * Must be registered before /:keyId routes to avoid shadowing.
+ */
+app.get('/admin/scoped-tokens/permissions', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    permissions: scopedAdminTokenStore.getValidPermissions(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * POST /admin/scoped-tokens
+ * Creates a new permission-scoped admin token.
+ * Requires super-admin API key.
+ * Returns the plaintext secret once; it is never stored.
+ */
+app.post('/admin/scoped-tokens', validateApiKey, validate({ body: ScopedTokenCreateSchema }), async (req: Request, res: Response) => {
+  if (!hasRequiredApiKeyRole(req, 'super-admin')) {
+    res.status(403).json({ error: 'Forbidden', status: 403, message: 'Super-admin role is required to create scoped tokens' });
+    return;
+  }
+  const { label, permissions, expiresInSeconds } = req.body;
+  if (typeof label !== 'string' || !label.trim()) {
+    res.status(400).json({ error: 'Bad Request', status: 400, message: '`label` (string) is required' });
+    return;
+  }
+  if (!Array.isArray(permissions) || permissions.length === 0) {
+    res.status(400).json({ error: 'Bad Request', status: 400, message: '`permissions` (non-empty array) is required' });
+    return;
+  }
+  const actor = resolveActingAdminAddress(req);
+  try {
+    const { token, secret } = await scopedAdminTokenStore.create({
+      label: label.trim(),
+      permissions,
+      expiresInSeconds: typeof expiresInSeconds === 'number' && expiresInSeconds > 0 ? expiresInSeconds : undefined,
+      createdBy: actor,
+    });
+    recordAdminAuditLogInBackground(req, 'scoped-token.created', 201, { keyId: token.keyId, label: token.label, permissions: token.permissions, actor });
+    res.status(201).json({ message: 'Scoped admin token created', keyId: token.keyId, secret, label: token.label, permissions: token.permissions, expiresAt: token.expiresAt, createdAt: token.createdAt });
+  } catch (error) {
+    res.status(400).json({ error: 'Bad Request', status: 400, message: error instanceof Error ? error.message : 'Failed to create scoped token' });
+  }
+});
+
+/**
+ * GET /admin/scoped-tokens
+ * Lists all scoped admin tokens (without secrets).
+ * Requires admin or super-admin API key.
+ */
+app.get('/admin/scoped-tokens', validateApiKey, async (req: Request, res: Response) => {
+  const includeRevoked = req.query.includeRevoked === 'true';
+  const tokens = await scopedAdminTokenStore.list({ includeRevoked });
+  const sanitized = tokens.map(({ hashedSecret: _hs, ...rest }) => rest);
+  res.status(200).json({ tokens: sanitized, count: sanitized.length, timestamp: new Date().toISOString() });
+});
+
+/**
+ * GET /admin/scoped-tokens/:keyId
+ * Returns a single token record (without secret).
+ * Requires admin or super-admin API key.
+ */
+app.get('/admin/scoped-tokens/:keyId', validateApiKey, async (req: Request, res: Response) => {
+  const token = await scopedAdminTokenStore.get(req.params.keyId);
+  if (!token) {
+    res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found' });
+    return;
+  }
+  const { hashedSecret: _hs, ...sanitized } = token;
+  res.status(200).json({ token: sanitized });
+});
+
+/**
+ * GET /admin/scoped-tokens/:keyId/rotations
+ * Returns the immutable rotation history for a token (fingerprints only, no old secrets).
+ * Requires admin or super-admin API key.
+ */
+app.get('/admin/scoped-tokens/:keyId/rotations', validateApiKey, async (req: Request, res: Response) => {
+  const token = await scopedAdminTokenStore.get(req.params.keyId);
+  if (!token) {
+    res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found' });
+    return;
+  }
+  const events = await scopedAdminTokenStore.listRotationEvents(req.params.keyId);
+  res.status(200).json({ keyId: req.params.keyId, rotations: events, count: events.length, timestamp: new Date().toISOString() });
+});
+
+/**
+ * POST /admin/scoped-tokens/:keyId/rotate
+ * Rotates the secret and writes an immutable audit event row.
+ * Requires super-admin API key.
+ */
+app.post('/admin/scoped-tokens/:keyId/rotate', validateApiKey, async (req: Request, res: Response) => {
+  if (!hasRequiredApiKeyRole(req, 'super-admin')) {
+    res.status(403).json({ error: 'Forbidden', status: 403, message: 'Super-admin role is required to rotate scoped tokens' });
+    return;
+  }
+  const actor = resolveActingAdminAddress(req);
+  const result = await scopedAdminTokenStore.rotate(req.params.keyId, { rotatedBy: actor });
+  if (!result) {
+    res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
+    return;
+  }
+  recordAdminAuditLogInBackground(req, 'scoped-token.rotated', 200, { keyId: result.keyId, rotatedAt: result.rotatedAt, actor });
+  res.status(200).json({ message: 'Scoped token rotated', keyId: result.keyId, newSecret: result.newSecret, rotatedAt: result.rotatedAt });
+});
+
+/**
+ * POST /admin/scoped-tokens/:keyId/revoke
+ * Revokes a scoped admin token cluster-wide.
+ * Requires super-admin API key.
+ */
+app.post('/admin/scoped-tokens/:keyId/revoke', validateApiKey, async (req: Request, res: Response) => {
+  if (!hasRequiredApiKeyRole(req, 'super-admin')) {
+    res.status(403).json({ error: 'Forbidden', status: 403, message: 'Super-admin role is required to revoke scoped tokens' });
+    return;
+  }
+  const actor = resolveActingAdminAddress(req);
+  const revoked = await scopedAdminTokenStore.revoke(req.params.keyId, { revokedBy: actor });
+  if (!revoked) {
+    res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
+    return;
+  }
+  recordAdminAuditLogInBackground(req, 'scoped-token.revoked', 200, { keyId: req.params.keyId, actor });
+  res.status(200).json({ message: 'Scoped token revoked', keyId: req.params.keyId, timestamp: new Date().toISOString() });
+});
+
+// ─── Withdrawal Partial-Failure Recovery Endpoints (Issue #954) ──────────────
+
+const WITHDRAWAL_SAGA_STATUSES: readonly WithdrawalSagaStatus[] = [
+  'in_progress',
+  'completed',
+  'awaiting_retry',
+  'compensated',
+  'needs_manual_intervention',
+  'failed',
+];
+
+function parseSagaStatus(value: unknown): WithdrawalSagaStatus | undefined {
+  return typeof value === 'string' &&
+    (WITHDRAWAL_SAGA_STATUSES as readonly string[]).includes(value)
+    ? (value as WithdrawalSagaStatus)
+    : undefined;
+}
+
+/**
+ * GET /admin/withdrawals/recovery
+ * Lists journalled withdrawal sagas with optional filters. Use
+ * `?requiresManualIntervention=true` for the operator work queue.
+ */
+app.get('/admin/withdrawals/recovery', validateApiKey, (req: Request, res: Response) => {
+  const requiresManualIntervention =
+    req.query.requiresManualIntervention === undefined
+      ? undefined
+      : req.query.requiresManualIntervention === 'true';
+
+  const sagas = withdrawalRecoveryCoordinator.list({
+    status: parseSagaStatus(req.query.status),
+    walletAddress:
+      typeof req.query.walletAddress === 'string' ? req.query.walletAddress : undefined,
+    withdrawalId:
+      typeof req.query.withdrawalId === 'string' ? req.query.withdrawalId : undefined,
+    requiresManualIntervention,
+    limit: parseLimited(req.query.limit, 50, 1, 200),
+  });
+
+  res.status(200).json({
+    sagas,
+    count: sagas.length,
+    metrics: withdrawalRecoveryCoordinator.getMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/withdrawals/recovery/metrics
+ * Aggregate recovery counters for dashboards and alert rules.
+ */
+app.get('/admin/withdrawals/recovery/metrics', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({
+    metrics: withdrawalRecoveryCoordinator.getMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * GET /admin/withdrawals/recovery/:sagaId
+ * Returns the full step journal for one withdrawal saga.
+ */
+app.get('/admin/withdrawals/recovery/:sagaId', validateApiKey, (req: Request, res: Response) => {
+  const saga = withdrawalRecoveryCoordinator.get(req.params.sagaId);
+  if (!saga) {
+    res.status(404).json({
+      error: 'Not Found',
+      status: 404,
+      message: 'Withdrawal recovery saga not found',
+    });
+    return;
+  }
+  res.status(200).json({ saga });
+});
+
+/**
+ * POST /admin/withdrawals/recovery/:sagaId/resume
+ * Replays the saga from its journal. Completed steps are skipped, so no side
+ * effect is repeated. `force: true` also resumes sagas parked for an operator.
+ */
+app.post(
+  '/admin/withdrawals/recovery/:sagaId/resume',
+  validateApiKey,
+  async (req: Request, res: Response) => {
+    const force = req.body?.force === true;
+    const outcome = await withdrawalRecoveryCoordinator.resume(req.params.sagaId, { force });
+
+    if (!outcome) {
+      res.status(404).json({
+        error: 'Not Found',
+        status: 404,
+        message: 'Withdrawal recovery saga not found',
+      });
+      return;
+    }
+
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resumed', 200, {
+      sagaId: outcome.saga.id,
+      withdrawalId: outcome.saga.withdrawalId,
+      status: outcome.status,
+      forced: force,
+      actor: resolveActingAdminAddress(req),
+    });
+
+    res.status(200).json({
+      message: 'Withdrawal recovery pass completed',
+      status: outcome.status,
+      completed: outcome.completed,
+      partial: outcome.partial,
+      saga: outcome.saga,
+    });
+  },
+);
+
+/**
+ * POST /admin/withdrawals/recovery/:sagaId/resolve
+ * Closes out a parked saga after an operator reconciled it by hand.
+ */
+app.post(
+  '/admin/withdrawals/recovery/:sagaId/resolve',
+  validateApiKey,
+  (req: Request, res: Response) => {
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!note) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: 'A "note" describing the manual resolution is required',
+      });
+      return;
+    }
+
+    const outcome = req.body?.outcome;
+    if (outcome !== undefined && !['completed', 'compensated', 'failed'].includes(outcome)) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: 'outcome must be one of: completed, compensated, failed',
+      });
+      return;
+    }
+
+    const actor = resolveActingAdminAddress(req);
+    const saga = withdrawalRecoveryCoordinator.resolveManually(
+      req.params.sagaId,
+      actor,
+      note,
+      outcome,
+    );
+
+    if (!saga) {
+      res.status(404).json({
+        error: 'Not Found',
+        status: 404,
+        message: 'Withdrawal recovery saga not found',
+      });
+      return;
+    }
+
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resolved', 200, {
+      sagaId: saga.id,
+      withdrawalId: saga.withdrawalId,
+      outcome: saga.status,
+      actor,
+    });
+
+    res.status(200).json({ message: 'Withdrawal saga resolved', saga });
+  },
+);
+
+/**
+ * POST /admin/withdrawals/recovery/sweep
+ * Runs one recovery sweep immediately instead of waiting for the interval.
+ */
+app.post('/admin/withdrawals/recovery/sweep', validateApiKey, async (req: Request, res: Response) => {
+  const result = await withdrawalRecoveryCoordinator.sweep();
+  recordAdminAuditLogInBackground(req, 'withdrawal-recovery.swept', 200, {
+    resumed: result.resumed.length,
+    stale: result.stale.length,
+    actor: resolveActingAdminAddress(req),
+  });
+  res.status(200).json({
+    message: 'Withdrawal recovery sweep completed',
+    resumed: result.resumed,
+    staleResumed: result.stale,
+    metrics: withdrawalRecoveryCoordinator.getMetrics(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Resume partially failed withdrawals in the background. Disabled under test so
 // suites drive the sweeper explicitly.
 if (process.env.NODE_ENV !== 'test') {
@@ -4288,6 +4739,58 @@ if (process.env.NODE_ENV !== 'test') {
   // Initialize job governance from persisted dead-letter records
   void initializeJobGovernance();
 }
+
+// ─── Vault management ────────────────────────────────────────────────────────
+
+/**
+ * POST /admin/vaults
+ *
+ * Creates a new vault for a tenant.
+ *
+ * Body: { name: string, symbol: string, tenantId: string }
+ *
+ * Validation is handled entirely by CreateVaultBodySchema (which trims
+ * whitespace before checking min/max lengths), so no manual trim() calls
+ * are needed in this handler. A whitespace-only name like " " fails schema
+ * validation and returns 400 before any DB write is attempted.
+ */
+app.post(
+  '/admin/vaults',
+  validateApiKey,
+  validate({ body: CreateVaultBodySchema }),
+  async (req: Request, res: Response) => {
+    const { name, symbol, tenantId } = req.body as {
+      name: string;
+      symbol: string;
+      tenantId: string;
+    };
+
+    const prismaClient = getPrismaClient();
+    const vault = await prismaClient.vault.create({
+      data: { name, symbol, tenantId },
+    });
+
+    recordAdminAuditLogInBackground(req, 'vault.created', 201, {
+      vaultId: vault.id,
+      name: vault.name,
+      symbol: vault.symbol,
+      tenantId: vault.tenantId,
+      actor: resolveActingAdminAddress(req),
+    });
+
+    res.status(201).json({
+      vault: {
+        id: vault.id,
+        name: vault.name,
+        symbol: vault.symbol,
+        tenantId: vault.tenantId,
+        aum: vault.aum,
+        createdAt: vault.createdAt.toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
 
 // Normalize dependency and unhandled application failures before the 404 route.
 app.use(errorBoundaryMiddleware);
