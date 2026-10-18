@@ -766,33 +766,12 @@ router.post(
           cooldownTotal: cooldownSec,
         });
       }
-router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), validate({ body: VaultStrategyBodySchema }), (req: Request, res: Response) => {
-  const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
-  const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
-  const now = Date.now();
-  const lastSwitchMs = lastSwitchIso ? new Date(lastSwitchIso).getTime() : 0;
-
-  if (cooldownSec > 0 && lastSwitchMs > 0) {
-    const elapsed = Math.floor((now - lastSwitchMs) / 1000);
-    if (elapsed < cooldownSec) {
-      const retryAfter = cooldownSec - elapsed;
-      res.setHeader('Retry-After', String(retryAfter));
-      res.status(429).json({
-        error: 'Too Many Requests',
-        status: 429,
-        code: 'STRATEGY_COOLDOWN_ACTIVE',
-        message: `Strategy switch cooldown active. Retry in ${retryAfter}s.`,
-        cooldownRemaining: retryAfter,
-        cooldownTotal: cooldownSec,
-      });
-      return;
     }
 
     const strategyId = typeof req.body?.strategyId === 'string' ? req.body.strategyId : 'default';
     const previousStrategyId =
       typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
 
-    // Record switch time for cooldown tracking
     process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
 
     void eventOutboxService
@@ -822,11 +801,9 @@ router.post('/strategy', depositsLimiter, requireFlag('strategy-selection'), val
         });
       });
 
-    res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
+    return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
   }
 );
-  return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
-});
 
 /**
  * POST /api/v1/vault/gasless-deposits
