@@ -8,6 +8,7 @@ dotenv.config();
 import { initTracing, shutdownTracing, getCurrentTraceId } from './tracing';
 initTracing();
 
+import 'express-async-errors';
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import NodeCache from 'node-cache';
 import {
@@ -37,7 +38,7 @@ import {
 import { idempotencyStore } from './idempotency';
 import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
 import { AuditLogQuerySchema } from './middleware/validate';
-import { recordAdminAuditLog } from './adminAudit';
+import { recordAdminAuditLog, recordAdminAuditLogInBackground } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
 } from './adminConfigChangeAudit';
@@ -273,6 +274,15 @@ const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CA
 
 // Configure logger
 logger.configure(logLevel);
+
+if (nodeEnv !== 'test') {
+  process.on('unhandledRejection', (reason: unknown) => {
+    logger.error('Unhandled promise rejection', {
+      error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  });
+}
 
 // Coordinates SIGTERM/SIGINT: stops new requests immediately, drains
 // in-flight ones, then runs DB/job cleanup — see onShutdown registrations
@@ -1451,7 +1461,7 @@ app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBody
 
   try {
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'apy.backfill.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'apy.backfill.dry_run', 200, {
         start,
         end,
         actor,
@@ -1484,7 +1494,7 @@ app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBody
       },
     });
 
-    void recordAdminAuditLog(req, 'apy.backfill', 200, {
+    recordAdminAuditLogInBackground(req, 'apy.backfill', 200, {
       start,
       end,
       created: result.created,
@@ -1558,7 +1568,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
   };
 
   if (dryRun) {
-    void recordAdminAuditLog(req, 'maintenance.toggle.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'maintenance.toggle.dry_run', 200, {
       enabled: preview.enabled,
       previousEnabled: previous.enabled,
       reason: preview.reason,
@@ -1608,7 +1618,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
     previousEnabled: previous.enabled,
   });
 
-  void recordAdminAuditLog(req, 'maintenance.toggle', 200, {
+  recordAdminAuditLogInBackground(req, 'maintenance.toggle', 200, {
     enabled: next.enabled,
     previousEnabled: previous.enabled,
     reason: next.reason,
@@ -2024,7 +2034,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
 
     const actor = resolveActingAdminAddress(req);
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'events.replay.manual.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'events.replay.manual.dry_run', 200, {
         fromLedger,
         toLedger,
         ledgerCount: toLedger - fromLedger + 1,
@@ -2063,7 +2073,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     });
     
     // Record replay job metadata
-    void recordAdminAuditLog(req, 'events.replay.manual', 200, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual', 200, {
       fromLedger,
       toLedger,
       processedCount: result.processedCount,
@@ -2087,7 +2097,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     const errorMessage = err instanceof Error ? err.message : String(err);
     
     // Record failed replay attempt
-    void recordAdminAuditLog(req, 'events.replay.manual.failed', 500, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual.failed', 500, {
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
@@ -2218,7 +2228,7 @@ app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalle
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.add', added ? 201 : 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.add', added ? 201 : 200, {
     walletAddress,
     added,
     actor,
@@ -2262,7 +2272,7 @@ app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: Allowlist
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.remove', 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.remove', 200, {
     walletAddress,
     actor,
     receiptId: receipt.id,
@@ -2331,7 +2341,7 @@ app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Req
   }
 
   const actor = resolveActingAdminAddress(req);
-  void recordAdminAuditLog(req, 'wallet-alias.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'wallet-alias.delete', 200, {
     actor,
     canonicalId,
     aliases: existing.aliases,
@@ -3100,7 +3110,7 @@ app.delete('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSche
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.delete', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -3128,7 +3138,7 @@ app.post('/admin/webhooks/:id/restore', validateApiKey, validate({ params: IdPar
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.restore', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.restore', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -3328,7 +3338,7 @@ app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySche
   const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
-  void recordAdminAuditLog(req, 'audit-logs.read', 200, {
+  recordAdminAuditLogInBackground(req, 'audit-logs.read', 200, {
     limit,
     returned: data.length,
   });
@@ -3496,7 +3506,12 @@ app.post('/admin/exports/bulk', validateApiKey, validate({ body: BulkExportBodyS
       filters: filters || {},
     });
 
-    void processBulkExportJob(job.id).catch(() => {});
+    void processBulkExportJob(job.id).catch((error: unknown) => {
+      logger.error('Bulk export job failed', {
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     res.status(201).json({
       message: 'Bulk export job created',
@@ -3633,7 +3648,7 @@ app.get('/admin/jobs/metrics', validateApiKey, (req: Request, res: Response) => 
     activeJobs: Object.values(metrics.runtime).filter((job) => job.inFlight > 0).length,
   };
 
-  void recordAdminAuditLog(req, 'jobs.metrics.read', 200);
+  recordAdminAuditLogInBackground(req, 'jobs.metrics.read', 200);
 
   res.json({
     summary,
@@ -4166,22 +4181,6 @@ app.get('/admin/jobs/dashboard', validateApiKey, async (_req: Request, res: Resp
 // ─── Dead-Letter Queue Admin Endpoints ─────────────────────────────────────
 
 /**
- * GET /admin/jobs/metrics
- * Returns background job runtime and governance metrics.
- */
-app.get('/admin/jobs/metrics', validateApiKey, (_req: Request, res: Response) => {
-  const metrics = getJobMetrics();
-  const health = getJobHealthStatus();
-
-  res.status(200).json({
-    summary: { health },
-    metrics,
-    prisma: getPrismaConfig(),
-    timestamp: new Date().toISOString(),
-  });
-});
-
-/**
  * GET /admin/jobs/dead-letters
  * Lists dead-letter queue records with optional filtering (jobName, status, limit, offset).
  * Requires API key authentication.
@@ -4245,7 +4244,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   const actor = resolveActingAdminAddress(req);
 
   if (isDryRunRequest(req)) {
-    void recordAdminAuditLog(req, 'jobs.dlq.retry.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'jobs.dlq.retry.dry_run', 200, {
       id: req.params.id,
       jobName: record.jobName,
       actor,
@@ -4262,7 +4261,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   }
 
   const outcome = await retryDeadLetter(req.params.id);
-  void recordAdminAuditLog(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
     id: req.params.id,
     jobName: record.jobName,
     success: outcome.success,
@@ -4308,7 +4307,7 @@ app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ para
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.resolve', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.resolve', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -4354,7 +4353,7 @@ app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: R
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.discard', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -4400,7 +4399,7 @@ app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, validate({ body:
 
   const summary = await bulkRetryDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_retry', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_retry', 200, {
     requestedCount: ids.length,
     retried: summary.retried,
     failed: summary.failed,
@@ -4449,7 +4448,7 @@ app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, validate({ bod
 
   const summary = bulkDiscardDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_discard', 200, {
     requestedCount: ids.length,
     discardedCount: summary.discarded,
     actor,
@@ -4486,7 +4485,7 @@ app.post('/admin/jobs/dead-letters/process', validateApiKey, validate({ body: De
 
   const summary = await processDeadLetterQueue(batchSize);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.process', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.process', 200, {
     batchSize,
     processed: summary.processed,
     succeeded: summary.succeeded,
@@ -4696,7 +4695,7 @@ app.delete('/admin/webhooks/deduplication/:eventId', validateApiKey, (req: Reque
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.dedup.entry.removed', 200, { eventId });
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.entry.removed', 200, { eventId });
 
   res.status(200).json({
     message: `Deduplication entry '${eventId}' removed`,
@@ -4735,7 +4734,7 @@ app.delete('/admin/webhooks/deduplication', validateApiKey, (req: Request, res: 
 
   webhookDeduplicationStore.flush();
 
-  void recordAdminAuditLog(req, 'webhook.dedup.store.flushed', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.store.flushed', 200, {
     flushedCount: metrics.activeFingerprints,
   });
 
@@ -5223,7 +5222,7 @@ app.post('/admin/scoped-tokens', validateApiKey, validate({ body: ScopedTokenCre
       expiresInSeconds: typeof expiresInSeconds === 'number' && expiresInSeconds > 0 ? expiresInSeconds : undefined,
       createdBy: actor,
     });
-    void recordAdminAuditLog(req, 'scoped-token.created', 201, { keyId: token.keyId, label: token.label, permissions: token.permissions, actor });
+    recordAdminAuditLogInBackground(req, 'scoped-token.created', 201, { keyId: token.keyId, label: token.label, permissions: token.permissions, actor });
     res.status(201).json({ message: 'Scoped admin token created', keyId: token.keyId, secret, label: token.label, permissions: token.permissions, expiresAt: token.expiresAt, createdAt: token.createdAt });
   } catch (error) {
     res.status(400).json({ error: 'Bad Request', status: 400, message: error instanceof Error ? error.message : 'Failed to create scoped token' });
@@ -5288,7 +5287,7 @@ app.post('/admin/scoped-tokens/:keyId/rotate', validateApiKey, async (req: Reque
     res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
     return;
   }
-  void recordAdminAuditLog(req, 'scoped-token.rotated', 200, { keyId: result.keyId, rotatedAt: result.rotatedAt, actor });
+  recordAdminAuditLogInBackground(req, 'scoped-token.rotated', 200, { keyId: result.keyId, rotatedAt: result.rotatedAt, actor });
   res.status(200).json({ message: 'Scoped token rotated', keyId: result.keyId, newSecret: result.newSecret, rotatedAt: result.rotatedAt });
 });
 
@@ -5308,7 +5307,7 @@ app.post('/admin/scoped-tokens/:keyId/revoke', validateApiKey, async (req: Reque
     res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
     return;
   }
-  void recordAdminAuditLog(req, 'scoped-token.revoked', 200, { keyId: req.params.keyId, actor });
+  recordAdminAuditLogInBackground(req, 'scoped-token.revoked', 200, { keyId: req.params.keyId, actor });
   res.status(200).json({ message: 'Scoped token revoked', keyId: req.params.keyId, timestamp: new Date().toISOString() });
 });
 
@@ -5408,7 +5407,7 @@ app.post(
       return;
     }
 
-    void recordAdminAuditLog(req, 'withdrawal-recovery.resumed', 200, {
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resumed', 200, {
       sagaId: outcome.saga.id,
       withdrawalId: outcome.saga.withdrawalId,
       status: outcome.status,
@@ -5471,7 +5470,7 @@ app.post(
       return;
     }
 
-    void recordAdminAuditLog(req, 'withdrawal-recovery.resolved', 200, {
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resolved', 200, {
       sagaId: saga.id,
       withdrawalId: saga.withdrawalId,
       outcome: saga.status,
@@ -5488,7 +5487,7 @@ app.post(
  */
 app.post('/admin/withdrawals/recovery/sweep', validateApiKey, async (req: Request, res: Response) => {
   const result = await withdrawalRecoveryCoordinator.sweep();
-  void recordAdminAuditLog(req, 'withdrawal-recovery.swept', 200, {
+  recordAdminAuditLogInBackground(req, 'withdrawal-recovery.swept', 200, {
     resumed: result.resumed.length,
     stale: result.stale.length,
     actor: resolveActingAdminAddress(req),
@@ -5541,7 +5540,7 @@ app.post(
       data: { name, symbol, tenantId },
     });
 
-    void recordAdminAuditLog(req, 'vault.created', 201, {
+    recordAdminAuditLogInBackground(req, 'vault.created', 201, {
       vaultId: vault.id,
       name: vault.name,
       symbol: vault.symbol,

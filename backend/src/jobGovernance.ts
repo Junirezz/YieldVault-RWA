@@ -127,9 +127,14 @@ class JobGovernanceStore {
       }
 
       this.initialized = true;
-      console.log(`Loaded ${persistedRecords.length} dead-letter records from database`);
+      logger.log('info', 'Loaded dead-letter records from database', {
+        count: persistedRecords.length,
+      });
     } catch (error) {
-      console.error('Failed to initialize dead-letter records from database:', error);
+      logger.log('error', 'Failed to initialize dead-letter records from database', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       this.initialized = true; // Mark as initialized anyway to avoid retries
     }
   }
@@ -185,7 +190,10 @@ class JobGovernanceStore {
     this.failureCounts.set(fullRecord.jobName, failures);
 
     if (failures >= JOB_POLICIES[fullRecord.jobName].deadLetterThreshold) {
-      console.warn(`Recurring failures detected for ${fullRecord.jobName}: ${failures}`);
+      logger.log('warn', 'Recurring job failures detected', {
+        jobName: fullRecord.jobName,
+        failures,
+      });
       // Fire-and-forget alert
       void this.sendDeadLetterAlert(fullRecord.jobName, failures, fullRecord.error);
     }
@@ -214,7 +222,11 @@ class JobGovernanceStore {
         },
       });
     } catch (error) {
-      console.error('Failed to persist dead-letter record to database:', error);
+      logger.log('error', 'Failed to persist dead-letter record to database', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        jobName: record.jobName,
+      });
       // Continue operation even if persistence fails
     }
   }
@@ -327,7 +339,11 @@ class JobGovernanceStore {
         },
       });
     } catch (error) {
-      console.error('Failed to update dead-letter record in database:', error);
+      logger.log('error', 'Failed to update dead-letter record in database', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        id,
+      });
     }
   }
 

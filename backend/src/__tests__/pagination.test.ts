@@ -362,11 +362,19 @@ describe('Pagination', () => {
       expect(idsFirst).toEqual(idsSecond);
     });
 
-    it('should handle invalid sort field gracefully', async () => {
+    it('rejects invalid sort fields with 400 and a clear error', async () => {
       const response = await request(app).get('/api/transactions?sortBy=invalidField');
 
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('data');
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Bad Request');
+      expect(response.body.message).toContain('Invalid sortBy value');
+    });
+
+    it('rejects sort injection payloads before they reach the query layer', async () => {
+      const response = await request(app).get('/api/transactions?sortBy=timestamp;drop%20table');
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toContain('Invalid sortBy value');
     });
 
     it('should handle invalid sort order gracefully', async () => {

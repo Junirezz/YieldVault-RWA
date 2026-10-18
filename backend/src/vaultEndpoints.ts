@@ -772,7 +772,6 @@ router.post(
     const previousStrategyId =
       typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
 
-    // Record switch time for cooldown tracking
     process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
 
     void eventOutboxService
@@ -802,7 +801,7 @@ router.post(
         });
       });
 
-    res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
+    return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
   }
 );
 

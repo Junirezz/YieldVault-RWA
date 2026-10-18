@@ -8,8 +8,9 @@
 
 // ─── Mock @stellar/stellar-sdk (via the shim-declared types) ─────────────────
 
-const mockSign = jest.fn();
-const mockBuild = jest.fn().mockReturnValue({ sign: mockSign });
+const mockHash = jest.fn().mockReturnValue(Buffer.from('transaction-hash'));
+const mockAddSignature = jest.fn();
+const mockBuild = jest.fn().mockReturnValue({ hash: mockHash, addSignature: mockAddSignature });
 const mockAssembleTransaction = jest.fn().mockReturnValue({ build: mockBuild });
 
 const mockSendTransaction = jest.fn();
@@ -26,7 +27,7 @@ jest.mock('@stellar/stellar-sdk', () => ({
   Keypair: {
     fromSecret: jest.fn().mockReturnValue({
       publicKey: () => 'GDUMMYSOURCE123456789012345678901234567890123456789012',
-      sign: jest.fn(),
+      sign: jest.fn().mockReturnValue(Buffer.from('local-signature')),
     }),
   },
   Contract: jest.fn().mockImplementation(() => ({
@@ -59,7 +60,13 @@ jest.mock('../tracing', () => ({ getCurrentTraceId: () => 'test-trace-id' }));
 
 // ─── Import SUT after mocks ───────────────────────────────────────────────────
 
-import { submitVaultOperation, SorobanSimulationError, resolveContractId } from '../sorobanClient';
+import {
+  configureStellarSigners,
+  submitVaultOperation,
+  SorobanSimulationError,
+  resolveContractId,
+  rotateStellarSigner,
+} from '../sorobanClient';
 import { rpc } from '@stellar/stellar-sdk';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -69,6 +76,8 @@ const PENDING_RESPONSE = { status: 'PENDING', hash: 'real-tx-hash-abcdef12345678
 
 function setEnv() {
   process.env.STELLAR_SECRET_KEY = 'SCZANGBA5RLNIRHAASV3SUKWNZV3YJTVJBOTVOHFMKCHLJV2RDBUFXE';
+  delete process.env.STELLAR_SECRET_KEY_NEXT;
+  delete process.env.STELLAR_ACTIVE_SIGNER;
   process.env.VAULT_CONTRACT_ID = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
   process.env.STELLAR_NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
   process.env.STELLAR_RPC_URL = 'https://soroban-testnet.stellar.org';
@@ -95,6 +104,8 @@ describe('resolveContractId()', () => {
 // ─── submitVaultOperation() ───────────────────────────────────────────────────
 
 describe('submitVaultOperation()', () => {
+  let restoreConfiguredSigners: (() => void) | undefined;
+
   beforeEach(() => {
     jest.clearAllMocks();
     setEnv();
@@ -103,11 +114,15 @@ describe('submitVaultOperation()', () => {
     mockSendTransaction.mockResolvedValue(PENDING_RESPONSE);
     (rpc.Api.isSimulationError as jest.Mock).mockReturnValue(false);
     (rpc.Api.isSimulationRestore as jest.Mock).mockReturnValue(false);
-    mockBuild.mockReturnValue({ sign: mockSign });
+    mockBuild.mockReturnValue({ hash: mockHash, addSignature: mockAddSignature });
   });
 
   afterEach(() => {
+    restoreConfiguredSigners?.();
+    restoreConfiguredSigners = undefined;
     delete process.env.STELLAR_SECRET_KEY;
+    delete process.env.STELLAR_SECRET_KEY_NEXT;
+    delete process.env.STELLAR_ACTIVE_SIGNER;
     delete process.env.VAULT_CONTRACT_ID;
     delete process.env.STELLAR_NETWORK_PASSPHRASE;
   });
@@ -126,7 +141,36 @@ describe('submitVaultOperation()', () => {
 
   it('signs the transaction before submitting', async () => {
     await submitVaultOperation('deposit', VALID_WALLET, '100', 'USDC');
-    expect(mockSign).toHaveBeenCalledTimes(1);
+    expect(mockAddSignature).toHaveBeenCalledTimes(1);
+  });
+
+  it('completes a rotation drill from the active signer to standby and back', async () => {
+    const activeSigner = {
+      publicKey: 'GACTIVE123456789012345678901234567890123456789012345678',
+      sign: jest.fn().mockResolvedValue(Buffer.from('active-signature')),
+    };
+    const standbySigner = {
+      publicKey: 'GSTANDBY12345678901234567890123456789012345678901234567',
+      sign: jest.fn().mockResolvedValue(Buffer.from('standby-signature')),
+    };
+    restoreConfiguredSigners = configureStellarSigners(activeSigner, standbySigner);
+
+    await submitVaultOperation('deposit', VALID_WALLET, '100', 'USDC');
+    expect(activeSigner.sign).toHaveBeenCalledTimes(1);
+    expect(mockAddSignature).toHaveBeenLastCalledWith(
+      activeSigner.publicKey,
+      Buffer.from('active-signature'),
+    );
+
+    expect(rotateStellarSigner()).toBe(standbySigner.publicKey);
+    await submitVaultOperation('deposit', VALID_WALLET, '100', 'USDC');
+    expect(standbySigner.sign).toHaveBeenCalledTimes(1);
+    expect(mockAddSignature).toHaveBeenLastCalledWith(
+      standbySigner.publicKey,
+      Buffer.from('standby-signature'),
+    );
+
+    expect(rotateStellarSigner()).toBe(activeSigner.publicKey);
   });
 
   it('calls assembleTransaction to inject resource footprint', async () => {
