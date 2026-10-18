@@ -597,10 +597,23 @@ impl YieldVault {
         let pending = get_pending_upgrade(&env).ok_or(VaultError::NoPendingWithdrawal)?;
         Self::assert_timelock_ready(&env, pending.eta)?;
 
-        let pre_version = get_storage_version(&env);
-        Self::run_storage_migration(&env, STORAGE_VERSION)?;
+        set_pending_upgrade(&env, &None);
+        Self::upgrade_with_checkpoint(&env, &admin, pending.wasm_hash)
+    }
+
+    /// Shared by `execute_upgrade` and the `ForceUpgrade` emergency action:
+    /// migrates storage to `STORAGE_VERSION`, verifies the version checkpoint,
+    /// swaps the WASM, and emits `upg_chkpt` with
+    /// `(old_wasm_hash, new_wasm_hash, old_storage_version, new_storage_version)`.
+    fn upgrade_with_checkpoint(
+        env: &Env,
+        caller: &Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), VaultError> {
+        let pre_version = get_storage_version(env);
+        Self::run_storage_migration(env, STORAGE_VERSION)?;
         // Checkpoint: storage version must equal STORAGE_VERSION after migration.
-        let post_version = get_storage_version(&env);
+        let post_version = get_storage_version(env);
         assert_eq!(
             post_version, STORAGE_VERSION,
             "storage version checkpoint failed: expected {}, got {}",
@@ -614,8 +627,12 @@ impl YieldVault {
             post_version
         );
 
-        set_pending_upgrade(&env, &None);
-        Self::apply_upgrade(&env, &admin, pending.wasm_hash);
+        let previous = get_implementation(env);
+        Self::apply_upgrade(env, caller, new_wasm_hash.clone());
+        env.events().publish(
+            (symbol_short!("upg_chkpt"), caller.clone()),
+            (previous, new_wasm_hash, pre_version, post_version),
+        );
         Ok(())
     }
 
@@ -1203,7 +1220,7 @@ impl YieldVault {
 
             emergency::EmergencyActionKind::ForceUpgrade => {
                 let hash = proposal.wasm_hash.clone().expect("wasm hash required");
-                Self::apply_upgrade(&env, &confirmer, hash);
+                Self::upgrade_with_checkpoint(&env, &confirmer, hash)?;
             }
         }
 
