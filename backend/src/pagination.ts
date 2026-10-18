@@ -12,6 +12,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import type { ParsedUtcDateRange } from './dateRange';
+import { logger } from './middleware/structuredLogging';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,8 @@ export interface PaginationConfig {
   includeTotal: boolean;
   /** Default sort field. */
   defaultSortBy?: string;
+  /** Allowed sort fields for the resource. */
+  allowedSortBy?: readonly string[];
   /** Default sort order. */
   defaultSortOrder: 'asc' | 'desc';
 }
@@ -102,6 +105,36 @@ export const DEFAULT_PAGINATION_CONFIG: PaginationConfig = {
 };
 
 export const CURSOR_SEPARATOR = '_';
+
+export class PaginationSortError extends Error {
+  constructor(requestedSortBy: string, allowedSortBy: readonly string[]) {
+    super(`Invalid sortBy value '${requestedSortBy}'. Allowed values: ${allowedSortBy.join(', ')}`);
+    this.name = 'PaginationSortError';
+  }
+}
+
+export function validateSortBy(
+  sortBy: string | undefined,
+  config: Partial<PaginationConfig> = {},
+): string | undefined {
+  const mergedConfig = { ...DEFAULT_PAGINATION_CONFIG, ...config };
+  const selectedSortBy = sortBy ?? mergedConfig.defaultSortBy;
+
+  if (!selectedSortBy || !mergedConfig.allowedSortBy || mergedConfig.allowedSortBy.length === 0) {
+    return selectedSortBy;
+  }
+
+  if (mergedConfig.allowedSortBy.includes(selectedSortBy)) {
+    return selectedSortBy;
+  }
+
+  logger.log('warn', 'Rejected invalid pagination sort field', {
+    requestedSortBy: selectedSortBy,
+    allowedSortBy: mergedConfig.allowedSortBy,
+  });
+
+  throw new PaginationSortError(selectedSortBy, mergedConfig.allowedSortBy);
+}
 
 // ─── Query Parsing ──────────────────────────────────────────────────────────
 
@@ -178,22 +211,20 @@ export function parsePaginationQuery(
 
   // Parse page (1-based, clamped — never rejected)
   if (req.query.page !== undefined) {
-    query.page = clampPageNumber(parseInt(req.query.page as string, 10));
-  // Parse page (1-based, clamped to 1..maxPage — Issue #1430)
-  if (req.query.page !== undefined) {
-    const page = parseInt(req.query.page as string, 10);
-    if (!isNaN(page) && page > 0) {
-      query.page = Math.min(page, mergedConfig.maxPage);
+    const parsedPage = parseInt(req.query.page as string, 10);
+    if (!Number.isNaN(parsedPage) && parsedPage > 0) {
+      query.page = Math.min(parsedPage, mergedConfig.maxPage);
     } else {
       query.page = 1;
     }
   }
+  }
 
   // Parse sortBy
   if (req.query.sortBy !== undefined && typeof req.query.sortBy === 'string') {
-    query.sortBy = req.query.sortBy;
+    query.sortBy = validateSortBy(req.query.sortBy, mergedConfig);
   } else if (mergedConfig.defaultSortBy) {
-    query.sortBy = mergedConfig.defaultSortBy;
+    query.sortBy = validateSortBy(mergedConfig.defaultSortBy, mergedConfig);
   }
 
   // Parse sortOrder

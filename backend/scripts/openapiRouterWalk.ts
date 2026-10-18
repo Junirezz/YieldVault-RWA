@@ -84,11 +84,20 @@ function walk(stack: Layer[], prefix: string, out: DiscoveredRoute[], seen: Set<
   }
 }
 
-/** Returns every concrete route reachable from an Express app or Router. */
-export function collectRoutes(root: Routable, basePath = ''): DiscoveredRoute[] {
+/**
+ * Returns every route registration reachable from an Express app or Router,
+ * including duplicates (the same method and path registered more than once).
+ */
+export function collectRouteRegistrations(root: Routable, basePath = ''): DiscoveredRoute[] {
   const stack = root._router?.stack ?? root.stack ?? [];
   const out: DiscoveredRoute[] = [];
   walk(stack, basePath, out, new Set());
+  return out;
+}
+
+/** Returns every concrete route reachable from an Express app or Router. */
+export function collectRoutes(root: Routable, basePath = ''): DiscoveredRoute[] {
+  const out = collectRouteRegistrations(root, basePath);
 
   const unique = new Map<string, DiscoveredRoute>();
   for (const route of out) unique.set(`${route.method} ${route.path}`, route);

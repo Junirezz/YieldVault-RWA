@@ -2,6 +2,7 @@ import type { Response, NextFunction, RequestHandler } from 'express';
 import type { CorrelationIdRequest } from './correlationId';
 import { getActiveRequestId, getActiveCorrelationId } from '../requestContext';
 import { getCurrentTraceId } from '../tracing';
+import { redactSensitiveLogAttributes } from '../auditRedaction';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -54,8 +55,9 @@ class Logger {
       ...fields,
     };
 
+    const sanitizedEntry = redactSensitiveLogAttributes(entry);
     /* eslint-disable-next-line no-console */
-    console.log(JSON.stringify(entry));
+    console.log(JSON.stringify(sanitizedEntry));
   }
 
   debug(message: string, fields?: Partial<LogEntry>): void {
