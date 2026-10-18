@@ -68,12 +68,22 @@ export function startPositionReconciliationScheduler(): () => void {
   const intervalMs = parseInt(process.env.POSITION_RECONCILIATION_INTERVAL_MS || '30000', 10);
   registerJob('positionReconciliation');
 
+  let inFlight = false;
   positionReconciliationTimer = setInterval(() => {
-    void runJobWithRetry('positionReconciliation', runPositionReconciliationJob).catch((error) => {
-      logger.log('error', 'Position reconciliation scheduler error', {
-        error: error instanceof Error ? error.message : String(error),
+    if (inFlight) {
+      logger.log('warn', 'Position reconciliation skipped tick — previous run still in flight');
+      return;
+    }
+    inFlight = true;
+    void runJobWithRetry('positionReconciliation', runPositionReconciliationJob)
+      .catch((error) => {
+        logger.log('error', 'Position reconciliation scheduler error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        inFlight = false;
       });
-    });
   }, intervalMs);
 
   logger.log('info', 'Position reconciliation scheduler started', {
@@ -128,6 +138,7 @@ async function sendDriftAlert(report: ReconciliationSummary): Promise<void> {
     await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
         text: `Reconciliation drift detected: ${report.counts.drifted} issue(s) in window ${report.window.from} → ${report.window.to}`,
       }),
@@ -180,12 +191,22 @@ export function startLedgerReconciliationScheduler(): () => void {
   const intervalMs = getReconciliationIntervalMs();
   registerJob('reportGeneration');
 
+  let inFlight = false;
   ledgerReconciliationTimer = setInterval(() => {
-    void runJobWithRetry('reportGeneration', runLedgerReconciliationJob).catch((error) => {
-      logger.log('error', 'Ledger reconciliation scheduler error', {
-        error: error instanceof Error ? error.message : String(error),
+    if (inFlight) {
+      logger.log('warn', 'Ledger reconciliation skipped tick — previous run still in flight');
+      return;
+    }
+    inFlight = true;
+    void runJobWithRetry('reportGeneration', runLedgerReconciliationJob)
+      .catch((error) => {
+        logger.log('error', 'Ledger reconciliation scheduler error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        inFlight = false;
       });
-    });
   }, intervalMs);
 
   logger.log('info', 'Ledger reconciliation scheduler started', { intervalMs });

@@ -360,8 +360,6 @@ export function triggerCacheInvalidation(
         console.error(
           JSON.stringify({
             level: 'error',
-            event: 'invalidation_hook_error',
-            error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
             eventType,
             event: 'invalidation_hook_invalid_return',
             error: 'Invalidation hook must return an array of cache key patterns',
@@ -369,7 +367,6 @@ export function triggerCacheInvalidation(
         );
         continue;
       }
-      patterns.push(...hookPatterns);
       patterns.push(...hookPatterns.filter((pattern): pattern is string => typeof pattern === 'string'));
     } catch (err) {
       console.error(

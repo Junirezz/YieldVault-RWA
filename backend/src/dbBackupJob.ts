@@ -90,7 +90,16 @@ export async function dumpDatabase(): Promise<Buffer> {
 
   return new Promise<Buffer>((resolve, reject) => {
     let settled = false;
+    const timeoutMs = parseInt(process.env.PG_DUMP_TIMEOUT_MS || '60000', 10);
+    const timeoutTimer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {}
+      fail(new Error(`pg_dump timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
     const fail = (err: Error) => {
+      clearTimeout(timeoutTimer);
       if (!settled) {
         settled = true;
         reject(err);
@@ -107,6 +116,7 @@ export async function dumpDatabase(): Promise<Buffer> {
     child.stdout.pipe(gzip);
     gzip.on('data', (chunk: Buffer) => chunks.push(chunk));
     gzip.on('end', () => {
+      clearTimeout(timeoutTimer);
       if (!settled) {
         settled = true;
         resolve(Buffer.concat(chunks));
@@ -116,6 +126,7 @@ export async function dumpDatabase(): Promise<Buffer> {
 
     child.on('error', fail);
     child.on('close', (code) => {
+      clearTimeout(timeoutTimer);
       if (code !== 0) {
         fail(new Error(`pg_dump exited with code ${code}`));
       }
@@ -203,6 +214,7 @@ export async function sendBackupFailureAlert(error: Error): Promise<void> {
       const resp = await fetch(slackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           text: `:rotating_light: *YieldVault DB Backup Failed*\n>${message}`,
         }),

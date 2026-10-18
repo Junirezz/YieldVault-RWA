@@ -190,6 +190,7 @@ async function fetchEventsForRange(
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 1,

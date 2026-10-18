@@ -409,6 +409,7 @@ class EventOutboxService {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           text: `:rotating_light: *YieldVault Outbox Dead-Lettered*\nEvent \`${eventType}\` (ID: ${outboxId}) failed after ${attempts} attempts.\nLatest error: \`${error}\``
         })

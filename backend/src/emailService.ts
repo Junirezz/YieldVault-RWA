@@ -189,6 +189,7 @@ View on Stellar Explorer: ${explorerLink}`;
             Authorization: `Bearer ${this.apiKey}`,
             ...correlationHeaders,
           },
+          signal: AbortSignal.timeout(10000),
           body: JSON.stringify({
             from: this.fromEmail,
             to: options.to,
@@ -211,6 +212,7 @@ View on Stellar Explorer: ${explorerLink}`;
             Authorization: `Bearer ${this.apiKey}`,
             ...correlationHeaders,
           },
+          signal: AbortSignal.timeout(10000),
           body: JSON.stringify({
             personalizations: [{ to: [{ email: options.to }] }],
             from: { email: this.fromEmail },

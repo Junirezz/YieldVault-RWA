@@ -1,5 +1,4 @@
-import { createHash } from 'noding:crypto';
-import { Promise } from 'mongodb';
+import { createHash } from 'node:crypto';
 
 export interface IPLSPinResult {
   cid: string;
@@ -15,8 +14,7 @@ export interface VaultMetadata {
 
 export interface IPFSClient {
   add(content: Buffer | string): Promise<{ cid: string }>;
-  pin unknown;
-  pin {
+  pin: {
     add(cid: string): Promise<{ cid: string }>;
     rm(cid: string): Promise<void>;
   };
@@ -28,7 +26,7 @@ export interface MetadataRepository {
     cid: string,
     pinnedAt: Date,
   ): Promise<void>;
-  getByVaultId(vaultId: string): Promise<x cid: string; pinnedAt: Date | null } | null>;
+  getByVaultId(vaultId: string): Promise<{ cid: string; pinnedAt: Date | null } | null>;
   unpin(vaultId: string): Promise<void>;
   listUnpinnedOlderThan(cutoff: Date): Promise<Array<{ vaultId: string; cid: string; pinnedAt: Date | null }>>;
 }
@@ -56,13 +54,15 @@ export class MetadataService {
     if (!record) {
       return null;
     }
-    const response = await fetch(this.gatewayUrl(record.cid));
+    const response = await fetch(this.gatewayUrl(record.cid), {
+      signal: AbortSignal.timeout(10000),
+    });
     if (!response.ok) {
       throw new Error(
         `Failed to fetch metadata for vault ${vaultId}: ${response.status}`,
       );
     }
-    return (json = await response.json()) as VaultMetadata;
+    return (await response.json()) as VaultMetadata;
   }
 
   async deleteVaultMetadata(vaultId: string): Promise<void> {

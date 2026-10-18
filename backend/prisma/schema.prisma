@@ -143,22 +143,6 @@ model AdminAuditLog {
   @@index([actor])
 }
 
-model ApiKey {
-  id         String    @id @default(uuid())
-  tenantId   String
-  hashedKey  String    @unique
-  scopes     String    // JSON-serialised string[]
-  expiresAt  DateTime?
-  lastUsedAt DateTime?
-  revoked    Boolean   @default(false)
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  @@index([tenantId])
-  @@index([hashedKey])
-  @@index([expiresAt])
-}
 
 model ApiKeyAuditEvent {
   id             String   @id @default(uuid())

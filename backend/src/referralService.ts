@@ -84,9 +84,39 @@ export class ReferralService {
     invalidateCache('GET:/api/v1/referrals');
   }
 
+  private cachedSnapshots: Array<{ sharePrice: string; recordedAt: Date }> | null = null;
+  private cacheExpiresAt = 0;
+
+  async getSharePriceSnapshots(forceRefresh = false): Promise<Array<{ sharePrice: string; recordedAt: Date }>> {
+    const now = Date.now();
+    if (!forceRefresh && this.cachedSnapshots && now < this.cacheExpiresAt) {
+      return this.cachedSnapshots;
+    }
+
+    const prisma = getPrisma();
+    const snapshots = await prisma.sharePriceSnapshot.findMany({
+      orderBy: [{ recordedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      take: 1000,
+      select: {
+        sharePrice: true,
+        recordedAt: true,
+      },
+    });
+
+    this.cachedSnapshots = snapshots;
+    this.cacheExpiresAt = now + 60000;
+    return snapshots;
+  }
+
+  clearSnapshotCache(): void {
+    this.cachedSnapshots = null;
+    this.cacheExpiresAt = 0;
+  }
+
   /**
    * Calculates total rewards for a referrer.
    * Real-time calculation accurate to 6 decimal places.
+   * Uses batched queries to prevent N+1 overhead regardless of referral count.
    */
   async getReferralStats(referrerAddress: string): Promise<{ referral_count: number; total_reward_earned: string } | null> {
     const prisma = getPrisma();
@@ -96,16 +126,41 @@ export class ReferralService {
         referrerAddress: normalizedReferrer,
         firstDepositAt: { not: null },
       },
+      take: 1000,
     });
 
     if (referrals.length === 0) {
       return null;
     }
 
+    const referredAddresses = Array.from(new Set(referrals.map((r) => normalizeWalletAddress(r.referredAddress))));
+
+    const [transactions, snapshots] = await Promise.all([
+      prisma.transaction.findMany({
+        where: {
+          user: { in: referredAddresses },
+          type: { in: ['deposit', 'withdrawal'] },
+          OR: [{ status: null }, { status: 'completed' }, { status: 'pending' }],
+        },
+        orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
+      }),
+      this.getSharePriceSnapshots(),
+    ]);
+
+    const txByUser = new Map<string, Array<{ amount: string; type: string; timestamp: Date }>>();
+    for (const tx of transactions) {
+      const u = normalizeWalletAddress(tx.user);
+      const list = txByUser.get(u) || [];
+      list.push(tx);
+      txByUser.set(u, list);
+    }
+
     let totalReward = ZERO;
 
     for (const ref of referrals) {
-      const yield_earned = await this.calculateUserYield(normalizeWalletAddress(ref.referredAddress));
+      const user = normalizeWalletAddress(ref.referredAddress);
+      const userTxs = txByUser.get(user) || [];
+      const yield_earned = this.computeYieldFromData(user, userTxs, snapshots);
       if (yield_earned.greaterThan(ZERO)) {
         const reward = yield_earned.mul(REFERRAL_REWARD_PERCENTAGE);
         totalReward = totalReward.plus(reward);
@@ -118,28 +173,11 @@ export class ReferralService {
     };
   }
 
-  /**
-   * Calculates user net yield from transaction history and persisted share price snapshots.
-   * Uses share-balance accounting so deposits and withdrawals across multiple periods
-   * are valued at the snapshot price in effect at the time of each transaction.
-   */
-  async calculateUserYield(walletAddress: string): Promise<Decimal> {
-    const prisma = getPrisma();
-    const normalizedWallet = normalizeWalletAddress(walletAddress);
-    const [transactions, snapshots] = await Promise.all([
-      prisma.transaction.findMany({
-        where: {
-          user: normalizedWallet,
-          type: { in: ['deposit', 'withdrawal'] },
-          OR: [{ status: null }, { status: 'completed' }, { status: 'pending' }],
-        },
-        orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
-      }),
-      prisma.sharePriceSnapshot.findMany({
-        orderBy: [{ recordedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      }),
-    ]);
-
+  computeYieldFromData(
+    normalizedWallet: string,
+    transactions: Array<{ amount: string; type: string; timestamp: Date }>,
+    snapshots: Array<{ sharePrice: string; recordedAt: Date }>,
+  ): Decimal {
     if (transactions.length === 0) {
       this.logYieldCalculation(normalizedWallet, {
         transactionCount: 0,
@@ -197,6 +235,30 @@ export class ReferralService {
     });
 
     return nonNegativeNetYield.toDecimalPlaces(OUTPUT_DECIMAL_PLACES);
+  }
+
+  /**
+   * Calculates user net yield from transaction history and persisted share price snapshots.
+   * Uses share-balance accounting so deposits and withdrawals across multiple periods
+   * are valued at the snapshot price in effect at the time of each transaction.
+   */
+  async calculateUserYield(walletAddress: string): Promise<Decimal> {
+    const prisma = getPrisma();
+    const normalizedWallet = normalizeWalletAddress(walletAddress);
+    const [transactions, snapshots] = await Promise.all([
+      prisma.transaction.findMany({
+        where: {
+          user: normalizedWallet,
+          type: { in: ['deposit', 'withdrawal'] },
+          OR: [{ status: null }, { status: 'completed' }, { status: 'pending' }],
+        },
+        orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
+        take: 1000,
+      }),
+      this.getSharePriceSnapshots(),
+    ]);
+
+    return this.computeYieldFromData(normalizedWallet, transactions, snapshots);
   }
 
   /**

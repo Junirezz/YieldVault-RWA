@@ -2,6 +2,7 @@
 // This ensures OTEL_ENABLED is set before tracing initialization
 import dotenv from 'dotenv';
 dotenv.config();
+import { env } from './config/env';
 
 // Tracing must be initialised before any other imports so auto-instrumentation
 // can patch http/express/prisma before they are first required.
@@ -12,7 +13,6 @@ import 'express-async-errors';
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { loginHandler, nonceHandler, refreshHandler, requireAuth, revokeAccessToken, revokeAllAccessTokens, revokeCurrentSession, revokeAllSessions } from './auth';
 import vaultListRouter from './routes/vaults';
-import { loginHandler, nonceHandler, refreshHandler, requireAuth } from './auth';
 import {
   authLimiter,
   authIpLimiter,
@@ -24,11 +24,8 @@ import {
   getRateLimitMonitorSnapshot,
   loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
-import { createAdminAuditMiddleware } from './auditLog';
-import { getActorFromRequest } from './adminConfigChangeAudit';
 import { idempotencyStore } from './idempotency';
 import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
-import { AuditLogQuerySchema } from './middleware/validate';
 import { recordAdminAuditLog, recordAdminAuditLogInBackground } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
@@ -65,7 +62,41 @@ import { geofencingMiddleware } from './middleware/geofencing';
 import { registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema } from './middleware/validate';
+import {
+  validate,
+  AllowlistWalletBodySchema,
+  ApiKeyRegisterSchema,
+  ApiKeyRevokeSchema,
+  ApiKeyRotateSchema,
+  AuditLogQuerySchema,
+  BulkExportBodySchema,
+  CacheInvalidateSchema,
+  ChecksumVerifyBodySchema,
+  CreateVaultBodySchema,
+  DeadLetterIdsSchema,
+  DeadLetterProcessSchema,
+  DeadLetterResolveSchema,
+  EventReplayBodySchema,
+  FeatureFlagOverrideSchema,
+  GovernanceSnapshotExportSchema,
+  IdParamSchema,
+  ImpersonationSessionBodySchema,
+  LoginSchema,
+  MaintenanceToggleSchema,
+  MaintenanceWindowBodySchema,
+  NonceRequestSchema,
+  PaginationQuerySchema,
+  RefreshSchema,
+  ReportExportBodySchema,
+  ScopedTokenCreateSchema,
+  TransactionBackfillBodySchema,
+  WebhookListQuerySchema,
+  WebhookRegisterSchema,
+  WebhookUpdateSchema,
+  WebhookVerifyBodySchema,
+  WindowIdParamSchema,
+  WithdrawalLimitOverrideSchema,
+} from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware } from './middleware/timeoutMiddleware';
@@ -137,10 +168,10 @@ declare global {
 }
 
 const app: Express = express();
-const port = process.env.PORT || 3000;
-const nodeEnv = process.env.NODE_ENV || 'development';
-const logLevel = (process.env.LOG_LEVEL || (nodeEnv === 'development' ? 'debug' : 'info')) as LogLevel;
-const drainTimeout = parseInt(process.env.DRAIN_TIMEOUT_MS || '30000', 10);
+const port = env.PORT;
+const nodeEnv = env.NODE_ENV;
+const logLevel = env.LOG_LEVEL;
+const drainTimeout = env.DRAIN_TIMEOUT_MS;
 
 // Configure logger
 logger.configure(logLevel);
@@ -691,6 +722,41 @@ if (process.env.NODE_ENV !== 'test') {
   eventOutboxService.replayOnStartup().catch((err) => {
     logger.log('error', 'Outbox startup replay failed', {
       error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+/**
+ * POST /admin/apy/backfill - backfill missing APY snapshots for a date range
+ * Body: { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+ * Requires API key authentication.
+ */
+app.post('/admin/apy/backfill', validateApiKey, async (req: Request, res: Response) => {
+  const { start, end } = req.body;
+  if (!start || !end || typeof start !== 'string' || typeof end !== 'string') {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`start` and `end` (YYYY-MM-DD) are required',
+    });
+    return;
+  }
+
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!datePattern.test(start) || !datePattern.test(end)) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`start` and `end` must be in YYYY-MM-DD format',
+    });
+    return;
+  }
+
+  if (end < start) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`end` must be >= `start`',
     });
     return;
   }
@@ -4113,40 +4179,6 @@ app.get('/admin/analytics/wallet-activity/heatmap', validateApiKey, async (req: 
     });
   }
 });
-
-
-
-/**
- * Mock vault metrics poll cycle
- * In a real application, this would fetch data from a database or Stellar RPC
- */
-const pollVaultMetrics = () => {
-  // Mock data for TVL and Share Price
-  const mockTvl = 1000000 + Math.random() * 100000;
-  const mockSharePrice = 1.25 + Math.random() * 0.05;
-
-  updateVaultMetrics(mockTvl, mockSharePrice);
-
-  logger.log('info', 'Vault metrics updated in Prometheus gauges', {
-    tvl: mockTvl,
-    sharePrice: mockSharePrice,
-  });
-};
-
-// Start poll cycle every 60 seconds (configurable)
-const METRICS_POLL_INTERVAL = parseInt(process.env.METRICS_POLL_INTERVAL_MS || '60000', 10);
-const metricsInterval =
-  process.env.NODE_ENV === 'test'
-    ? null
-    : setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
-
-if (process.env.NODE_ENV !== 'test') {
-  pollVaultMetrics(); // Initial call
-  void initializeWebhookEndpoints();
-}
-
-// Start latency monitoring
-latencyMonitoringService.startMonitoring();
 
 // â”€â”€â”€ Event Polling Service (Issue: Event Replay) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {

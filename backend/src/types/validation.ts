@@ -34,7 +34,6 @@ export const PaginationQuerySchema = z
   .object({
     limit: z.string().optional(),
     cursor: z.string().optional(),
-    page: z.string().optional(),
     // Signed so an out-of-range page (`page=-1`, `page=1000000`) reaches
     // `parsePaginationQuery`, which clamps it into `1..maxPage`, instead of
     // being rejected outright (Issue #1430).

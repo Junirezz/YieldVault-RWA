@@ -150,12 +150,22 @@ export function startApySnapshotScheduler(): () => void {
   const intervalMs = getSnapshotIntervalMs();
   registerJob('apySnapshot');
 
+  let inFlight = false;
   const timer = setInterval(() => {
-    void runJobWithRetry('apySnapshot', runApySnapshotJob).catch((error) => {
-      logger.log('error', 'APY snapshot scheduler encountered an error', {
-        error: error instanceof Error ? error.message : String(error),
+    if (inFlight) {
+      logger.log('warn', 'APY snapshot skipped tick — previous run still in flight');
+      return;
+    }
+    inFlight = true;
+    void runJobWithRetry('apySnapshot', runApySnapshotJob)
+      .catch((error) => {
+        logger.log('error', 'APY snapshot scheduler encountered an error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        inFlight = false;
       });
-    });
   }, intervalMs);
 
   logger.log('info', 'APY snapshot scheduler started', {
