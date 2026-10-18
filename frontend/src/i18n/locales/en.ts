@@ -20,6 +20,8 @@ export const en = {
     compare: "Compare",
     analytics: "Analytics",
     transactions: "Transactions",
+    vaultHealth: "Vault Health",
+    settings: "Settings",
     admin: "Admin",
   },
   admin: {

@@ -20,6 +20,8 @@ export const es = {
     compare: "Comparar",
     analytics: "Analica",
     transactions: "Transacciones",
+    vaultHealth: "Salud de la Bóveda",
+    settings: "Configuración",
     admin: "Administración",
   },
   admin: {
