@@ -22,9 +22,13 @@ vi.mock("../i18n", () => ({
   }),
 }));
 
-vi.mock("../lib/walletSession", () => ({
-  isProviderAvailable: vi.fn().mockResolvedValue(false),
-}));
+vi.mock("../lib/walletSession", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/walletSession")>();
+  return {
+    ...actual,
+    isProviderAvailable: vi.fn().mockResolvedValue(false),
+  };
+});
 
 function renderWithAuth() {
   return render(
