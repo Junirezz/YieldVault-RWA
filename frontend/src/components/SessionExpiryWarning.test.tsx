@@ -5,9 +5,16 @@ import { AuthProvider } from "../context/AuthContext";
 
 vi.mock("../i18n", () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: Record<string, unknown>) => {
+      const interpolate = (message: string) =>
+        options
+          ? message.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
+              options[name] !== undefined ? String(options[name]) : match,
+            )
+          : message;
       if (key === "session.warning.title") return "Session Expiring Soon";
-      if (key === "session.warning.message") return "Your wallet session will expire in {{minutes}} minutes. Reconnect to continue without interruption.";
+      if (key === "session.warning.message")
+        return interpolate("Your wallet session will expire in {{minutes}} minutes. Reconnect to continue without interruption.");
       if (key === "session.warning.reconnect") return "Reconnect";
       if (key === "common.dismiss") return "Dismiss";
       return key;

@@ -234,13 +234,13 @@ describe("VaultDashboard", () => {
 
     expect(await screen.findByText(/Review Transaction/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Withdraw" }));
     await waitFor(() => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("tab=withdraw");
       expect(screen.getByText(/Amount to withdraw/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Deposit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Deposit" }));
     await waitFor(() => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("tab=deposit");
       expect(screen.getByText(/Amount to deposit/i)).toBeInTheDocument();
@@ -353,7 +353,7 @@ describe("VaultDashboard", () => {
 
     expect(await screen.findByText(/Review Transaction/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Withdraw" }));
     await waitFor(() => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("tab=withdraw");
     });
@@ -491,7 +491,7 @@ describe("VaultDashboard", () => {
     fireEvent.change(input, { target: { value: "100" } });
     expect(input).toHaveValue(100);
 
-    fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Withdraw" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("tab=withdraw");
@@ -569,7 +569,7 @@ describe("VaultDashboard", () => {
       await screen.findByRole("heading", { name: "Transaction Successful" });
     }, 15000);
 
-    it("does not offer a retry action for a non-retryable validation failure", async () => {
+    it("routes a non-retryable validation failure back to the amount step without a retry action", async () => {
       const validationError = new ValidationError({
         message: "Validation failed",
         userMessage: "Please review the amount and try again.",
@@ -584,8 +584,10 @@ describe("VaultDashboard", () => {
       fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
       fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
 
-      await screen.findByRole("heading", { name: "Transaction Failed" });
-      expect(await screen.findByRole("button", { name: "Start Over" })).toBeInTheDocument();
+      // Field-level validation failures send the user back to the amount step
+      // so the input can be corrected; a blind retry is never offered.
+      expect(await screen.findByText("Amount exceeds vault cap")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("0.00")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     }, 15000);
 
