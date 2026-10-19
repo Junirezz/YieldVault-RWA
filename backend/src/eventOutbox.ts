@@ -30,6 +30,7 @@
  */
 
 import crypto from 'crypto';
+import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 import {
   emitTransactionEvent,
@@ -291,6 +292,12 @@ class EventOutboxService {
       //    expired. Order by (vaultId, sequence, createdAt) so per-vault
       //    ordering is preserved and events for different vaults do not block
       //    each other.
+      // 1. Find eligible entries: pending or failed entries whose lock is expired.
+      //    Order by (vaultId, sequence, createdAt) so per-vault ordering is
+      //    preserved and events for different vaults do not block each other.
+      //    We select the head-of-line event per vault to enforce strict
+      //    per-vault ordering (a vault's next event is only processed after
+      //    its predecessor has been relayed or dead-lettered).
       const candidates = await getEventOutboxDelegate().findMany({
         where: {
           status: { in: ['pending', 'failed'] },
@@ -326,6 +333,8 @@ class EventOutboxService {
       // 2. Claim the selected entries. The guard re-checks that nobody else
       //    claimed them between the read and the write.
       const candidateIds = orderedCandidates.map((entry) => entry.id);
+      // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
+      const candidateIds = orderedCandidates.map((e) => e.id);
       await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
@@ -378,6 +387,16 @@ class EventOutboxService {
             lockedAt: null,
             lockedBy: null,
             lastError: null,
+          await getEventOutboxDelegate().update({
+            where: { id: entry.id },
+            data: {
+              status: 'relayed',
+              attemptCount: { increment: 1 },
+              relayedAt: new Date(),
+              lockedAt: null,
+              lockedBy: null,
+              lastError: null,
+            },
           });
 
           if (!fenced) {

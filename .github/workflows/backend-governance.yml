@@ -78,16 +78,13 @@ jobs:
         run: npm run ci:governance
 
       - name: Verify OpenAPI documentation
-        run: |
-          npm run generate:openapi
-          if [ -n "$(git status --porcelain openapi.json)" ]; then
-            echo "❌ openapi.json is out of date. Run 'npm run generate:openapi' locally and commit the changes."
-            git diff openapi.json
-            exit 1
-          fi
+        run: npm run check:openapi
 
       - name: Check API contract schema snapshots
         run: npm run snapshots:check
 
       - name: Check for database schema drift
         run: npm run db:check-drift
+
+      - name: Check dev (SQLite) vs prod (PostgreSQL) column type mapping
+        run: npm run db:check-types

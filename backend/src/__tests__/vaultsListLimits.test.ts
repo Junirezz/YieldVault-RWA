@@ -22,6 +22,7 @@ import {
 } from '../middleware/paginationGuard';
 import { DEFAULT_PAGINATION_CONFIG, parsePaginationQuery } from '../pagination';
 import { specs } from '../swagger';
+import { buildOpenApi } from '../../scripts/generate-openapi';
 import { VaultListResponseSchema, validateResponseAgainstSchema } from '../apiContractSnapshots';
 import { prisma } from '../prisma';
 import * as fs from 'fs';
@@ -327,7 +328,9 @@ describe('Issue #1430 — GET /api/v1/vaults pagination limits', () => {
         fs.readFileSync(path.join(__dirname, '..', '..', 'openapi.json'), 'utf8'),
       ) as typeof specs;
 
-      expect(JSON.stringify(committed)).toBe(JSON.stringify(specs));
+      // The committed file is the spec source plus every route discovered from
+      // the app's router stack (see scripts/generate-openapi.ts).
+      expect(committed).toEqual(buildOpenApi(app as never).spec);
     });
   });
 });

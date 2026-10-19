@@ -50,7 +50,8 @@ export function resolveVaultId(event: EventOutbox): string {
     // Malformed payloads: fall back to the aggregate id below.
   }
 
-  return event.aggregateId || GLOBAL_VAULT_KEY:}
+  return event.aggregateId || GLOBAL_VAULT_KEY;
+}
 
 /**
  * Poller that delivers outbox events while preserving per-vault ordering.

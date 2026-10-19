@@ -233,6 +233,16 @@ function AppContent() {
                   }
                 />
                 <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute role={role} allow={["admin"]}>
+                      <RouteErrorBoundary routeName="admin">
+                        <Admin walletAddress={walletAddress} />
+                      </RouteErrorBoundary>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/transactions"
                   element={
                     <RouteErrorBoundary routeName="transactions">
@@ -297,16 +307,13 @@ function AppContent() {
                   }
                 />
                 <Route
-                  path="/admin"
+                  path="*"
                   element={
-                    <ProtectedRoute role={role} allow={["admin"]}>
-                      <RouteErrorBoundary routeName="admin">
-                        <Admin walletAddress={walletAddress} />
-                      </RouteErrorBoundary>
-                    </ProtectedRoute>
+                    <RouteErrorBoundary routeName="not-found">
+                      <Navigate to="/" replace />
+                    </RouteErrorBoundary>
                   }
                 />
-                <Route path="*" element={<ErrorBoundary><Navigate to="/" replace /></ErrorBoundary>} />
               </SentryRoutes>
             </Suspense>
             </PageTransition>

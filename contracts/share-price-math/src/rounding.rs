@@ -3,8 +3,6 @@
 //! The vault must never round in the user's favour: rounding always leaves the
 //! residual dust with the vault, so `deposit -> withdraw` round trips can never
 //! mint value out of nothing.
-
-use crate::MathError;
 //!
 //! | Operation  | Direction | Rounding |
 //! |------------|-----------|----------|
@@ -17,6 +15,8 @@ use crate::MathError;
 //! vectors are published as `fixtures/rounding_fixtures.json` so that the
 //! TypeScript SDK and the backend quote service can assert byte-identical
 //! results against this implementation.
+
+use crate::MathError;
 
 /// Rounding direction applied to the residual of an integer division.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -293,6 +293,23 @@ mod tests {
                 "round trip leaked value at {assets} assets"
             );
         }
+    }
+
+    #[test]
+    fn dust_deposit_below_one_share_rounds_to_zero() {
+        // Issue #1536: at 1_000 assets per share every deposit below 1_000
+        // mints zero shares; the vault rejects these instead of keeping them.
+        let (total_shares, total_assets) = (1_000, 1_000_000);
+        for assets in 1..1_000i128 {
+            assert_eq!(
+                assets_to_shares_rounded(assets, total_shares, total_assets, Op::Deposit),
+                Ok(0)
+            );
+        }
+        assert_eq!(
+            assets_to_shares_rounded(1_000, total_shares, total_assets, Op::Deposit),
+            Ok(1)
+        );
     }
 
     #[test]
