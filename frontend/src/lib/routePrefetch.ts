@@ -8,6 +8,7 @@ export const routeImports = {
   "/compare": () => import("../pages/VaultComparison"),
   "/vault-health": () => import("../pages/VaultHealthDashboard"),
   "/settings": () => import("../pages/Settings"),
+  "/admin": () => import("../pages/Admin"),
   "/ui-kit": () => import("../pages/UIPreview"),
 } as const;
 
@@ -39,6 +40,7 @@ export const HEAVY_ROUTES: readonly PrefetchableRoute[] = [
 export const PREFETCHABLE_ROUTES: readonly PrefetchableRoute[] = [
   ...PRIMARY_ROUTES,
   ...HEAVY_ROUTES,
+  "/admin",
   "/ui-kit",
 ];
 
