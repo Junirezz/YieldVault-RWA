@@ -13,22 +13,21 @@ export function useDelayedLoading(isLoading: boolean, delayMs: number = 100): bo
   const [delayedLoading, setDelayedLoading] = useState(false);
 
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    if (isLoading) {
-      timeoutId = setTimeout(() => {
-        setDelayedLoading(true);
-      }, delayMs);
-    } else {
-      queueMicrotask(() => {
-        setDelayedLoading(false);
-      });
+    if (!isLoading) {
+      return;
     }
+
+    const timeoutId = setTimeout(() => {
+      setDelayedLoading(true);
+    }, delayMs);
 
     return () => {
       clearTimeout(timeoutId);
+      setDelayedLoading(false);
     };
   }, [isLoading, delayMs]);
 
-  return delayedLoading;
+  // Mask the stale flag while not loading so consumers clear their skeleton
+  // immediately instead of waiting for a microtask.
+  return isLoading && delayedLoading;
 }

@@ -426,10 +426,12 @@ These are consumed by `scripts/fund-testnet-account.js` only — not by the runn
 | Variable | Default | Req. | Description | Source |
 |---|---|---|---|---|
 | `VITE_SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` | ✅ always | Soroban RPC endpoint for frontend | `frontend/src/config/network.ts`, `lib/stellarAccount.ts` |
-| `VITE_STELLAR_NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | ✅ always | Network passphrase for transaction building | `frontend/src/config/network.ts`, `components/TransactionStatus.tsx` |
+| `VITE_STELLAR_NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | ✅ always | Network passphrase for transaction building | `frontend/src/config/network.ts` |
 | `VITE_VAULT_CONTRACT_ID` | _(empty)_ | ✅ always | Vault contract ID for client-side reads | `frontend/src/config/network.ts` |
 | `VITE_USDC_ISSUER` | _(empty)_ | ⬜ optional | USDC issuer public key | `frontend/src/lib/stellarAccount.ts` |
-| `VITE_HORIZON_URL` | testnet horizon | ⬜ optional | Horizon URL for account data | `frontend/src/lib/stellarAccount.ts` |
+| `VITE_HORIZON_URL` | testnet horizon (`https://horizon-testnet.stellar.org`); mainnet default `https://horizon.stellar.org` | ⬜ optional | Horizon endpoint for account and transaction data | `frontend/src/config/network.ts` |
+| `VITE_STELLAR_EXPLORER_URL` | testnet `https://stellar.expert/explorer/testnet`; mainnet default `https://stellar.expert/explorer/public` | ⬜ optional | Stellar Expert base URL for transaction/ledger links | `frontend/src/config/network.ts`, `lib/security.ts` |
+| `VITE_XLM_PRICE_API_URL` | `https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd` | ⬜ optional | XLM/USD reference-rate API | `frontend/src/config/network.ts`, `lib/vaultApi.ts` |
 | `VITE_E2E_STUB_BALANCES` | _(empty)_ | ⬜ optional | Enable stub balances for E2E tests | `frontend/src/lib/vaultApi.ts`, `hooks/useTokenAllowance.ts`, `hooks/useBalanceData.ts` |
 
 ---

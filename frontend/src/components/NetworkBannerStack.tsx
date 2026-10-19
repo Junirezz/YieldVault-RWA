@@ -23,7 +23,7 @@ import { useWalletNetwork } from "../hooks/useWalletNetwork";
 import { useRetryState } from "../hooks/useRetryState";
 import { useTranslation } from "../i18n";
 import { queryClient } from "../lib/queryClient";
-import { AlertTriangle, Clock, WifiOff, Wifi, X } from "./icons";
+import { AlertTriangle, Clock, Wifi, X } from "./icons";
 import NetworkMismatchGuideModal from "./NetworkMismatchGuideModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -98,7 +98,11 @@ function OfflineBannerView({
             <span className="offline-banner__data">
               {lastKnownTvl !== undefined && `TVL: ${lastKnownTvl.toLocaleString()}`}
               {lastKnownTvl !== undefined && lastKnownBalance !== undefined && " · "}
-              {lastKnownBalance !== undefined && `Balance: ${lastKnownBalance.toFixed(2)} USDC`}
+              {lastKnownBalance !== undefined &&
+                `Balance: ${lastKnownBalance.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })} USDC`}
             </span>
           )}
         </div>

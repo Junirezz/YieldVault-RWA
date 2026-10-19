@@ -3,6 +3,7 @@ import { Share2, Copy, Check, MessageCircle, Twitter, Facebook } from "./icons";
 import Modal from "./Modal";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useToast } from "../context/ToastContext";
+import { socialShareBaseUrls } from "../config/externalLinks";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -41,7 +42,7 @@ const ShareModal: React.FC<ShareModalProps> = ({
     {
       name: "Twitter",
       icon: Twitter,
-      url: `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      url: `${socialShareBaseUrls.twitter}?text=${encodeURIComponent(
         `Join me on YieldVault and earn stable yields on real-world assets! Use my referral code: ${referralCode}\n\n${referralLink}`
       )}`,
       color: "#1DA1F2",
@@ -49,13 +50,13 @@ const ShareModal: React.FC<ShareModalProps> = ({
     {
       name: "Facebook",
       icon: Facebook,
-      url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLink)}`,
+      url: `${socialShareBaseUrls.facebook}?u=${encodeURIComponent(referralLink)}`,
       color: "#4267B2",
     },
     {
       name: "Telegram",
       icon: MessageCircle,
-      url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(
+      url: `${socialShareBaseUrls.telegram}?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(
         `Join me on YieldVault and earn stable yields! Use my referral code: ${referralCode}`
       )}`,
       color: "#0088CC",

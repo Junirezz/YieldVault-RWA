@@ -1,0 +1,14 @@
+# Cargo-audit configuration for supply-chain security checks.
+# See docs/FALSE_POSITIVE_HANDLING.md for the review and exception process.
+[advisories]
+ignore = [
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
+    # rand: unsound only with log+thread_rng+custom logger; not used here
+    "RUSTSEC-2026-0097",
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
+    # derivative: unmaintained (informational), no known exploit
+    "RUSTSEC-2024-0388",
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
+    # paste: unmaintained (informational), no known exploit
+    "RUSTSEC-2024-0436",
+]

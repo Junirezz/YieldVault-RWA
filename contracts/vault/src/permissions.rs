@@ -53,6 +53,11 @@ pub fn require_pauser_or_admin_auth(
         return Err(VaultError::RescueUnauthorized);
     }
     Ok(())
+    let is_pauser = pauser == Some(caller);
+    assert!(
+        is_admin || is_pauser,
+        "unauthorized: caller must be admin or pauser"
+    );
 }
 
 /// Multi-signer threshold validator for governance operations.

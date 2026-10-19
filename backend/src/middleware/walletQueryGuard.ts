@@ -10,7 +10,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { normalizeWalletAddress } from '../walletUtils';
+import { normalizeWalletAddress, formatWalletForLog } from '../walletUtils';
 import { getAuthenticatedWalletAddress } from './tenantGuard';
 import { hasPermission, Permission } from './rbac';
 import { logger } from './structuredLogging';
@@ -111,7 +111,7 @@ export function walletQueryGuard(options: WalletQueryGuardOptions = {}) {
     const isApiKey = /^ApiKey\s+/i.test(authHeader);
     if (isApiKey && allowAdminBypass && hasPermission(req, adminBypassPermission)) {
       req.walletScope = { walletAddress: requestedWallet, isAdminBypass: true };
-      logger.log('debug', 'walletQueryGuard: admin bypass', { walletAddress: requestedWallet });
+      logger.log('debug', 'walletQueryGuard: admin bypass', { walletAddress: formatWalletForLog(requestedWallet) });
       next();
       return;
     }

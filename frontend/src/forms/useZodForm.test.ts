@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import type { FormEvent } from "react";
 import { useForm } from "./useForm";
 import { settingsFormSchema } from "./schemas/settingsFormSchema";
-import { z } from "zod";
 
 describe("Zod Form Validation & Submission States", () => {
   const initialValues = {
@@ -59,7 +59,7 @@ describe("Zod Form Validation & Submission States", () => {
 
     const onSubmitSuccess = vi.fn().mockResolvedValue(undefined);
 
-    const fakeEvent = { preventDefault: vi.fn() } as any;
+    const fakeEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
 
     await act(async () => {
       await result.current.handleSubmit(onSubmitSuccess)(fakeEvent);

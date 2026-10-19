@@ -19,3 +19,14 @@ export function isValidStellarAddress(address: string | undefined | null): boole
   const normalized = normalizeWalletAddress(address);
   return /^G[A-Z0-9]{55,63}$/.test(normalized);
 }
+
+/**
+ * Truncates and masks a wallet address for safe logging without raw PII disclosure.
+ */
+export function formatWalletForLog(address: string | undefined | null): string {
+  if (!address) return '';
+  const norm = address.trim();
+  if (norm.length <= 12) return norm.slice(0, 4) + '...';
+  return norm.slice(0, 6) + '...' + norm.slice(-4);
+}
+

@@ -47,6 +47,15 @@ import {
  * `Cannot read properties of undefined` errors deep inside fire-and-forget
  * writes. Resolving at call time makes the failure mode explicit.
  */
+function getPrismaClient() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prisma } = require('./prisma') as typeof import('./prisma');
+  return prisma;
+}
+
+function getEventOutboxDelegate() {
+  const prisma = getPrismaClient();
+  const delegate = prisma?.eventOutbox;
 function getPrisma() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { prisma } = require('./prisma') as typeof import('./prisma');
@@ -199,6 +208,8 @@ export function buildOutboxLeaseToken(
  * deep inside fire-and-forget writes, where callers only log it.
  */
 export function assertEventOutboxModelAvailable(client?: unknown): void {
+  const target = (client ?? getPrismaClient()) as { eventOutbox?: { create?: unknown } } | null | undefined;
+  const delegate = target?.eventOutbox;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { prisma } = require('./prisma') as typeof import('./prisma');
   const c = client ?? prisma;
@@ -955,6 +966,7 @@ class EventOutboxService {
    * Sequences are per-vault and increment by exactly 1.
    */
   private async nextSequenceForVault(vaultId: string): Promise<number> {
+    const result = await getPrismaClient().$transaction(async (tx) => {
     const latest = await getEventOutboxDelegate().findFirst({
       where: { aggregateId: vaultId },
       orderBy: { sequence: 'desc' },

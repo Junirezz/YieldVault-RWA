@@ -13,6 +13,9 @@ import {
   setPersistedWalletAddress,
   clearPersistedWalletAddress,
   WALLET_CONNECTED_ADDRESS_KEY,
+  getWalletSessionStart,
+  startWalletSession,
+  WALLET_SESSION_START_KEY,
 } from "./walletSession";
 
 vi.mock("@stellar/freighter-api");
@@ -109,6 +112,37 @@ describe("walletSession reconnect prompt dismiss helpers", () => {
     setReconnectPromptDismissed();
     clearReconnectPromptDismissed();
     expect(sessionStorage.getItem(WALLET_RECONNECT_PROMPT_DISMISS_KEY)).toBeNull();
+  });
+});
+
+describe("walletSession start timestamp helpers", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("returns null when no session start is stored", () => {
+    expect(getWalletSessionStart()).toBeNull();
+  });
+
+  it("persists the session start through startWalletSession", () => {
+    startWalletSession(1_700_000_000_000);
+    expect(localStorage.getItem(WALLET_SESSION_START_KEY)).toBe(
+      "1700000000000",
+    );
+    expect(getWalletSessionStart()).toBe(1_700_000_000_000);
+  });
+
+  it("defaults to the current time", () => {
+    const before = Date.now();
+    startWalletSession();
+    const stored = getWalletSessionStart();
+    expect(stored).not.toBeNull();
+    expect(stored as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it("ignores unparseable stored values", () => {
+    localStorage.setItem(WALLET_SESSION_START_KEY, "not-a-number");
+    expect(getWalletSessionStart()).toBeNull();
   });
 });
 

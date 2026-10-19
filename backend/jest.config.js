@@ -40,6 +40,9 @@ module.exports = {
   setupFiles: ['<rootDir>/src/__tests__/preload.js'],
   moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
   moduleNameMapper: {
+    '^@yieldvault/api-schemas$': '<rootDir>/../packages/api-schemas/src/index.ts',
+    '^@yieldvault/api-schemas/(.*)$': '<rootDir>/../packages/api-schemas/src/$1',
+    '^zod$': '<rootDir>/node_modules/zod',
     '^@yieldvault/api-schemas$': '<rootDir>/../packages/api-schemas/dist/index.js',
     '^@yieldvault/api-schemas/(.*)$': '<rootDir>/../packages/api-schemas/dist/$1',
     '^@prisma/instrumentation$': '<rootDir>/src/__tests__/mocks/prismainstrumentation.js',

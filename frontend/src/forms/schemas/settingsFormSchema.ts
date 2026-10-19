@@ -13,7 +13,7 @@ export const settingsFormSchema = z.object({
       message: "Slippage tolerance must be between 0.1% and 5.0%.",
     }),
   currency: z.enum(["USD", "EUR", "GBP", "XLM"], {
-    errorMap: () => ({ message: "Please select a supported currency." }),
+    error: () => ({ message: "Please select a supported currency." }),
   }),
 });
 

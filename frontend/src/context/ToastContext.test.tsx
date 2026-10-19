@@ -54,11 +54,21 @@ describe("ToastProvider", () => {
 
     fireEvent.click(screen.getByText(/Show success/i));
 
+    // Sonner defers rendering new toasts by a tick; flush it under fake timers.
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+
     expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(container.querySelector("[data-sonner-toaster]")).toBeTruthy();
 
     act(() => {
       vi.advanceTimersByTime(1500);
+    });
+
+    // Sonner keeps the toast mounted for a 200ms exit animation before unmounting.
+    act(() => {
+      vi.advanceTimersByTime(300);
     });
 
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
@@ -72,10 +82,22 @@ describe("ToastProvider", () => {
     );
 
     fireEvent.click(screen.getByText(/Show error/i));
+
+    // Sonner defers rendering new toasts by a tick; flush it under fake timers.
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+
     expect(screen.getByText("Failed")).toBeInTheDocument();
 
     const dismiss = screen.getByRole("button", { name: /close|dismiss/i });
     fireEvent.click(dismiss);
+
+    // Dismissal is applied on the next animation frame, then sonner keeps the
+    // toast mounted for a 200ms exit animation before unmounting it.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
 
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
   });

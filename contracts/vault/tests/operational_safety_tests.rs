@@ -4,8 +4,8 @@
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
 use vault::{
-    governance_validation, operational_events, rounding_consistency, strategy_validation,
-    PauseReason, VaultError, YieldVault, YieldVaultClient,
+    governance_validation, rounding_consistency, strategy_validation, PauseReason, VaultError,
+    YieldVault, YieldVaultClient,
 };
 
 // ── Setup Helpers ─────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ fn test_pause_emits_comprehensive_event_with_actor_reason_timestamp() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (vault, _usdc, admin) = setup_vault(&env);
+    let (vault, _usdc, _admin) = setup_vault(&env);
     env.ledger().set_timestamp(1000);
 
     // Pause with maintenance reason
@@ -51,7 +51,7 @@ fn test_unpause_emits_resume_event_with_actor_timestamp() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (vault, _usdc, admin) = setup_vault(&env);
+    let (vault, _usdc, _admin) = setup_vault(&env);
     env.ledger().set_timestamp(1000);
 
     vault.pause(&PauseReason::Maintenance);
@@ -81,7 +81,7 @@ fn test_pause_reason_persistence_and_queryability() {
         PauseReason::Governance,
     ];
 
-    for (i, reason) in reasons.iter().enumerate() {
+    for reason in &reasons {
         vault.pause(reason);
         assert!(vault.is_paused());
         assert_eq!(vault.pause_reason(), Some(*reason));
@@ -345,18 +345,18 @@ fn test_state_transition_invalid_stale_no_further_transition() {
 #[test]
 fn test_rounding_policy_floor_division_exact() {
     let result = rounding_consistency::RoundingPolicy::floor_division(100, 10);
-    assert_eq!(result, 10);
+    assert_eq!(result, Ok(10));
 }
 
 #[test]
 fn test_rounding_policy_floor_division_rounds_down() {
     assert_eq!(
         rounding_consistency::RoundingPolicy::floor_division(99, 10),
-        9
+        Ok(9)
     );
     assert_eq!(
         rounding_consistency::RoundingPolicy::floor_division(100, 1500),
-        0
+        Ok(0)
     );
 }
 
@@ -469,7 +469,7 @@ fn test_rounding_consistency_with_governance_conditions() {
     };
 
     // Apply rounding
-    let rounded =
+    let _rounded =
         rounding_consistency::RoundingPolicy::calculate_basis_points_amount(1_000_000, 500)
             .unwrap();
 

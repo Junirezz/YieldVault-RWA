@@ -180,7 +180,7 @@ impl MockBenjiStrategy {
             .and_then(|scaled| scaled.checked_add(nav - 1))
             .expect("BENJI amount overflow");
         let benji_amount = scaled_amount / nav;
-        let benji_client = token::StellarAssetClient::new(&env, &benji_addr);
+        let benji_client = token::Client::new(&env, &benji_addr);
         benji_client.burn(&env.current_contract_address(), &benji_amount);
     }
 
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn test_initialize_and_query() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_deposit_and_withdraw() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn test_nav_accrual_and_withdrawal_burn_are_reflected_in_total_value() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(&admin, &vault, &asset, &benji_token, &NAV_SCALE);
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn test_advance_epoch() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn test_set_nav() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(
@@ -365,7 +365,7 @@ mod tests {
     #[should_panic(expected = "already initialized")]
     fn test_double_initialize_panics() {
         let (env, admin, vault, asset, benji_token) = setup();
-        let contract_addr = env.register_contract(None, MockBenjiStrategy);
+        let contract_addr = env.register(MockBenjiStrategy, ());
         let client = MockBenjiStrategyClient::new(&env, &contract_addr);
 
         client.initialize(

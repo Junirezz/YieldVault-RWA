@@ -1,7 +1,5 @@
 //! Integration tests for protocol-level exposure caps (Issue #1173).
 
-#![cfg(test)]
-
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
 use crate::{VaultError, YieldVault, YieldVaultClient};
 use soroban_sdk::testutils::Address as _;

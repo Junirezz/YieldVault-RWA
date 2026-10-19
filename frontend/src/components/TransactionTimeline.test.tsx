@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import TransactionTimeline from "./TransactionTimeline";
+import { getStellarExplorerUrl } from "../lib/security";
+
+/** 64-char hex hash that passes `isValidTransactionHash`. */
+const VALID_TX_HASH = "a1b2c3d4".repeat(8);
 
 describe("TransactionTimeline", () => {
   it("renders aria label", () => {
@@ -25,7 +29,7 @@ describe("TransactionTimeline", () => {
     render(
       <TransactionTimeline
         status="finalized"
-        txHash="abc123"
+        txHash={VALID_TX_HASH}
       />,
     );
     // Two "Finalized" labels: one in the steps list (completed) and one in the final row
@@ -33,9 +37,17 @@ describe("TransactionTimeline", () => {
     expect(finalizedLabels.length).toBeGreaterThanOrEqual(1);
 
     const explorerLink = screen.getByRole("link", { name: /View on Stellar Explorer/i });
-    expect(explorerLink).toHaveAttribute("href", expect.stringContaining("abc123"));
+    expect(explorerLink).toHaveAttribute(
+      "href",
+      getStellarExplorerUrl(VALID_TX_HASH, "testnet"),
+    );
     expect(explorerLink).toHaveAttribute("target", "_blank");
     expect(explorerLink).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("does not render an explorer link for an invalid transaction hash", () => {
+    render(<TransactionTimeline status="finalized" txHash="not-a-hash" />);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("does not render explorer link when finalized without txHash", () => {

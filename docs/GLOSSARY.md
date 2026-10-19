@@ -24,7 +24,7 @@ A shared reference for technical and product terminology used across the YieldVa
 - [Access Controls — Whitelist, RBAC & Admin](#access-controls--whitelist-rbac--admin)
 - [Protocol Fees, Treasury & Basis Points](#protocol-fees-treasury--basis-points)
 - [RWA Shipment Tracking & Asset Provenance](#rwa-shipment-tracking--asset-provenance)
-- [Smart Contracts & On-Chian Mechanics](#smart-contracts--on-chain-mechanics)
+- [Smart Contracts & On-Chain Mechanics](#smart-contracts--on-chain-mechanics)
 - [Math & Fixed-Point Arithmetic](#math--fixed-point-arithmetic)
 - [Frontend & UI](#frontend--ui)
 - [API & Backend](#api--backend)

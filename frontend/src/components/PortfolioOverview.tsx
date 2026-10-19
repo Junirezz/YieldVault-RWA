@@ -21,6 +21,8 @@ export interface PortfolioOverviewProps {
   locale: string;
   formatSensitiveCurrency: (amount: number, withSign?: boolean) => string;
   referralStats?: PortfolioOverviewReferralStats | null;
+  /** True when the referral stats query failed, so the card shows an error state. */
+  referralStatsError?: boolean;
   onShareClick: () => void;
 }
 
@@ -137,6 +139,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
   locale,
   formatSensitiveCurrency,
   referralStats,
+  referralStatsError = false,
   onShareClick,
 }) => {
   const { t } = useTranslation();
@@ -212,14 +215,22 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({
               <HelpIcon variant="tooltip" content={t("portfolio.referralTooltip")} />
             </span>
           }
-          value={referralStats ? `$${referralStats.total_reward_earned}` : "$0.00"}
+          value={
+            referralStatsError
+              ? "—"
+              : referralStats
+                ? `$${referralStats.total_reward_earned}`
+                : "$0.00"
+          }
           icon={<TrendingUp size={20} color="var(--accent-green)" />}
           trend={
-            referralStats
-              ? `${referralStats.referral_count} referral${referralStats.referral_count !== 1 ? "s" : ""}`
-              : "0 referrals"
+            referralStatsError
+              ? t("portfolio.referralUnavailable")
+              : referralStats
+                ? `${referralStats.referral_count} referral${referralStats.referral_count !== 1 ? "s" : ""}`
+                : "0 referrals"
           }
-          trendPositive={true}
+          trendPositive={!referralStatsError}
         />
         <PortfolioSummaryCard
           label={t("portfolio.shareReferralLink")}

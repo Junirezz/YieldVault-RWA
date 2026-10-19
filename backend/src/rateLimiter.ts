@@ -521,6 +521,13 @@ export const adminLimiter: RequestHandler = createLimiter({
   windowMs: config.admin.windowMs,
 });
 
+/** Dedicated rate-limit tier for webhook verification endpoints (#1608). */
+export const webhookVerifyLimiter: RequestHandler = createLimiter({
+  tier: 'webhook-verify',
+  max: parseInt(process.env.RATE_LIMIT_WEBHOOK_VERIFY_MAX || '30', 10),
+  windowMs: parseInt(process.env.RATE_LIMIT_WEBHOOK_VERIFY_WINDOW_MS || '60000', 10),
+});
+
 /**
  * Dedicated per-wallet rate limiter for deposit and withdrawal mutations.
  * Configured via DEPOSITS_RATE_LIMIT_MAX / DEPOSITS_RATE_LIMIT_WINDOW_MS.

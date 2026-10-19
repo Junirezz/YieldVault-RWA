@@ -1493,7 +1493,26 @@ impl YieldVault {
                     .map_err(|_| VaultError::OracleValidationFailed)?;
                     Self::set_last_oracle_price(&env, &price_data);
                 }
+        let token = Self::token(env.clone());
+        if Self::is_oracle_enabled(env.clone()) {
+            if let Some(oracle_addr) = Self::price_oracle(env.clone()) {
+                let oracle_client = OracleClient::new(&env, &oracle_addr);
+                let price_data = oracle_client.get_price(&token, &token);
+                let max_age = Self::oracle_heartbeat(env.clone());
+                let last_price = Self::last_oracle_price(&env);
+                oracle::OracleValidator::validate_price_data(
+                    &env,
+                    &price_data,
+                    max_age,
+                    Some(oracle::MAX_PRICE_DEVIATION_BPS),
+                    last_price.as_ref(),
+                )
+                .map_err(|_| VaultError::OracleValidationFailed)?;
+                Self::set_last_oracle_price(&env, &price_data);
             }
+        }
+
+        let strategy_assets = if let Some(strategy_addr) = Self::strategy(env.clone()) {
             Self::require_valid_strategy_response(&env, &strategy_addr, &token)
         } else {
             0
@@ -1699,8 +1718,7 @@ impl YieldVault {
                     .get(&DataKeyExt::PerformanceFeeBps)
                     .unwrap_or(0);
                 if perf_fee_bps > 0 {
-                    let (pf, _) =
-                        fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
                     perf_fee_amount = pf;
                     if perf_fee_amount > 0 {
                         if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
@@ -3037,7 +3055,7 @@ impl YieldVault {
         );
 
         crate::audit_events::emit_withdrawal(
-            &env,
+            env,
             &user,
             shares,
             assets_to_return,
@@ -3332,7 +3350,6 @@ impl YieldVault {
     }
 
     /// Rebalance funds between strategies with max slippage protection.
-
     /// Admin function to safely migrate assets from one strategy to another.
     pub fn rebalance(
         env: Env,
@@ -4389,11 +4406,7 @@ impl YieldVault {
             .unwrap_or(0);
         let now = env.ledger().timestamp();
         let deadline = last_switch.checked_add(cooldown).unwrap_or(u64::MAX);
-        if now >= deadline {
-            0
-        } else {
-            deadline - now
-        }
+        deadline.saturating_sub(now)
     }
 
     // ── Oracle configuration ──────────────────────────────────────────────────
@@ -4724,10 +4737,7 @@ impl YieldVault {
                 utilization,
             )
         } else {
-            (
-                fee_curve::effective_fee_bps(&curve, static_fee_bps, 0),
-                0,
-            )
+            (fee_curve::effective_fee_bps(&curve, static_fee_bps, 0), 0)
         };
 
         let token_addr = Self::token(env.clone());
@@ -4761,7 +4771,6 @@ impl YieldVault {
             .instance()
             .get(&DataKeyExt::PerformanceFeeEnabled)
             .unwrap_or(false);
-        let mut perf_fee_amount: i128 = 0;
         if perf_enabled && net_yield > 0 {
             let current_watermark = Self::strategy_watermark(env.clone(), strategy.clone());
             let yield_above_hwm = net_yield.checked_sub(current_watermark).unwrap_or(0);
@@ -4772,9 +4781,8 @@ impl YieldVault {
                     .get(&DataKeyExt::PerformanceFeeBps)
                     .unwrap_or(0);
                 if perf_fee_bps > 0 {
-                    let (pf, _) =
-                        fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
-                    perf_fee_amount = pf;
+                    let (pf, _) = fee_math::calculate_protocol_fee(yield_above_hwm, perf_fee_bps)?;
+                    let perf_fee_amount = pf;
                     if perf_fee_amount > 0 {
                         if let Some(pool) = Self::performance_incentive_pool(env.clone()) {
                             let token_addr = Self::token(env.clone());
@@ -4860,6 +4868,7 @@ impl YieldVault {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn ensure_strategy_heartbeat_fresh_for(
         env: &Env,
         strategy: &Address,

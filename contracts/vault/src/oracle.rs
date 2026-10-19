@@ -121,12 +121,10 @@ pub fn price_data_decimals(data: &PriceData) -> u32 {
 pub fn price_data_scaled_price(data: &PriceData) -> i128 {
     let price = data.0;
     let decimals = data.2;
-    if decimals > 18 {
-        price / 10_i128.pow(decimals - 18)
-    } else if decimals < 18 {
-        price * 10_i128.pow(18 - decimals)
-    } else {
-        price
+    match decimals.cmp(&18) {
+        core::cmp::Ordering::Greater => price / 10_i128.pow(decimals - 18),
+        core::cmp::Ordering::Less => price * 10_i128.pow(18 - decimals),
+        core::cmp::Ordering::Equal => price,
     }
 }
 
@@ -290,12 +288,21 @@ impl OracleValidator {
         if price_data_price(last) == 0 {
             return Ok(());
         }
-        let current_scaled = price_data_scaled_price(current);
-        let last_scaled = price_data_scaled_price(last);
-        let deviation = ((current_scaled - last_scaled).unsigned_abs() as i128)
+        let (current_val, last_val) = if current.2 == last.2 {
+            (price_data_price(current), price_data_price(last))
+        } else {
+            (
+                price_data_scaled_price(current),
+                price_data_scaled_price(last),
+            )
+        };
+        if last_val <= 0 {
+            return Err(OracleError::PriceZero);
+        }
+        let deviation = ((current_val - last_val).unsigned_abs() as i128)
             .checked_mul(10000)
             .ok_or(OracleError::PriceOverflow)?
-            .checked_div(last_scaled)
+            .checked_div(last_val)
             .ok_or(OracleError::PriceUnderflow)?;
         if deviation > max_deviation_bps {
             return Err(OracleError::PriceDeviationExceeded);
@@ -395,7 +402,7 @@ mod tests {
     #[test]
     fn test_max_oracle_heartbeat() {
         assert_eq!(MAX_ORACLE_HEARTBEAT, 86_400);
-        assert!(DEFAULT_HEARTBEAT_SECONDS <= MAX_ORACLE_HEARTBEAT);
+        assert_eq!(DEFAULT_HEARTBEAT_SECONDS, 3600);
     }
 
     #[test]
