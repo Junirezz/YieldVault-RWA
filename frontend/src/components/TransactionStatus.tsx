@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertCircle, Check, Loader2 } from "./icons";
 import { getStellarExplorerUrl, sanitizeExternalLink } from "../lib/security";
+import { networkConfig } from "../config/network";
 
 export type ActionStatusState = "idle" | "pending" | "success" | "failure";
 
@@ -14,14 +15,6 @@ export interface ActionStatus {
 
 interface TransactionStatusProps {
   status: ActionStatus;
-}
-
-function resolveNetworkMode(): "testnet" | "mainnet" {
-  const networkPassphrase =
-    import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE ?? "";
-  return networkPassphrase.toLowerCase().includes("public")
-    ? "mainnet"
-    : "testnet";
 }
 
 const STATE_STYLES: Record<
@@ -50,7 +43,10 @@ const TransactionStatus: React.FC<TransactionStatusProps> = ({ status }) => {
   const stateStyles = STATE_STYLES[status.state];
   const explorerUrl = status.txHash
     ? sanitizeExternalLink(
-        getStellarExplorerUrl(status.txHash, resolveNetworkMode()),
+        getStellarExplorerUrl(
+          status.txHash,
+          networkConfig.isTestnet ? "testnet" : "mainnet",
+        ),
       )
     : null;
 

@@ -29,9 +29,13 @@ const mockNetworkConfig = vi.hoisted(() => ({
   contractId: "",
 }));
 
-vi.mock("../config/network", () => ({
-  networkConfig: mockNetworkConfig,
-}));
+vi.mock("../config/network", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config/network")>();
+  return {
+    ...actual,
+    networkConfig: mockNetworkConfig,
+  };
+});
 
 // Mock the transactionApi module
 vi.mock("../lib/transactionApi", async (importOriginal) => {

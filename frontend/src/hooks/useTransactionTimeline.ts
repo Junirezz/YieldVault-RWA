@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { TxTimelineStatus } from "../components/TransactionTimeline";
+import { networkConfig } from "../config/network";
 
-const HORIZON_BASE = "https://horizon-testnet.stellar.org";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 40; // ~2 minutes
 
@@ -26,7 +26,7 @@ interface UseTransactionTimelineResult {
 }
 
 async function fetchTxStatus(hash: string): Promise<"finalized" | "failed" | "pending"> {
-  const res = await fetch(`${HORIZON_BASE}/transactions/${hash}`);
+  const res = await fetch(`${networkConfig.horizonUrl}/transactions/${hash}`);
   if (res.status === 404) return "pending";
   if (!res.ok) throw new Error(`Horizon error: ${res.status}`);
   const data = (await res.json()) as HorizonTxResponse;
