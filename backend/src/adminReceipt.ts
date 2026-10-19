@@ -11,7 +11,35 @@ export interface AdminActionReceipt {
   signature: string;
 }
 
-const RECEIPT_SECRET = process.env.ADMIN_ACTION_RECEIPT_SECRET || 'dev-receipt-secret-change-me';
+export function assertAdminReceiptSecretValid(): void {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const secret = process.env.ADMIN_ACTION_RECEIPT_SECRET;
+
+  if (isProduction) {
+    if (!secret || !secret.trim()) {
+      console.error(
+        '[adminReceipt] FATAL – ADMIN_ACTION_RECEIPT_SECRET is required in production.\n' +
+        'Set ADMIN_ACTION_RECEIPT_SECRET environment variable and restart the server.'
+      );
+      process.exit(1);
+    }
+  } else {
+    if (!secret) {
+      console.warn(
+        '[adminReceipt] WARNING – ADMIN_ACTION_RECEIPT_SECRET is not set. ' +
+        'Using insecure default secret for development/test. ' +
+        'This MUST be changed before deploying to production.'
+      );
+    }
+  }
+}
+
+// Run validation at startup
+assertAdminReceiptSecretValid();
+
+function getReceiptSecret(): string {
+  return process.env.ADMIN_ACTION_RECEIPT_SECRET || 'dev-receipt-secret-change-me';
+}
 
 /**
  * Generates an immutable, signed receipt for a critical admin action.
@@ -42,7 +70,7 @@ export async function generateAdminReceipt(params: {
 
   // 3. Generate HMAC signature
   const signature = crypto
-    .createHmac('sha256', RECEIPT_SECRET)
+    .createHmac('sha256', getReceiptSecret())
     .update(JSON.stringify(payload))
     .digest('hex');
 
@@ -93,7 +121,7 @@ export function verifyReceiptSignature(receipt: AdminActionReceipt): boolean {
   };
 
   const expectedSignature = crypto
-    .createHmac('sha256', RECEIPT_SECRET)
+    .createHmac('sha256', getReceiptSecret())
     .update(JSON.stringify(payload))
     .digest('hex');
 

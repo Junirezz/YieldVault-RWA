@@ -13,6 +13,7 @@ jobs:
   release:
     name: Generate changelog and publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout

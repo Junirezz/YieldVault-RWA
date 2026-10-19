@@ -42,6 +42,8 @@ async function seedVaults(count: number): Promise<void> {
   for (let i = existing; i < count; i += 1) {
     await prismaClient.vault.create({
       data: {
+        name: `Vault ${i}`,
+        symbol: `VLT${i}`,
         tenantId: 'tenant-1430',
         aum: 1000 + i,
         tvlUsd: `${1000 + i}.00`,

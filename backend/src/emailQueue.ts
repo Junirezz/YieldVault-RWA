@@ -201,6 +201,7 @@ export class EmailQueueService {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           text: `:rotating_light: *YieldVault Email Dead-Lettered*\nFailed to send email to \`${toAddress}\` (ID: ${emailId}).\nLatest error: \`${error}\``
         })

@@ -83,7 +83,7 @@ class PatchedPrismaClient extends OriginalPrismaClient {
 PrismaClientModule.PrismaClient = PatchedPrismaClient;
 
 // Register default admin API keys for integration tests that use test-admin-key.
-const { registerApiKey } = require('../middleware/apiKeyAuth') as typeof import('../middleware/apiKeyAuth');
+const { registerApiKey } = require('../middleware/apiKeyAuth');
 const defaultAdminKey = process.env.ADMIN_API_KEY || 'test-admin-key';
 registerApiKey(defaultAdminKey);
 registerApiKey('super-admin-test-key', { role: 'super-admin' });

@@ -35,6 +35,11 @@ import { Button } from "./ui/Button";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { useSlippage } from "../hooks/useSlippage";
+import {
+  SLIPPAGE_MAX_PERCENT,
+  SLIPPAGE_MIN_PERCENT,
+  isValidSlippagePercent,
+} from "../forms/schemas/slippageSchema";
 import HelpIcon from "./ui/HelpIcon";
 import EmptyState from "./ui/EmptyState";
 import { useTranslation } from "../i18n";
@@ -144,6 +149,8 @@ interface VaultDashboardProps {
   walletAddress: string | null;
   usdcBalance?: number;
   xlmBalance?: number;
+  /** True when the balance queries failed, so the UI can show an error state. */
+  balancesError?: boolean;
 }
 
 const VaultCapWarning: React.FC<{ utilization: number; isReached: boolean }> = ({
@@ -200,6 +207,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   walletAddress,
   usdcBalance = 0,
   xlmBalance = 0,
+  balancesError = false,
 }) => {
   const navigate = useNavigate();
   const dashboardUrl = useDashboardUrlState();
@@ -272,7 +280,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   const confirmation = useTransactionConfirmation();
 
   const { isOnline } = useNetworkStatus();
-  const { feeXlm, isEstimating, isHighFee, lastUpdated: feeLastUpdated } = useFeeEstimate(
+  const { feeXlm, isEstimating, isHighFee, lastUpdated: feeLastUpdated, error: feeError } = useFeeEstimate(
     walletAddress,
     "",
     dashboardUrl.state.tab,
@@ -281,6 +289,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const { slippage, setSlippage, presets, isHighSlippage, minReceived } = useSlippage();
   const [customSlippage, setCustomSlippage] = useState("");
+  const [customSlippageError, setCustomSlippageError] = useState<string | null>(null);
+
+  const handleCustomSlippageChange = (value: string) => {
+    setCustomSlippage(value);
+    if (value.trim() === "") {
+      setCustomSlippageError(null);
+      return;
+    }
+    const n = parseFloat(value);
+    if (isValidSlippagePercent(n)) {
+      setSlippage(n);
+      setCustomSlippageError(null);
+    } else {
+      // Reject out-of-range values and announce the error.
+      setCustomSlippageError(t("vaultDashboard.slippageOutOfRange"));
+    }
+  };
   const { isStale: feeIsStale, ageText: feeAgeText } = useStaleIndicator(feeLastUpdated);
 
   // Create validation schema based on transaction type and current state
@@ -1149,7 +1174,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           </div>
 
           {/* Empty state: wallet connected, loading done, no USDC balance */}
-          {!isLoading && walletAddress && usdcBalance === 0 && (
+          {!isLoading && walletAddress && usdcBalance === 0 && !balancesError && (
             <EmptyState
               kind="no-data"
               title={t("dashboard.emptyState.noDeposits.title")}
@@ -1254,7 +1279,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                               {tab === "deposit" ? t("vaultDashboard.amountToDeposit") : t("vaultDashboard.amountToWithdraw")}
                             </div>
                             <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-                              {t("vaultDashboard.balanceLabel")} <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{tabBalance.toFixed(2)}</span>
+                              {t("vaultDashboard.balanceLabel")} <span
+                                style={{ color: "var(--text-primary)", fontWeight: 600 }}
+                                title={balancesError ? t("vaultDashboard.balanceUnavailable") : undefined}
+                              >{balancesError ? "—" : tabBalance.toFixed(2)}</span>
                             </div>
                           </div>
 
@@ -1516,8 +1544,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                               <div className="flex justify-between">
                                 <span style={{ color: "var(--text-secondary)" }}>{t("vaultDashboard.networkFee")}</span>
                                 <span style={{ fontWeight: 600, textAlign: "right", display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
-                                  {isEstimating ? <Skeleton width="60px" height="1.1rem" /> : `${feeXlm.toFixed(4)} XLM`}
-                                  {!isEstimating && (
+                                  {isEstimating ? (
+                                    <Skeleton width="60px" height="1.1rem" />
+                                  ) : feeError ? (
+                                    <span role="alert" style={{ color: "var(--text-error)", fontWeight: 600 }}>
+                                      {t("vaultDashboard.feeUnavailable")}
+                                    </span>
+                                  ) : (
+                                    `${feeXlm.toFixed(4)} XLM`
+                                  )}
+                                  {!isEstimating && !feeError && (
                                     <Badge
                                       variant="outline"
                                       color={feeIsStale ? "warning" : "info"}
@@ -1600,19 +1636,21 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                       {p}%
                                     </button>
                                   ))}
+                                  <label
+                                    htmlFor="vault-custom-slippage"
+                                    style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}
+                                  >
+                                    {t("vaultDashboard.customSlippageLabel")}
+                                  </label>
                                   <input
+                                    id="vault-custom-slippage"
                                     type="number"
-                                    min="0"
-                                    max="50"
+                                    min={SLIPPAGE_MIN_PERCENT}
+                                    max={SLIPPAGE_MAX_PERCENT}
                                     step="0.1"
                                     placeholder={t("vaultDashboard.customPlaceholder")}
                                     value={customSlippage}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setCustomSlippage(v);
-                                      const n = parseFloat(v);
-                                      if (isFinite(n) && n >= 0) setSlippage(n);
-                                    }}
+                                    onChange={(e) => handleCustomSlippageChange(e.target.value)}
                                     style={{
                                       width: "80px",
                                       padding: "5px 8px",
@@ -1624,9 +1662,24 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                       outline: "none",
                                     }}
                                     aria-label={t("vaultDashboard.customSlippageAria")}
+                                    aria-invalid={customSlippageError ? true : undefined}
+                                    aria-describedby={customSlippageError ? "vault-custom-slippage-error" : undefined}
                                   />
                                   <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>%</span>
                                 </div>
+                                {customSlippageError && (
+                                  <p
+                                    id="vault-custom-slippage-error"
+                                    role="alert"
+                                    style={{
+                                      margin: "6px 0 0",
+                                      fontSize: "0.78rem",
+                                      color: "var(--text-error)",
+                                    }}
+                                  >
+                                    {customSlippageError}
+                                  </p>
+                                )}
                                 {isHighSlippage && (
                                   <div className="flex items-center gap-xs animate-in fade-in duration-200" style={{ marginTop: "8px" }}>
                                     <AlertTriangle size={13} color="var(--text-warning, #f59e0b)" />
@@ -1740,6 +1793,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                 >
                                   {t("vaultDashboard.approveUsdc")}
                                 </Button>
+                              )}
+                              {approvalStatus === "error" && (
+                                <div
+                                  role="alert"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    gap: "8px",
+                                    marginTop: "10px",
+                                    fontSize: "0.8rem",
+                                    lineHeight: "1.4",
+                                    color: "var(--text-error)",
+                                  }}
+                                >
+                                  <AlertCircle size={14} style={{ marginTop: "2px", flexShrink: 0 }} />
+                                  <span>{t("vaultDashboard.approvalErrorDesc")}</span>
+                                </div>
                               )}
                             </div>
                           )}

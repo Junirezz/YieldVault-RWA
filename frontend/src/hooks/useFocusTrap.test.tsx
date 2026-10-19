@@ -25,6 +25,12 @@ describe("useFocusTrap", () => {
     const user = userEvent.setup();
     render(<TrapHarness onEscape={() => undefined} />);
 
+    // The trap sets initial focus on the next animation frame; wait for it so
+    // it cannot steal focus from "Last" while tab() is in flight.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus();
+    });
+
     screen.getByRole("button", { name: "Last" }).focus();
     await user.tab();
     expect(screen.getByRole("button", { name: "First" })).toHaveFocus();

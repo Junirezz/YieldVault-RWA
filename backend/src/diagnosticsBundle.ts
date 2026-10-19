@@ -44,8 +44,7 @@ function isSensitiveKey(key: string): boolean {
 
 function redactValue(key: string, value: string): string {
   if (!isSensitiveKey(key)) return value;
-  if (value.length <= 8) return '***REDACTED***';
-  return value.slice(0, 4) + '***REDACTED***' + value.slice(-4);
+  return '***REDACTED***';
 }
 
 function getSanitizedEnvConfig(): Record<string, string> {

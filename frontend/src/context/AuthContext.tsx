@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from "react";
+import { getWalletSessionStart, startWalletSession } from "../lib/walletSession";
 
 export type SessionState = "idle" | "warning" | "expired";
 
@@ -20,12 +21,8 @@ const WARNING_WINDOW_MS = 5 * 60 * 1000;
 const SESSION_CHECK_INTERVAL_MS = 10_000;
 const COUNTDOWN_INTERVAL_MS = 1_000;
 
-function getSessionStart(): number | null {
-  const raw = localStorage.getItem("wallet_session_start");
-  if (!raw) return null;
-  const val = parseInt(raw, 10);
-  return Number.isFinite(val) ? val : null;
-}
+/** Session start timestamp; storage access lives in `lib/walletSession`. */
+const getSessionStart = getWalletSessionStart;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -42,7 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const renewSession = useCallback(() => {
-    localStorage.setItem("wallet_session_start", Date.now().toString());
+    startWalletSession();
     warningHandledRef.current = false;
     setSessionState("idle");
   }, []);

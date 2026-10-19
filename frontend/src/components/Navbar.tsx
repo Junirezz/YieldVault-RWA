@@ -19,7 +19,7 @@ interface NavbarProps {
   currentPath?: "/" | "/analytics" | "/portfolio";
   onNavigate?: (path: "/" | "/analytics" | "/portfolio") => void;
   walletAddress: string | null;
-  usdcBalance?: number;
+  usdcBalance?: number | null;
   onConnect: (address: string) => void;
   onDisconnect: (reason?: DisconnectReason) => void;
   role?: UserRole;

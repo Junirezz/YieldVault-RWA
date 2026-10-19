@@ -5,8 +5,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   deploy-staging:
+    timeout-minutes: 20
     name: Deploy to Staging
     runs-on: ubuntu-latest
     if: github.event.head_commit.author.name != 'github-actions[bot]'
@@ -28,6 +33,9 @@ jobs:
           sudo apt-get install -y pkg-config libdbus-1-dev
 
       - name: Install Soroban CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: soroban-cli
         run: |
           cargo install --locked soroban-cli --version 21.0.0
 
@@ -49,6 +57,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
       - name: Deploy Backend
         if: env.DATABASE_URL != '' && env.VERCEL_TOKEN != ''

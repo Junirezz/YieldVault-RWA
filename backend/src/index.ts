@@ -2,6 +2,7 @@
 // This ensures OTEL_ENABLED is set before tracing initialization
 import dotenv from 'dotenv';
 dotenv.config();
+import { env } from './config/env';
 
 // Tracing must be initialised before any other imports so auto-instrumentation
 // can patch http/express/prisma before they are first required.
@@ -12,7 +13,6 @@ import 'express-async-errors';
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { loginHandler, nonceHandler, refreshHandler, requireAuth, revokeAccessToken, revokeAllAccessTokens, revokeCurrentSession, revokeAllSessions } from './auth';
 import vaultListRouter from './routes/vaults';
-import { loginHandler, nonceHandler, refreshHandler, requireAuth } from './auth';
 import {
   authLimiter,
   authIpLimiter,
@@ -20,15 +20,13 @@ import {
   writesLimiter,
   readsLimiter,
   adminLimiter,
+  webhookVerifyLimiter,
   identityRateLimiter,
   getRateLimitMonitorSnapshot,
   loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
-import { createAdminAuditMiddleware } from './auditLog';
-import { getActorFromRequest } from './adminConfigChangeAudit';
 import { idempotencyStore } from './idempotency';
 import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
-import { AuditLogQuerySchema } from './middleware/validate';
 import { recordAdminAuditLog, recordAdminAuditLogInBackground } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
@@ -65,9 +63,44 @@ import { geofencingMiddleware } from './middleware/geofencing';
 import { registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, CanonicalIdParamSchema, WalletParamSchema, ArtifactIdParamSchema, KeyParamSchema, CacheDeleteQuerySchema } from './middleware/validate';
 import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, TransferResolveBodySchema, TransferResolveParamsSchema } from './middleware/validate';
 import { redisCacheClient } from './redisCache';
-import { validate, LoginSchema, NonceRequestSchema, RefreshSchema } from './middleware/validate';
+import {
+  validate,
+  AllowlistWalletBodySchema,
+  ApiKeyRegisterSchema,
+  ApiKeyRevokeSchema,
+  ApiKeyRotateSchema,
+  AuditLogQuerySchema,
+  BulkExportBodySchema,
+  CacheInvalidateSchema,
+  ChecksumVerifyBodySchema,
+  CreateVaultBodySchema,
+  DeadLetterIdsSchema,
+  DeadLetterProcessSchema,
+  DeadLetterResolveSchema,
+  EventReplayBodySchema,
+  FeatureFlagOverrideSchema,
+  GovernanceSnapshotExportSchema,
+  IdParamSchema,
+  ImpersonationSessionBodySchema,
+  LoginSchema,
+  MaintenanceToggleSchema,
+  MaintenanceWindowBodySchema,
+  NonceRequestSchema,
+  PaginationQuerySchema,
+  RefreshSchema,
+  ReportExportBodySchema,
+  ScopedTokenCreateSchema,
+  TransactionBackfillBodySchema,
+  WebhookListQuerySchema,
+  WebhookRegisterSchema,
+  WebhookUpdateSchema,
+  WebhookVerifyBodySchema,
+  WindowIdParamSchema,
+  WithdrawalLimitOverrideSchema,
+} from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { timeoutMiddleware } from './middleware/timeoutMiddleware';
@@ -158,10 +191,10 @@ declare global {
 }
 
 const app: Express = express();
-const port = process.env.PORT || 3000;
-const nodeEnv = process.env.NODE_ENV || 'development';
-const logLevel = (process.env.LOG_LEVEL || (nodeEnv === 'development' ? 'debug' : 'info')) as LogLevel;
-const drainTimeout = parseInt(process.env.DRAIN_TIMEOUT_MS || '30000', 10);
+const port = env.PORT;
+const nodeEnv = env.NODE_ENV;
+const logLevel = env.LOG_LEVEL;
+const drainTimeout = env.DRAIN_TIMEOUT_MS;
 
 // Configure logger
 logger.configure(logLevel);
@@ -1111,6 +1144,87 @@ app.post('/auth/logout-all', (req: Request, res: Response) => {
   res.redirect(301, '/api/v1/auth/logout-all');
 });
 
+// /api/vault/* â†’ /api/v1/vault/*
+app.get('/api/vault/summary', (_req: Request, res: Response) => {
+  res.setHeader('deprecation', 'true');
+  res.redirect(301, '/api/v1/vault/summary');
+});
+app.get('/api/vault/transactions/export', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/transactions/export');
+});
+app.get('/api/vault/metrics', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/metrics');
+});
+app.get('/api/vault/apy', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/apy');
+});
+
+/**
+ * Shared handler for POST /webhooks/verify and /api/v1/webhooks/verify (#1608).
+ * Requires admin ApiKey with webhook permission. Anonymous gets 401 via validateApiKey.
+ * Uses dedicated webhookVerifyLimiter rate-limit tier.
+ * Never logs secrets.
+ */
+const handleWebhookVerify = (req: Request, res: Response) => {
+  const scopes = (req as any).authApiKeyScopes || [];
+  const role = (req as any).authApiKeyRole || 'admin';
+  const hasWebhookPerm =
+    scopes.includes('*') ||
+    scopes.includes('webhooks') ||
+    scopes.includes('admin') ||
+    role === 'admin' ||
+    role === 'super-admin';
+
+  if (!hasWebhookPerm) {
+    res.status(403).json({
+      error: 'Forbidden',
+      status: 403,
+      message: 'API key lacks required webhooks scope',
+    });
+    return;
+  }
+
+  const { secret, payload, signature } = req.body || {};
+  if (typeof secret !== 'string' || !secret.trim()) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'secret is required and must be a non-empty string',
+    });
+    return;
+  }
+
+  if (typeof payload === 'undefined') {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'payload is required',
+    });
+    return;
+  }
+
+  const computedSignature = createWebhookSignature(secret, payload);
+  const verified =
+    typeof signature === 'string' && signature.length > 0
+      ? verifyWebhookSignature(secret, payload, signature)
+      : null;
+
+  res.status(200).json({
+    algorithm: 'HMAC-SHA256',
+    signature: computedSignature,
+    verified,
+  });
+};
+
+// /webhooks/verify → /api/v1/webhooks/verify (#1608)
+app.post(
+  '/webhooks/verify',
+  webhookVerifyLimiter,
+  validateApiKey,
+  validate({ body: WebhookVerifyBodySchema }),
+  handleWebhookVerify,
+);
+
 // â”€â”€â”€ Backward-compatibility redirects for list/router-mounted paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Generic catch-all redirects for unversioned /vault/*, /referrals/*,
 // /transactions/*, /portfolio/* paths â†’ /api/v1 equivalents.
@@ -1196,6 +1310,41 @@ if (process.env.NODE_ENV !== 'test') {
   eventOutboxService.replayOnStartup().catch((err) => {
     logger.log('error', 'Outbox startup replay failed', {
       error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+/**
+ * POST /admin/apy/backfill - backfill missing APY snapshots for a date range
+ * Body: { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+ * Requires API key authentication.
+ */
+app.post('/admin/apy/backfill', validateApiKey, async (req: Request, res: Response) => {
+  const { start, end } = req.body;
+  if (!start || !end || typeof start !== 'string' || typeof end !== 'string') {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`start` and `end` (YYYY-MM-DD) are required',
+    });
+    return;
+  }
+
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!datePattern.test(start) || !datePattern.test(end)) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`start` and `end` must be in YYYY-MM-DD format',
+    });
+    return;
+  }
+
+  if (end < start) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: '`end` must be >= `start`',
     });
     return;
   }
@@ -1581,7 +1730,7 @@ app.post('/admin/feature-flags/overrides', validateApiKey, validate({ body: Feat
  * DELETE /admin/feature-flags/overrides/:id - Delete a feature flag override
  * Requires API key authentication
  */
-app.delete('/admin/feature-flags/overrides/:id', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/feature-flags/overrides/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const { id } = req.params;
   if (!id) {
     res.status(400).json({
@@ -1677,12 +1826,28 @@ app.get('/admin/cache/redis-status', validateApiKey, async (_req: Request, res: 
   });
 });
 
+function isSafeRegexPattern(pattern: string): boolean {
+  if (pattern.length > 100) {
+    return false;
+  }
+  const nestedQuantifiers = /(\([^)]*[+*?]\)[+*?{])|(\([^)]*\|[^)]*\)[+*?{])/;
+  if (nestedQuantifiers.test(pattern)) {
+    return false;
+  }
+  const repeatedQuantifiers = /\([^)]*(\+).*?\)(\+|\*|\{[0-9]+,\})/;
+  if (repeatedQuantifiers.test(pattern)) {
+    return false;
+  }
+  return true;
+}
+
 /**
- * DELETE /admin/cache - Clear entire cache or by regex pattern (R8)
+ * DELETE /admin/cache - Clear entire cache or by regex pattern (R8, Issue #1609)
  * ?pattern=<regex> removes only matching entries
+ * Supports ?dryRun=true preview
  * Requires API key authentication
  */
-app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
+app.delete('/admin/cache', validateApiKey, validate({ query: CacheDeleteQuerySchema }), (req: Request, res: Response) => {
   const pattern = typeof req.query.pattern === 'string' ? req.query.pattern : undefined;
 
   if (pattern !== undefined) {
@@ -1691,6 +1856,22 @@ app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
         error: 'Bad Request',
         status: 400,
         message: 'pattern query parameter must not be empty; omit it to clear the entire cache',
+      });
+      return;
+    }
+    if (pattern.length > 100) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: 'pattern query parameter exceeds maximum length of 100 characters',
+      });
+      return;
+    }
+    if (!isSafeRegexPattern(pattern)) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: `Unsafe regex pattern "${pattern}": potential catastrophic backtracking detected`,
       });
       return;
     }
@@ -1704,6 +1885,18 @@ app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
       });
       return;
     }
+  }
+
+  if (isDryRunRequest(req)) {
+    res.json({
+      dryRun: true,
+      message: 'Cache invalidation dry-run preview',
+      pattern: pattern ?? null,
+      wouldInvalidate: true,
+      stats: getCacheStats(),
+      timestamp: new Date().toISOString(),
+    });
+    return;
   }
 
   const removed = invalidateCache(pattern);
@@ -1933,7 +2126,7 @@ app.get('/admin/emails/queue', validateApiKey, async (req: Request, res: Respons
  * POST /admin/emails/replay/:id
  * Requeues a failed/dead-letter email for another send attempt.
  */
-app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/emails/replay/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const email = await emailQueueService.replayEmail(req.params.id);
     res.status(200).json({
@@ -2077,7 +2270,7 @@ app.get('/admin/wallet-aliases', validateApiKey, async (_req: Request, res: Resp
  * Deletes a canonical wallet alias group and all linked aliases.
  * Requires API key authentication.
  */
-app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, validate({ params: CanonicalIdParamSchema }), async (req: Request, res: Response) => {
   const { canonicalId } = req.params;
   const existing = await walletAliasMappingService.getIdentityLinks(canonicalId);
 
@@ -2318,7 +2511,7 @@ app.delete('/admin/impersonate/sessions/:id', validateApiKey, async (req: Reques
  * GET /admin/impersonate/:wallet - inspect vault state as a specific wallet
  * Requires super-admin API key and a valid non-expired impersonation session.
  */
-app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/impersonate/:wallet', validateApiKey, validate({ params: WalletParamSchema }), async (req: Request, res: Response) => {
   const wallet = String(req.params.wallet || '').trim();
   const actingAdminAddress = resolveActingAdminAddress(req);
   const sessionId = String(req.get('x-impersonation-session-id') || '').trim();
@@ -2462,7 +2655,7 @@ app.get('/admin/receipts', validateApiKey, async (req: Request, res: Response) =
  * Retrieves a specific admin action receipt.
  * Requires API key authentication.
  */
-app.get('/admin/receipts/:id', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/receipts/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const receipt = await getAdminReceipt(req.params.id);
     if (!receipt) {
@@ -2484,7 +2677,7 @@ app.get('/admin/receipts/:id', validateApiKey, async (req: Request, res: Respons
  * Verifies the integrity of an admin action receipt.
  * Requires API key authentication.
  */
-app.get('/admin/receipts/:id/verify', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/receipts/:id/verify', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const receipt = await getAdminReceipt(req.params.id);
     if (!receipt) {
@@ -2942,7 +3135,7 @@ app.get('/admin/webhooks/dead-letter', validateApiKey, validate({ query: Webhook
 /**
  * POST /admin/webhooks/dead-letter/:id/retry - re-queue a dead-letter delivery
  */
-app.post('/admin/webhooks/dead-letter/:id/retry', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/webhooks/dead-letter/:id/retry', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const entry = await retryWebhookDeadLetter(req.params.id);
     if (!entry) {
@@ -3005,40 +3198,15 @@ app.get('/admin/webhooks/deliveries', validateApiKey, validate({ query: Paginati
 });
 
 /**
- * POST /api/v1/webhooks/verify - verify webhook secret/signature pairing before go-live
+ * POST /api/v1/webhooks/verify - verify webhook secret/signature pairing before go-live (#1608)
  */
-app.post('/api/v1/webhooks/verify', validate({ body: WebhookVerifyBodySchema }), (req: Request, res: Response) => {
-  const { secret, payload, signature } = req.body || {};
-  if (typeof secret !== 'string' || !secret.trim()) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'secret is required and must be a non-empty string',
-    });
-    return;
-  }
-
-  if (typeof payload === 'undefined') {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'payload is required',
-    });
-    return;
-  }
-
-  const computedSignature = createWebhookSignature(secret, payload);
-  const verified =
-    typeof signature === 'string' && signature.length > 0
-      ? verifyWebhookSignature(secret, payload, signature)
-      : null;
-
-  res.status(200).json({
-    algorithm: 'HMAC-SHA256',
-    signature: computedSignature,
-    verified,
-  });
-});
+app.post(
+  '/api/v1/webhooks/verify',
+  webhookVerifyLimiter,
+  validateApiKey,
+  validate({ body: WebhookVerifyBodySchema }),
+  handleWebhookVerify,
+);
 
 /**
  * GET /admin/audit/logs - list admin activity logs
@@ -3312,7 +3480,7 @@ app.get('/admin/exports/bulk/jobs', validateApiKey, async (req: Request, res: Re
 /**
  * GET /admin/exports/bulk/jobs/:id - get bulk export job status
  */
-app.get('/admin/exports/bulk/jobs/:id', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/exports/bulk/jobs/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const job = await getBulkExportJob(String(req.params.id));
   if (!job) {
     res.status(404).json({
@@ -3328,7 +3496,7 @@ app.get('/admin/exports/bulk/jobs/:id', validateApiKey, async (req: Request, res
 /**
  * POST /admin/exports/bulk/jobs/:id/cancel - cancel a pending/processing bulk export job
  */
-app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const cancelled = await cancelBulkExportJob(String(req.params.id));
   if (!cancelled) {
     const job = await getBulkExportJob(String(req.params.id));
@@ -3356,7 +3524,7 @@ app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, async (req: Requ
 /**
  * GET /admin/exports/bulk/artifacts/:artifactId - download a completed bulk export artifact
  */
-app.get('/admin/exports/bulk/artifacts/:artifactId', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/exports/bulk/artifacts/:artifactId', validateApiKey, validate({ params: ArtifactIdParamSchema }), (req: Request, res: Response) => {
   const artifact = getBulkExportArtifact(String(req.params.artifactId));
   if (!artifact) {
     res.status(404).json({
@@ -3967,7 +4135,7 @@ app.get('/admin/jobs/dead-letters', validateApiKey, (req: Request, res: Response
  * Retrieves a single dead-letter record by ID.
  * Requires API key authentication.
  */
-app.get('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/jobs/dead-letters/:id', validateApiKey, validate({ params: IdParamSchema }), (req: Request, res: Response) => {
   const record = getDeadLetterRecord(req.params.id);
   if (!record) {
     res.status(404).json({
@@ -3990,7 +4158,7 @@ app.get('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Resp
  * Supports dryRun flag.
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const record = getDeadLetterRecord(req.params.id);
   if (!record) {
     res.status(404).json({
@@ -4086,7 +4254,7 @@ app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ para
  * Discards a dead-letter record from the queue.
  * Requires API key authentication.
  */
-app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Response) => {
+app.delete('/admin/jobs/dead-letters/:id', validateApiKey, validate({ params: IdParamSchema }), (req: Request, res: Response) => {
   const actor = resolveActingAdminAddress(req);
 
   if (isDryRunRequest(req)) {
@@ -4287,8 +4455,18 @@ app.get('/admin/idempotency/keys', validateApiKey, (req: Request, res: Response)
  * Removes a single idempotency key from the store.
  * Requires API key authentication.
  */
-app.delete('/admin/idempotency/keys/:key', validateApiKey, (req: Request, res: Response) => {
-  const key = decodeURIComponent(req.params.key);
+app.delete('/admin/idempotency/keys/:key', validateApiKey, validate({ params: KeyParamSchema }), (req: Request, res: Response) => {
+  let key: string;
+  try {
+    key = decodeURIComponent(req.params.key);
+  } catch (err) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'Malformed URI encoding in key parameter',
+    });
+    return;
+  }
   if (isDryRunRequest(req)) {
     const exists = idempotencyStore.inspectKeys().some((entry) => entry.key === key);
     res.status(exists ? 200 : 404).json({
@@ -4634,40 +4812,6 @@ app.get('/admin/analytics/wallet-activity/heatmap', validateApiKey, async (req: 
     });
   }
 });
-
-
-
-/**
- * Mock vault metrics poll cycle
- * In a real application, this would fetch data from a database or Stellar RPC
- */
-const pollVaultMetrics = () => {
-  // Mock data for TVL and Share Price
-  const mockTvl = 1000000 + Math.random() * 100000;
-  const mockSharePrice = 1.25 + Math.random() * 0.05;
-
-  updateVaultMetrics(mockTvl, mockSharePrice);
-
-  logger.log('info', 'Vault metrics updated in Prometheus gauges', {
-    tvl: mockTvl,
-    sharePrice: mockSharePrice,
-  });
-};
-
-// Start poll cycle every 60 seconds (configurable)
-const METRICS_POLL_INTERVAL = parseInt(process.env.METRICS_POLL_INTERVAL_MS || '60000', 10);
-const metricsInterval =
-  process.env.NODE_ENV === 'test'
-    ? null
-    : setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
-
-if (process.env.NODE_ENV !== 'test') {
-  pollVaultMetrics(); // Initial call
-  void initializeWebhookEndpoints();
-}
-
-// Start latency monitoring
-latencyMonitoringService.startMonitoring();
 
 // â”€â”€â”€ Event Polling Service (Issue: Event Replay) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {

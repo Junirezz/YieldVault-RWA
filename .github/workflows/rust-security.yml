@@ -7,10 +7,18 @@ on:
       - main
       - develop
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dependency-audit:
     name: Dependency Vulnerability Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -49,36 +57,40 @@ jobs:
         working-directory: frontend
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.22.1 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit@0.22.1
 
       - name: Run cargo audit
         run: |
-          cargo audit --ignore RUSTSEC-2026-0097 \
-            --ignore RUSTSEC-2024-0388 \
-            --ignore RUSTSEC-2024-0436 \
-            --json > cargo-audit.json || true
+          cargo audit --json > cargo-audit.json
           node scripts/dependency-audit.js cargo cargo-audit cargo-audit.json
 
       - name: Run npm audit for backend
         run: |
-          npm audit --json > backend/backend-audit.json || true
+          npm audit --json > backend/backend-audit.json
           node scripts/dependency-audit.js npm backend backend/backend-audit.json
 
       - name: Run npm audit for frontend
         run: |
-          npm audit --json > frontend/frontend-audit.json || true
+          npm audit --json > frontend/frontend-audit.json
           node scripts/dependency-audit.js npm frontend frontend/frontend-audit.json
 
       - name: Run cargo-clippy (share-price math)
         run: cargo clippy -p share-price-math --all-targets -- -D warnings
         working-directory: contracts
-        continue-on-error: true
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.18.3
 
       - name: Run cargo-deny (supply chain security)
         run: |
-          cargo install cargo-deny --version 0.18.3 --locked
           cargo deny check advisories
           cargo deny check licenses
+          cargo install cargo-deny --version 0.18.3 --locked
+          cargo deny check advisories bans licenses sources
 
       - name: Verify workspace license alignment (MIT)
         run: npm run validate:licenses

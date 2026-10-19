@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createHash } from 'crypto';
 
 export interface IPLSPinResult {
@@ -54,7 +55,9 @@ export class MetadataService {
     if (!record) {
       return null;
     }
-    const response = await fetch(this.gatewayUrl(record.cid));
+    const response = await fetch(this.gatewayUrl(record.cid), {
+      signal: AbortSignal.timeout(10000),
+    });
     if (!response.ok) {
       throw new Error(
         `Failed to fetch metadata for vault ${vaultId}: ${response.status}`,

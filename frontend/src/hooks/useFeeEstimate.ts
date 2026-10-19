@@ -28,6 +28,7 @@ export function useFeeEstimate(
   const [feeUsd, setFeeUsd] = useState<number>(0);
   const [isEstimating, setIsEstimating] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [error, setError] = useState<Error | null>(null);
 
   const { data: xlmPrice = 0.12 } = useQuery({
     queryKey: ["xlmPrice"],
@@ -42,6 +43,8 @@ export function useFeeEstimate(
       queueMicrotask(() => {
         setFeeXlm(0);
         setFeeUsd(0);
+        setLastUpdated(null);
+        setError(null);
       });
       return;
     }
@@ -61,9 +64,18 @@ export function useFeeEstimate(
           setFeeXlm(xlmFee);
           setFeeUsd(xlmFee * xlmPrice);
           setLastUpdated(new Date());
+          setError(null);
         }
-      } catch (error) {
-        console.error("Fee estimation failed", error);
+      } catch (caught) {
+        console.error("Fee estimation failed", caught);
+        if (!isCancelled) {
+          // Surface the failure instead of leaving a stale quote on screen
+          // (issue #1624).
+          setFeeXlm(0);
+          setFeeUsd(0);
+          setLastUpdated(null);
+          setError(caught instanceof Error ? caught : new Error(String(caught)));
+        }
       } finally {
         if (!isCancelled) {
           setIsEstimating(false);
@@ -88,5 +100,7 @@ export function useFeeEstimate(
     isHighFee,
     feeToValueRatio,
     lastUpdated,
+    error,
+    isError: error !== null,
   };
 }

@@ -427,6 +427,7 @@ class SlackAlert extends AlertIntegration {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify(message),
       });
 
@@ -492,6 +493,7 @@ class PagerDutyAlert extends AlertIntegration {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify(payload),
       });
 

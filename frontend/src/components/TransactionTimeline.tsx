@@ -1,6 +1,8 @@
 import React from "react";
 import { Check, AlertCircle, Loader2 } from "./icons";
 import { useTranslation } from "../i18n";
+import { networkConfig } from "../config/network";
+import { getStellarExplorerUrl } from "../lib/security";
 
 export type TxTimelineStatus = "preparing" | "signing" | "submitting" | "pending" | "confirming" | "finalized" | "failed";
 
@@ -79,6 +81,16 @@ const TransactionTimeline: React.FC<TransactionTimelineProps> = ({
   const steps = status === "failed"
     ? STEPS // show all steps, the failed one will be marked failed based on order
     : STEPS;
+
+  // `getStellarExplorerUrl` returns "#" for hashes that fail validation; never
+  // render a dead link in that case.
+  const explorerUrl = txHash
+    ? getStellarExplorerUrl(
+        txHash,
+        networkConfig.isTestnet ? "testnet" : "mainnet",
+      )
+    : null;
+  const hasExplorerLink = Boolean(explorerUrl && explorerUrl !== "#");
 
   return (
     <div
@@ -207,9 +219,9 @@ const TransactionTimeline: React.FC<TransactionTimelineProps> = ({
                 ? errorMessage
                 : t(status === "finalized" ? "txTimeline.steps.finalized.desc" : "txTimeline.steps.failed.desc")}
             </p>
-            {status === "finalized" && txHash && (
+            {status === "finalized" && hasExplorerLink && (
               <a
-                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+                href={explorerUrl ?? "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{

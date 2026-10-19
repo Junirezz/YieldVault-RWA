@@ -872,6 +872,7 @@ async function sendWebhookDeadLetterAlert(
     await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
         text: `:rotating_light: *YieldVault Webhook Dead-Lettered*\nFailed to deliver \`${eventType}\` to \`${endpointUrl}\` after ${attempts} attempts.\nLatest error: \`${error}\``,
       }),

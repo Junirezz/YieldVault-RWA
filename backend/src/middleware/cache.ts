@@ -456,6 +456,7 @@ export function triggerCacheInvalidation(
         console.error(
           JSON.stringify({
             level: 'error',
+            eventType,
             event: 'invalidation_hook_invalid_return',
             error: 'Invalidation hook must return an array of cache key patterns',
             eventType,

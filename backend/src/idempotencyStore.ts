@@ -271,6 +271,7 @@ export class IdempotencyStore {
   async pruneStaleKeys(
     retentionMs: number,
     dryRun = false,
+  ): Promise<{ pruned: number; localPruned: number; redisPruned: number; dryRun?: boolean }> {
   ): Promise<{ pruned: number; localPruned: number; redisPruned: number; dryRun: boolean }> {
     const cutoff = Date.now() - retentionMs;
     let localPruned = 0;

@@ -41,15 +41,17 @@ export class CircuitBreaker {
   private readonly cooldownMs: number;
 
   constructor(opts: CircuitBreakerOptions = {}) {
+    const ft = parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10);
     this.failureThreshold =
-      opts.failureThreshold ??
-      parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10);
+      opts.failureThreshold ?? (isNaN(ft) || ft <= 0 ? 5 : ft);
+
+    const win = parseInt(process.env.CIRCUIT_BREAKER_WINDOW_MS || '30000', 10);
     this.windowMs =
-      opts.windowMs ??
-      parseInt(process.env.CIRCUIT_BREAKER_WINDOW_MS || '30000', 10);
+      opts.windowMs ?? (isNaN(win) || win <= 0 ? 30000 : win);
+
+    const cd = parseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS || '30000', 10);
     this.cooldownMs =
-      opts.cooldownMs ??
-      parseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS || '30000', 10);
+      opts.cooldownMs ?? (isNaN(cd) || cd <= 0 ? 30000 : cd);
   }
 
   get currentState(): CircuitState {

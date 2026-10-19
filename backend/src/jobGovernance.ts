@@ -11,6 +11,7 @@ export interface JobPolicy {
   baseDelayMs: number;
   backoffMultiplier: number;
   deadLetterThreshold: number;
+  timeoutMs?: number;
 }
 
 export interface DeadLetterRecord {
@@ -47,30 +48,35 @@ export const JOB_POLICIES: Record<JobName, JobPolicy> = {
     baseDelayMs: 1000,
     backoffMultiplier: 2,
     deadLetterThreshold: 3,
+    timeoutMs: 10000,
   },
   positionReconciliation: {
     maxAttempts: 4,
     baseDelayMs: 2000,
     backoffMultiplier: 2,
     deadLetterThreshold: 2,
+    timeoutMs: 30000,
   },
   reportGeneration: {
     maxAttempts: 5,
     baseDelayMs: 5000,
     backoffMultiplier: 2,
     deadLetterThreshold: 2,
+    timeoutMs: 60000,
   },
   databaseBackup: {
     maxAttempts: 3,
     baseDelayMs: 10000,
     backoffMultiplier: 2,
     deadLetterThreshold: 2,
+    timeoutMs: 120000,
   },
   apySnapshot: {
     maxAttempts: 3,
     baseDelayMs: 1000,
     backoffMultiplier: 2,
     deadLetterThreshold: 3,
+    timeoutMs: 15000,
   },
   // vaultRebalance uses a generous retry policy because timeouts are transient
   // under load and a successful rebalance requires all allocation rows to commit
@@ -80,6 +86,7 @@ export const JOB_POLICIES: Record<JobName, JobPolicy> = {
     baseDelayMs: 5000,
     backoffMultiplier: 2,
     deadLetterThreshold: 2,
+    timeoutMs: 30000,
   },
   yieldAccrual: {
     maxAttempts: 3,
@@ -245,6 +252,7 @@ class JobGovernanceStore {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           text: `:rotating_light: *YieldVault Job Dead-Lettered*\nJob \`${jobName}\` reached dead-letter threshold with ${failures} failures.\nLatest error: \`${error}\``
         })
@@ -510,7 +518,23 @@ export async function runJobWithRetry<T>(
 
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
     try {
-      const result = await task();
+      let result: T;
+      const timeoutMs = policy.timeoutMs;
+      if (timeoutMs && timeoutMs > 0) {
+        let timer: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`Job ${jobName} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        });
+        try {
+          result = await Promise.race([task(), timeoutPromise]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      } else {
+        result = await task();
+      }
       jobGovernanceStore.markCompleted(jobName, Date.now() - startedAt, true);
       return result;
     } catch (error) {

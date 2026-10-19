@@ -11,6 +11,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+
 concurrency:
   group: production-deployment
   cancel-in-progress: false
@@ -20,6 +23,7 @@ jobs:
   validate:
     name: Validate release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.parse.outputs.version }}
     steps:
@@ -53,6 +57,7 @@ jobs:
   frontend-ci:
     name: Frontend CI (lint + tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: validate
     defaults:
       run:
@@ -81,6 +86,7 @@ jobs:
   frontend-build:
     name: Build frontend (production)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: frontend-ci
     defaults:
       run:
@@ -103,11 +109,11 @@ jobs:
 
       - name: Build (production mode)
         env:
-          VITE_SOROBAN_RPC_URL: ${{ secrets.PROD_SOROBAN_RPC_URL }}
-          VITE_STELLAR_NETWORK_PASSPHRASE: ${{ secrets.PROD_STELLAR_NETWORK_PASSPHRASE }}
-          VITE_VAULT_CONTRACT_ID: ${{ inputs.vault_contract_id || secrets.PROD_VAULT_CONTRACT_ID }}
-          VITE_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
-          VITE_SENTRY_DSN: ${{ secrets.PROD_SENTRY_DSN }}
+          VITE_SOROBAN_RPC_URL: ${{ vars.PROD_SOROBAN_RPC_URL || secrets.PROD_SOROBAN_RPC_URL }}
+          VITE_STELLAR_NETWORK_PASSPHRASE: ${{ vars.PROD_STELLAR_NETWORK_PASSPHRASE || secrets.PROD_STELLAR_NETWORK_PASSPHRASE }}
+          VITE_VAULT_CONTRACT_ID: ${{ inputs.vault_contract_id || vars.PROD_VAULT_CONTRACT_ID || secrets.PROD_VAULT_CONTRACT_ID }}
+          VITE_API_BASE_URL: ${{ vars.PROD_API_BASE_URL || secrets.PROD_API_BASE_URL }}
+          VITE_SENTRY_DSN: ${{ vars.PROD_SENTRY_DSN || secrets.PROD_SENTRY_DSN }}
           VITE_SENTRY_ENVIRONMENT: production
           VITE_SENTRY_TRACES_SAMPLE_RATE: '0.1'
           VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE: '0.1'
@@ -134,6 +140,7 @@ jobs:
   deploy-frontend:
     name: Deploy frontend → Vercel (production)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [validate, frontend-build]
     environment:
       name: production
@@ -160,13 +167,17 @@ jobs:
 
       - name: Pull Vercel environment info
         working-directory: frontend
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production
 
       - name: Deploy to Vercel (production)
         id: deploy
         working-directory: frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} 2>&1 | tail -1)
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod 2>&1 | tail -1)
           echo "production_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
           echo "Deployed to: $DEPLOY_URL"
 
@@ -174,6 +185,7 @@ jobs:
   smoke-test:
     name: Smoke test production URL
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: deploy-frontend
     steps:
       - name: Check production URL is reachable
@@ -201,6 +213,7 @@ jobs:
   notify:
     name: Deployment summary
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [validate, deploy-frontend, smoke-test]
     if: always()
     steps:

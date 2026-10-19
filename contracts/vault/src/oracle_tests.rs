@@ -184,10 +184,6 @@ fn test_oracle_setters_require_admin_auth() {
     let admin = Address::generate(&env);
     let token_admin = Address::generate(&env);
     let usdc = create_token_contract(&env, &token_admin);
-    let token_admin_client = token::StellarAssetClient::new(&env, &usdc.address);
-
-    let user = Address::generate(&env);
-    token_admin_client.mint(&user, &1000);
 
     let vault_id = env.register(YieldVault, ());
     let vault = YieldVaultClient::new(&env, &vault_id);
@@ -205,7 +201,8 @@ fn test_oracle_setters_require_admin_auth() {
     assert_eq!(vault.oracle_heartbeat(), 3600);
 
     env.mock_all_auths();
-    vault.queue_price_oracle_change(&oracle_addr);
+    let eta = vault.queue_price_oracle_change(&oracle_addr);
+    env.ledger().with_mut(|li| li.timestamp = eta);
     vault.execute_price_oracle_change();
     vault.set_oracle_enabled(&true);
     vault.set_oracle_heartbeat(&7200);

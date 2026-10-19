@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 
 export type LoadingStatus = "idle" | "loading" | "success" | "error";
 
@@ -22,7 +22,7 @@ export interface UseLoadingStateReturn<T> {
   reset: () => void;
 }
 
-export function useLoadingState<T = any>(
+export function useLoadingState<T = unknown>(
   options: UseLoadingStateOptions<T> = {}
 ): UseLoadingStateReturn<T> {
   const { initialData = null, minLoadingTimeMs = 0, onSuccess, onError } = options;

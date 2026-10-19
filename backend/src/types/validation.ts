@@ -72,7 +72,48 @@ export const WebhookListQuerySchema = PaginationQuerySchema.extend({
 }).passthrough();
 
 export const IdParamSchema = z.object({
-  id: z.string().min(1, 'id is required'),
+  id: z
+    .string()
+    .trim()
+    .min(1, 'id is required')
+    .max(128, 'id is too long')
+    .regex(/^[a-zA-Z0-9_-]+$/, 'id contains invalid characters'),
+});
+
+export const CanonicalIdParamSchema = z.object({
+  canonicalId: z
+    .string()
+    .trim()
+    .min(1, 'canonicalId is required')
+    .max(128, 'canonicalId is too long')
+    .regex(/^[a-zA-Z0-9_-]+$/, 'canonicalId contains invalid characters'),
+});
+
+export const WalletParamSchema = z.object({
+  wallet: walletAddressField,
+});
+
+export const ArtifactIdParamSchema = z.object({
+  artifactId: z
+    .string()
+    .trim()
+    .min(1, 'artifactId is required')
+    .max(128, 'artifactId is too long')
+    .regex(/^[a-zA-Z0-9_-]+$/, 'artifactId contains invalid characters'),
+});
+
+export const KeyParamSchema = z.object({
+  key: z
+    .string()
+    .trim()
+    .min(1, 'key is required')
+    .max(256, 'key is too long')
+    .regex(/^[a-zA-Z0-9_%-]+$/, 'key contains invalid characters'),
+});
+
+export const CacheDeleteQuerySchema = z.object({
+  pattern: z.string().trim().max(100, 'Pattern exceeds maximum length of 100 characters').optional(),
+  dryRun: z.union([z.boolean(), z.enum(['true', 'false', '1', '0'])]).optional(),
 });
 
 export const WindowIdParamSchema = z.object({

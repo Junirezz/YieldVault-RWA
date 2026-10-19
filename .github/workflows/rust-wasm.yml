@@ -18,10 +18,18 @@ on:
       - "scripts/check_bridge_abi.sh"
       - ".github/workflows/rust-wasm.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust-test:
     name: Rust unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,22 +65,26 @@ jobs:
       - name: Type-check every contract crate
         run: cargo check --workspace --all-targets --locked
 
-      - name: Run clippy (share-price math)
-        run: cargo clippy -p share-price-math --all-targets -- -D warnings
+      - name: Run clippy across workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Compile and run vault oracle regression tests
-        run: cargo test -p vault oracle --locked --quiet
+      - name: Run bridge-compat contract tests
+        run: cargo test -p bridge-compat --locked --quiet
 
       - name: Compile and run mock oracle failure-mode tests
         run: cargo test -p mock-strategy --locked --quiet
 
       - name: Run share-price math unit tests
         run: cargo test -p share-price-math --locked --quiet
-        working-directory: ./contracts
+
+      # Vault unit tests currently filter to `oracle` regression tests because full vault mock suites are undergoing refactoring (Issue #1590).
+      - name: Compile and run vault oracle regression tests
+        run: cargo test -p vault oracle --locked --quiet
 
   vault-fuzz:
     name: Vault share-price fuzz (60s)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,7 +103,7 @@ jobs:
             ${{ runner.os }}-cargo-fuzz-
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        uses: taiki-e/install-action@cargo-fuzz
 
       - name: Run share_price_math fuzz target
         run: |
@@ -101,6 +113,7 @@ jobs:
   wasm-build:
     name: Build WASM artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: vault-fuzz
     steps:
       - name: Checkout
@@ -141,6 +154,7 @@ jobs:
   testnet-deploy:
     name: Testnet deploy & smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: wasm-build
     # Only run on push to main — not on pull requests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -170,6 +184,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
           node-version-file: '.nvmrc'
 
       - name: Install root dependencies
@@ -193,13 +210,14 @@ jobs:
   bridge-abi:
     name: Bridge ABI compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       # Issue #1305: the bridge-compat contract must keep its ABI shape and
       # event signatures stable across vault upgrades. The checker is pure
-      # text analysis, so it runs without a Rust toolchain � and therefore
+      # text analysis, so it runs without a Rust toolchain  and therefore
       # gates even while the workspace does not compile.
       - name: Verify bridge-compat ABI against snapshot
         run: bash scripts/check_bridge_abi.sh

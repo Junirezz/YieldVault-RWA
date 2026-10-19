@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyFreighterApiError,
   classifyWalletConnectionError,
   createWalletConnectionError,
   hasWalletConnectionError,
@@ -215,5 +216,46 @@ describe("walletErrorI18nKeys", () => {
       title: "wallet.status.error",
       description: "wallet.error.noAddress",
     });
+  });
+});
+
+describe("classifyFreighterApiError", () => {
+  it("maps a user rejection payload to USER_REJECTED", () => {
+    const result = classifyFreighterApiError({
+      code: 3,
+      message: "User rejected the request.",
+    });
+    expect(result.code).toBe("USER_REJECTED");
+    expect(result.retryable).toBe(true);
+    expect(result.message).toBe("User rejected the request. [freighter code 3]");
+  });
+
+  it("maps a permission payload to PERMISSION_DENIED", () => {
+    const result = classifyFreighterApiError({
+      message: "Freighter permission denied.",
+    });
+    expect(result.code).toBe("PERMISSION_DENIED");
+  });
+
+  it("maps a missing-extension payload to NOT_INSTALLED (non-retryable)", () => {
+    const result = classifyFreighterApiError({
+      message: "Freighter is not installed",
+    });
+    expect(result.code).toBe("NOT_INSTALLED");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("falls back to UNKNOWN when the payload has no usable message", () => {
+    expect(classifyFreighterApiError({}).code).toBe("UNKNOWN");
+    expect(classifyFreighterApiError(null).code).toBe("UNKNOWN");
+    expect(classifyFreighterApiError({ code: 7 }).message).toContain("code 7");
+  });
+
+  it("keeps the innermost message but appends the Freighter code", () => {
+    const result = classifyFreighterApiError({
+      code: -1,
+      message: "  something odd happened  ",
+    });
+    expect(result.message).toBe("something odd happened [freighter code -1]");
   });
 });

@@ -492,26 +492,32 @@ export class EventPollingService {
   }
 
   private async getCurrentLedger(): Promise<number> {
-    try {
-      const response = await fetch(this.config.rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getLatestLedger',
-          params: [],
-        }),
-      });
+    const response = await fetch(this.config.rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getLatestLedger',
+        params: [],
+      }),
+    });
 
-      const data = await response.json();
-      return data.result?.sequence ?? 0;
-    } catch (error) {
-      logger.log('error', 'Failed to fetch current ledger', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      return 0;
+    if ('ok' in response && !response.ok) {
+      throw new Error(`RPC request getLatestLedger failed with status ${response.status}`);
     }
+
+    const data = await response.json();
+    if (data?.error) {
+      const err = typeof data.error === 'string' ? data.error : data.error.message || JSON.stringify(data.error);
+      throw new Error(`RPC getLatestLedger JSON-RPC error: ${err}`);
+    }
+
+    if (data?.result?.sequence == null || typeof data.result.sequence !== 'number') {
+      throw new Error('RPC response missing valid sequence number');
+    }
+
+    return data.result.sequence;
   }
 
   private async fetchEventsForLedgerRange(
@@ -519,43 +525,77 @@ export class EventPollingService {
     endLedger: number,
   ): Promise<StellarEvent[]> {
     try {
-      const response = await fetch(this.config.rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getEvents',
-          params: {
-            startLedger,
-            endLedger,
-            filters: [
-              {
-                type: 'contract',
-                contractIds: [this.config.contractId],
+      const allEvents: StellarEvent[] = [];
+      let cursor: string | undefined = undefined;
+
+      while (true) {
+        const response = await fetch(this.config.rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getEvents',
+            params: {
+              startLedger,
+              endLedger,
+              filters: [
+                {
+                  type: 'contract',
+                  contractIds: [this.config.contractId],
+                },
+              ],
+              pagination: {
+                limit: 1000,
+                ...(cursor ? { cursor } : {}),
               },
-            ],
-            pagination: {
-              limit: 1000,
             },
-          },
-        }),
-      });
+          }),
+        });
 
-      const data = await response.json();
-      const events = data.result?.events ?? [];
+        if ('ok' in response && !response.ok) {
+          throw new Error(`RPC request getEvents failed with status ${response.status}`);
+        }
 
-      return events
-        .filter((e: any) => e.ledger >= startLedger && e.ledger <= endLedger)
-        .map((e: any) => ({
-          id: e.id,
-          type: e.type,
-          ledger: e.ledger,
-          contractId: e.contractId,
-          txHash: e.txHash,
-          topics: e.topic ?? [],
-          value: e.value,
-        }));
+        const data = await response.json();
+        if (data?.error) {
+          const err = typeof data.error === 'string' ? data.error : data.error.message || JSON.stringify(data.error);
+          throw new Error(`RPC getEvents JSON-RPC error: ${err}`);
+        }
+
+        if (!data?.result) {
+          throw new Error('RPC getEvents response missing result');
+        }
+
+        const rawEvents = data.result?.events ?? [];
+        const mapped = rawEvents
+          .filter((e: any) => e.ledger >= startLedger && e.ledger <= endLedger)
+          .map((e: any) => ({
+            id: e.id,
+            type: e.type,
+            ledger: e.ledger,
+            contractId: e.contractId,
+            txHash: e.txHash,
+            topics: e.topic ?? [],
+            value: e.value,
+          }));
+
+        allEvents.push(...mapped);
+
+        const nextCursor =
+          data.result.cursor ||
+          (rawEvents.length > 0
+            ? rawEvents[rawEvents.length - 1].pagingToken || rawEvents[rawEvents.length - 1].id
+            : undefined);
+
+        if (rawEvents.length < 1000 || !nextCursor || nextCursor === cursor) {
+          break;
+        }
+
+        cursor = nextCursor;
+      }
+
+      return allEvents;
     } catch (error) {
       logger.log('error', 'Failed to fetch events', {
         startLedger,

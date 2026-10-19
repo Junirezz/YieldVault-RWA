@@ -270,7 +270,7 @@ fn test_deposit_and_withdraw_emit_events() {
     let events = env.events().all();
     let mut deposit_found = false;
     for event in events.iter() {
-        if event.1.len() > 0 {
+        if !event.1.is_empty() {
             if let Ok(topic_sym) = Symbol::try_from_val(&env, &event.1.get(0).unwrap()) {
                 if topic_sym == symbol_short!("deposit") {
                     deposit_found = true;
@@ -289,7 +289,7 @@ fn test_deposit_and_withdraw_emit_events() {
     let events_after = env.events().all();
     let mut withdraw_found = false;
     for event in events_after.iter() {
-        if event.1.len() > 0 {
+        if !event.1.is_empty() {
             if let Ok(topic_sym) = Symbol::try_from_val(&env, &event.1.get(0).unwrap()) {
                 if topic_sym == symbol_short!("withdraw") {
                     withdraw_found = true;

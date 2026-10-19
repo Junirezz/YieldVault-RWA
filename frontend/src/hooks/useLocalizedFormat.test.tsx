@@ -4,7 +4,7 @@ import { useLocalizedFormat } from "./useLocalizedFormat";
 import { PreferencesProvider } from "../context/PreferencesContext";
 import React from "react";
 
-function createWrapper(locale = "en-US") {
+function createWrapper() {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     return (
       <PreferencesProvider walletAddress="test-wallet">

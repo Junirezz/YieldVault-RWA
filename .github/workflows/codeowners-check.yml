@@ -39,8 +39,16 @@ on:
       - 'backend/**'
       - 'frontend/**'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-governance:
+    timeout-minutes: 5
     name: Verify CODEOWNERS, PR Template & Contribution Rules
     runs-on: ubuntu-latest
     steps:

@@ -7,8 +7,6 @@
 //! Run with:
 //!   cargo test -p vault oracle
 
-#![cfg(test)]
-
 use crate::oracle::{
     price_data_new, validate_conversion_rate, validate_price_for_calculation, OracleError,
     OracleValidator, MAX_PRICE_DEVIATION_BPS,
@@ -33,6 +31,7 @@ fn setup_vault_with_oracle(
     token::Client<'_>,
     Address,
 ) {
+    env.ledger().set_timestamp(10_000);
     let admin = Address::generate(env);
     let token_admin = Address::generate(env);
     let usdc = create_token(env, &token_admin);
@@ -47,7 +46,9 @@ fn setup_vault_with_oracle(
     oracle.initialize(&admin);
     oracle.set_price(&1_000_000_000, &env.ledger().timestamp(), &18);
 
-    vault.queue_price_oracle_change(&oracle_id);
+    let eta = vault.queue_price_oracle_change(&oracle_id);
+    env.ledger().with_mut(|li| li.timestamp = eta);
+    oracle.set_price(&1_000_000_000, &eta, &18);
     vault.execute_price_oracle_change();
     vault.set_oracle_enabled(&true);
     vault.set_oracle_heartbeat(&3600);

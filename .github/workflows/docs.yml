@@ -6,18 +6,22 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.84.0
-
-      - name: Generate Rust docs
-        run: cargo doc -p share-price-math --no-deps
         uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Generate Rust docs

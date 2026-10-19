@@ -40,7 +40,7 @@ mod access_control {
 
     #[test]
     fn test_pause_requires_admin_auth() {
-        let (env, client, _admin, _token) = setup();
+        let (env, _client, _admin, _token) = setup();
         let non_admin = Address::generate(&env);
 
         // mock_all_auths allows any auth in setup; reset to strict for this test

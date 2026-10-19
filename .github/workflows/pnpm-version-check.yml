@@ -8,11 +8,19 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Required version passes ─────────────────────────────────────────────────
   pnpm-version-ok:
     name: pnpm >=9.12 (required range)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +41,7 @@ jobs:
   pnpm-v8-rejected:
     name: pnpm 8 rejected with clear error
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
