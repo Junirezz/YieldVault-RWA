@@ -8,10 +8,18 @@ on:
   schedule:
     - cron: '0 4 * * *' # Daily at 4:00 AM UTC
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pnpm-audit:
     name: Workspace PNPM Audit (Gating on High/Critical)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -41,6 +49,7 @@ jobs:
   npm-audit:
     name: NPM Audit (Frontend & Backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -61,6 +70,7 @@ jobs:
   cargo-audit:
     name: Cargo Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -72,11 +82,12 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Run Cargo Audit
-        run: cargo audit --deny warnings || echo "Cargo audit completed."
+        run: cargo audit --deny warnings
 
   dependency-review:
     name: GitHub Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout Repository

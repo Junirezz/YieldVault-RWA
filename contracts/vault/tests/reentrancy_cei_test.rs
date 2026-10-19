@@ -1,5 +1,5 @@
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 use vault::{YieldVault, YieldVaultClient};
 
 #[contracttype]
@@ -86,9 +86,7 @@ impl ReentrantToken {
         if callback_done {
             return;
         }
-        env.storage()
-            .instance()
-            .set(&TokenKey::CallbackDone, &true);
+        env.storage().instance().set(&TokenKey::CallbackDone, &true);
 
         let vault: Address = env.storage().instance().get(&TokenKey::Vault).unwrap();
         let user: Address = env.storage().instance().get(&TokenKey::User).unwrap();
@@ -97,14 +95,12 @@ impl ReentrantToken {
             &TokenKey::ObservedUserDeposit,
             &vault_client.user_deposit(&user),
         );
-        env.storage().instance().set(
-            &TokenKey::ObservedAssets,
-            &vault_client.total_assets().unwrap(),
-        );
-        env.storage().instance().set(
-            &TokenKey::ObservedShares,
-            &vault_client.total_shares(),
-        );
+        env.storage()
+            .instance()
+            .set(&TokenKey::ObservedAssets, &vault_client.total_assets());
+        env.storage()
+            .instance()
+            .set(&TokenKey::ObservedShares, &vault_client.total_shares());
 
         let nested_amount: i128 = env
             .storage()
@@ -112,10 +108,9 @@ impl ReentrantToken {
             .get(&TokenKey::NestedAmount)
             .unwrap();
         let result = vault_client.try_deposit(&user, &nested_amount);
-        env.storage().instance().set(
-            &TokenKey::ReentrySucceeded,
-            &matches!(result, Ok(Ok(_))),
-        );
+        env.storage()
+            .instance()
+            .set(&TokenKey::ReentrySucceeded, &matches!(result, Ok(Ok(_))));
     }
 }
 
@@ -142,6 +137,6 @@ fn deposit_commits_accounting_before_malicious_token_callback() {
     assert_eq!(token.observed_shares(), 100);
     assert!(token.reentry_succeeded());
     assert_eq!(vault.user_deposit(&user), 150);
-    assert_eq!(vault.total_assets().unwrap(), 150);
+    assert_eq!(vault.total_assets(), 150);
     assert_eq!(vault.total_shares(), 150);
 }

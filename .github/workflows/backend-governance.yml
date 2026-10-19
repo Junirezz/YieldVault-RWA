@@ -16,8 +16,16 @@ on:
       - 'frontend/src/types/**'
       - '.github/workflows/backend-governance.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-governance:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     services:
       postgres:

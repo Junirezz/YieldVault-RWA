@@ -16,9 +16,17 @@ on:
       - 'frontend/src/types/**'
       - '.github/workflows/cypress.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cypress-run:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,10 +40,6 @@ jobs:
 
       - name: Build shared API schemas
         working-directory: packages/api-schemas
-        run: |
-          npm ci
-          # TypeScript 5.9 removed moduleResolution=node10; build with 5.5 for compatibility
-          npx -p typescript@5.5.4 tsc -p tsconfig.json
         run: npm ci && npm run build
 
       - name: Install dependencies

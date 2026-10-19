@@ -6,8 +6,16 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   coverage-backend:
+    timeout-minutes: 15
     name: Backend Test Coverage (Threshold >= 80%)
     runs-on: ubuntu-latest
     steps:
@@ -36,6 +44,7 @@ jobs:
   coverage-frontend:
     name: Frontend Test Coverage (Threshold >= 70%)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -62,6 +71,7 @@ jobs:
   coverage-threshold-check:
     name: Verify Coverage Thresholds & Alert on Drops
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [coverage-backend, coverage-frontend]
     steps:
       - name: Checkout Repository

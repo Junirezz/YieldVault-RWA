@@ -14,8 +14,12 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   flaky-detector:
+    timeout-minutes: 30
     name: Detect Flaky Tests (10x Loop)
     runs-on: ubuntu-latest
     services:

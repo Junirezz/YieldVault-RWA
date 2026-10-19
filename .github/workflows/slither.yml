@@ -10,8 +10,16 @@ on:
       - main
       - develop
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   slither:
+    timeout-minutes: 15
     name: Solidity / Slither scan
     runs-on: ubuntu-latest
     permissions:

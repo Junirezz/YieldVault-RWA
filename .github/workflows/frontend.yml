@@ -5,10 +5,18 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   changes:
     name: Detect changed packages
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
@@ -44,6 +52,7 @@ jobs:
   frontend-lint-test:
     name: Frontend lint + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     defaults:
@@ -71,6 +80,7 @@ jobs:
   frontend-env-validation:
     name: Frontend env validation script
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.contracts == 'true'
     steps:
@@ -94,6 +104,7 @@ jobs:
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, frontend-env-validation]
     if: needs.changes.outputs.frontend == 'true'
     defaults:
@@ -125,6 +136,7 @@ jobs:
   backend-lint-test:
     name: Backend lint + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     defaults:
@@ -159,6 +171,7 @@ jobs:
   backend-build:
     name: Backend build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     defaults:
@@ -184,6 +197,7 @@ jobs:
   api-schemas-test:
     name: Shared API schemas typecheck + test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.shared == 'true'
     defaults:
@@ -206,6 +220,7 @@ jobs:
   contracts-ci:
     name: Contracts lint + test + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     steps:
@@ -216,7 +231,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          components: clippy
+          components: clippy, rustfmt
           profile: minimal
           override: true
 
@@ -233,10 +248,18 @@ jobs:
       - name: Run cargo fmt check
         run: cargo fmt --all -- --check
 
-      - name: Run clippy (share-price math)
-        run: cargo clippy -p share-price-math --all-targets -- -D warnings
-        working-directory: contracts
+      - name: Run clippy across workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run bridge-compat contract tests
+        run: cargo test -p bridge-compat --locked --quiet
+
+      - name: Compile and run mock oracle failure-mode tests
+        run: cargo test -p mock-strategy --locked --quiet
 
       - name: Run share-price math unit tests
         run: cargo test -p share-price-math --locked --quiet
-        working-directory: contracts
+
+      # Vault unit tests currently filter to `oracle` regression tests because full vault mock suites are undergoing refactoring (Issue #1590).
+      - name: Compile and run vault oracle regression tests
+        run: cargo test -p vault oracle --locked --quiet

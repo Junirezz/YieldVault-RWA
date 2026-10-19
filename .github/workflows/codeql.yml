@@ -17,10 +17,15 @@ permissions:
   security-events: write
   actions: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-rust:
     name: CodeQL (Rust)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'push' ||
@@ -90,6 +95,7 @@ jobs:
   analyze-typescript:
     name: CodeQL (TypeScript)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'push' ||
@@ -163,6 +169,7 @@ jobs:
   security-review:
     name: Security Review Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [analyze-rust, analyze-typescript]
     if: always()
 

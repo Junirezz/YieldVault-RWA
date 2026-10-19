@@ -36,8 +36,16 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration-smoke:
+    timeout-minutes: 15
     name: Cross-stack testnet smoke test
     runs-on: ubuntu-latest
     if: >-
