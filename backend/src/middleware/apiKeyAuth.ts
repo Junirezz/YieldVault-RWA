@@ -64,6 +64,7 @@ export interface PersistedApiKeyStatus {
   isActive: boolean;
   deletedAt?: Date | null;
   expiresAt?: Date | null;
+  tenant?: { deletedAt?: Date | null } | null;
   tenant?: { deletedAt?: Date | null };
 }
 
@@ -124,6 +125,7 @@ function sendUnauthorized(
     status: 401,
     code,
     message,
+    retryable: false,
     retrable: false,
   });
 }
@@ -169,12 +171,14 @@ export async function validateApiKey(
   let apiKey: {
     id?: string;
     hashedKey: string;
+    role: string | null;
     role: string;
     tenantId: string;
     scopes: unknown;
     isActive: boolean;
     deletedAt?: Date | null;
     expiresAt?: Date | null;
+    tenant?: { deletedAt?: Date | null } | null;
     tenant?: { deletedAt?: Date | null };
   } | null = null;
   try {
@@ -233,6 +237,7 @@ export async function validateApiKey(
     }
 
     req.authApiKeyHash = apiKey.hashedKey;
+    req.authApiKeyRole = (apiKey.role || 'viewer') as ApiKeyRole;
     req.authApiKeyRole = apiKey.role as ApiKeyRole;
     req.authApiKeyTenantId = apiKey.tenantId;
     req.authApiKeyScopes = availableScopes;

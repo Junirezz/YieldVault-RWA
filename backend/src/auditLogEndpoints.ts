@@ -1,47 +1,17 @@
 import { Router, Request, Response } from 'express';
+import { prisma } from './prisma';
+import { validateApiKey } from './middleware/apiKeyAuth';
 
 const router = Router();
+
+router.use(validateApiKey);
 
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  operation: 'deposit' | 'withdraw' | 'strategy_switch' | 'parameter_change';
+  operation: string;
   actor: string;
   details: Record<string, unknown>;
-}
-
-function generateMockAuditLogs(): AuditLogEntry[] {
-  const now = Date.now();
-  return [
-    {
-      id: 'audit-1',
-      timestamp: new Date(now - 3_600_000).toISOString(),
-      operation: 'deposit',
-      actor: 'GABC...1234',
-      details: { amount: 1000, shares: 990, token: 'USDC' },
-    },
-    {
-      id: 'audit-2',
-      timestamp: new Date(now - 7_200_000).toISOString(),
-      operation: 'strategy_switch',
-      actor: 'GDEF...5678',
-      details: { from: 'BENJI', to: 'Korean Sovereign' },
-    },
-    {
-      id: 'audit-3',
-      timestamp: new Date(now - 10_800_000).toISOString(),
-      operation: 'withdraw',
-      actor: 'GABC...1234',
-      details: { shares: 500, assets: 505, token: 'USDC' },
-    },
-    {
-      id: 'audit-4',
-      timestamp: new Date(now - 14_400_000).toISOString(),
-      operation: 'parameter_change',
-      actor: 'GDEF...5678',
-      details: { parameter: 'min_deposit', oldValue: 100, newValue: 50 },
-    },
-  ];
 }
 
 /**
@@ -51,12 +21,13 @@ function generateMockAuditLogs(): AuditLogEntry[] {
  *     summary: Audit log
  *     description: Returns paginated audit log entries for vault state changes.
  *     tags: [Audit]
+ *     security:
+ *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
  *         name: operation
  *         schema:
  *           type: string
- *           enum: [deposit, withdraw, strategy_switch, parameter_change]
  *       - in: query
  *         name: actor
  *         schema:
@@ -69,36 +40,62 @@ function generateMockAuditLogs(): AuditLogEntry[] {
  *     responses:
  *       200:
  *         description: Audit log entries
+ *       401:
+ *         description: Unauthorized
  */
-router.get('/', (req: Request, res: Response) => {
-  const { operation, actor, limit: limitStr } = req.query;
+router.get('/', async (req: Request, res: Response) => {
+  const { operation, action, actor, limit: limitStr } = req.query;
   const limit = Math.min(parseInt(limitStr as string, 10) || 20, 100);
 
-  let entries = generateMockAuditLogs();
+  const actionFilter =
+    (typeof operation === 'string' && operation) ||
+    (typeof action === 'string' && action) ||
+    undefined;
+  const actorFilter = typeof actor === 'string' && actor ? actor : undefined;
 
-  if (typeof operation === 'string' && operation) {
-    entries = entries.filter((e) => e.operation === operation);
-  }
+  const where = {
+    ...(actionFilter ? { action: { contains: actionFilter, mode: 'insensitive' as const } } : {}),
+    ...(actorFilter ? { actor: { contains: actorFilter, mode: 'insensitive' as const } } : {}),
+  };
 
-  if (typeof actor === 'string' && actor) {
-    entries = entries.filter((e) =>
-      e.actor.toLowerCase().includes(actor.toLowerCase()),
-    );
-  }
+  const [total, rows] = await Promise.all([
+    prisma.adminAuditLog.count({ where }),
+    prisma.adminAuditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    }),
+  ]);
 
-  const data = entries.slice(0, limit);
+  const data: AuditLogEntry[] = rows.map((row) => {
+    let details: Record<string, unknown> = {};
+    if (row.metadata) {
+      try {
+        details = JSON.parse(row.metadata);
+      } catch {
+        details = { raw: row.metadata };
+      }
+    }
+    return {
+      id: row.id,
+      timestamp: row.createdAt.toISOString(),
+      operation: row.action,
+      actor: row.actor,
+      details,
+    };
+  });
 
   res.json({
     data,
     pagination: {
       count: data.length,
       limit,
-      total: entries.length,
+      total,
       nextCursor: null,
       prevCursor: null,
       currentPage: null,
       totalPages: null,
-      hasNextPage: data.length < entries.length,
+      hasNextPage: data.length < total,
       hasPrevPage: false,
     },
     timestamp: new Date().toISOString(),

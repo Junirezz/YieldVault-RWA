@@ -6,11 +6,26 @@
  * withdrawals, transfers). Ensures that retried requests produce the same result
  * without creating duplicate side effects.
  *
- * Acceptance Criteria:
- *   ✓ Accept idempotency keys for critical mutation endpoints
- *   ✓ Reject or reuse repeated submissions safely
- *   ✓ Track pending and completed keys with expiry
- *   ✓ Document API expectations for clients
+ * TTL semantics (issue #1556)
+ * ---------------------------
+ * Two independent clocks govern a key:
+ *
+ *   1. **Replay retention TTL** (`DEFAULT_IDEMPOTENCY_TTL_MS`, 24h by default):
+ *      how long a *completed* or *failed* record is kept so a retry can replay
+ *      the stored response. It never blocks retries; it only bounds how long a
+ *      replay is available. Expired rows are removed by the cleanup task.
+ *
+ *   2. **Processing lease** (`IDEMPOTENCY_PROCESSING_LEASE_MS`, 2 minutes by
+ *      default): how long a *pending* record may remain in flight. The lease is
+ *      measured from `createdAt`. If the worker that created a pending record
+ *      crashes or hangs, a retry after the lease expires may safely reclaim the
+ *      slot (`reclaimExpiredIdempotencyRecord`) instead of being blocked with a
+ *      409 for the full 24h retention window.
+ *
+ *   The lease MUST be shorter than the retention TTL. It should also exceed the
+ *   longest expected mutation latency (the transfer orchestrator times out at
+ *   45s by default), otherwise a genuinely slow request could be reclaimed and
+ *   executed twice.
  *
  * Usage:
  *   POST /v1/vault/deposit
@@ -30,6 +45,11 @@ import type { Request, Response, NextFunction } from 'express';
  * The replay cache used by money-moving operations (deposits, withdrawals,
  * transfers) lives in `idempotencyStore.ts`; it is re-exported here so callers
  * keep a single import surface for the whole idempotency feature.
+ *
+ * The Prisma-backed helpers below are the durable, per-key record lifecycle
+ * used by `enforceIdempotency`. Keeping a single implementation (rather than a
+ * second, inline copy) avoids the duplicate declarations that previously made
+ * this module un-loadable.
  */
 export {
   idempotencyStore,
@@ -39,6 +59,7 @@ export {
   getIdempotencyHashThreshold,
   type IdempotentOperationResult,
   type IdempotencyKeyInfo,
+  type IdempotencyKeyMetadata,
   type IdempotencyMetrics,
 } from './idempotencyStore';
 
@@ -59,17 +80,16 @@ export interface IdempotencyRecord {
   operation: string;
 }
 
-export interface IdempotencyKeyMetadata {
-  keyId: string;
-  keyFormat: 'uuid' | 'nonce' | 'custom';
-  maxAge: number;
-  hint?: string;
-}
-
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-/** Default idempotency key TTL: 24 hours */
+/** Default idempotency key replay retention TTL: 24 hours. */
 export const DEFAULT_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Default processing lease for a pending record. A pending record older than
+ * this is considered abandoned (crashed/hung worker) and may be reclaimed.
+ */
+export const DEFAULT_PROCESSING_LEASE_MS = 2 * 60 * 1000;
 
 /** Minimum idempotency key length to prevent brute-force */
 export const MIN_KEY_LENGTH = 16;
@@ -86,6 +106,50 @@ export const IDEMPOTENT_ENDPOINTS = [
   'POST /admin/allowlist/add',
   'DELETE /admin/allowlist/remove',
 ] as const;
+
+/**
+ * Reads the processing-lease duration at call time so operators and tests can
+ * tune it without re-importing the module. Values below 1s are ignored.
+ */
+export function getProcessingLeaseMs(): number {
+  const parsed = parseInt(process.env.IDEMPOTENCY_PROCESSING_LEASE_MS || '', 10);
+  return Number.isFinite(parsed) && parsed >= 1_000 ? parsed : DEFAULT_PROCESSING_LEASE_MS;
+}
+
+/**
+ * True when a pending record has outlived its processing lease and may be
+ * reclaimed. Completed/failed records are never lease-reclaimed: only their
+ * retention TTL applies.
+ */
+export function isProcessingLeaseExpired(
+  record: Pick<IdempotencyRecord, 'status' | 'createdAt'>,
+  now: number = Date.now(),
+): boolean {
+  if (record.status !== 'pending') return false;
+
+  const createdAt =
+    record.createdAt instanceof Date
+      ? record.createdAt.getTime()
+      : Date.parse(String(record.createdAt));
+
+  if (!Number.isFinite(createdAt)) return false;
+  return now - createdAt >= getProcessingLeaseMs();
+}
+
+/** Seconds a caller should wait before retrying a still-leased pending key. */
+export function processingLeaseRemainingSeconds(
+  record: Pick<IdempotencyRecord, 'createdAt'>,
+  now: number = Date.now(),
+): number {
+  const createdAt =
+    record.createdAt instanceof Date
+      ? record.createdAt.getTime()
+      : Date.parse(String(record.createdAt));
+  if (!Number.isFinite(createdAt)) return Math.ceil(getProcessingLeaseMs() / 1000);
+
+  const remainingMs = createdAt + getProcessingLeaseMs() - now;
+  return Math.max(1, Math.ceil(remainingMs / 1000));
+}
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -134,7 +198,7 @@ export function hashResponseBody(body: unknown): string {
  */
 export async function getIdempotencyRecord(
   keyId: string,
-  tenantId: string
+  tenantId: string,
 ): Promise<IdempotencyRecord | null> {
   const record = await prisma.idempotencyKey.findFirst({
     where: {
@@ -171,7 +235,7 @@ export async function createIdempotencyRecord(
   walletAddress: string | undefined,
   operation: string,
   requestBody: unknown,
-  ttlMs = DEFAULT_IDEMPOTENCY_TTL_MS
+  ttlMs = DEFAULT_IDEMPOTENCY_TTL_MS,
 ): Promise<IdempotencyRecord> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlMs);
@@ -209,7 +273,7 @@ export async function completeIdempotencyRecord(
   keyId: string,
   tenantId: string,
   statusCode: number,
-  responseBody: unknown
+  responseBody: unknown,
 ): Promise<IdempotencyRecord> {
   const now = new Date();
   const responseHash = hashResponseBody(responseBody);
@@ -248,7 +312,7 @@ export async function failIdempotencyRecord(
   keyId: string,
   tenantId: string,
   statusCode: number,
-  errorBody: unknown
+  errorBody: unknown,
 ): Promise<IdempotencyRecord> {
   const now = new Date();
 
@@ -278,6 +342,73 @@ export async function failIdempotencyRecord(
   return record;
 }
 
+// ─── Processing-lease reclaim (issue #1556) ─────────────────────────────────
+
+/**
+ * Atomically reclaims a *single* expired pending record.
+ *
+ * The delete is guarded by `status: 'pending'` and `createdAt <= cutoff`, so a
+ * concurrent writer that has already completed the record (or created a newer
+ * attempt) is never clobbered. Returns `true` only when this call actually
+ * removed the stale row.
+ */
+export async function reclaimExpiredIdempotencyRecord(
+  keyId: string,
+  tenantId: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const cutoff = new Date(now - getProcessingLeaseMs());
+
+  const result = await prisma.idempotencyKey.deleteMany({
+    where: {
+      keyId,
+      tenantId,
+      status: 'pending',
+      createdAt: { lte: cutoff },
+    },
+  });
+
+  if (result.count > 0) {
+    logger.log('warn', 'Reclaimed expired idempotency processing lease', {
+      action: 'idempotency_lease_reclaim',
+      keyId,
+      tenantId,
+      leaseMs: getProcessingLeaseMs(),
+      reclaimed: result.count,
+    });
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Bulk reaper for abandoned pending records. Intended to run periodically so a
+ * crashed worker does not leave keys blocking retries until the 24h TTL.
+ */
+export async function reclaimExpiredIdempotencyRecords(
+  now: number = Date.now(),
+): Promise<number> {
+  const cutoff = new Date(now - getProcessingLeaseMs());
+
+  const result = await prisma.idempotencyKey.deleteMany({
+    where: {
+      status: 'pending',
+      createdAt: { lte: cutoff },
+    },
+  });
+
+  if (result.count > 0) {
+    logger.log('warn', 'Reaped expired idempotency processing leases', {
+      action: 'idempotency_lease_reaper',
+      reclaimed: result.count,
+      leaseMs: getProcessingLeaseMs(),
+    });
+  }
+
+  return result.count;
+}
+
 // ─── Middleware ─────────────────────────────────────────────────────────────
 
 /**
@@ -290,7 +421,12 @@ export async function failIdempotencyRecord(
  * Returns:
  *   - 400 if Idempotency-Key is missing or invalid
  *   - 409 if request is different from pending submission
- *   - Same response if resubmitting identical request
+ *   - 409 with `retryAfter` while an unexpired processing lease is held
+ *   - Same response if resubmitting an identical completed/failed request
+ *
+ * A pending record whose processing lease has expired is reclaimed and the
+ * retry is allowed to proceed, so a crashed worker cannot block the key for the
+ * full retention TTL.
  */
 export function enforceIdempotency(options: { optional?: boolean } = {}) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -332,7 +468,7 @@ export function enforceIdempotency(options: { optional?: boolean } = {}) {
     // Check for existing idempotency record
     const existingRecord = await getIdempotencyRecord(
       idempotencyKey,
-      req.tenantId || ''
+      req.tenantId || '',
     ).catch(() => null);
 
     if (existingRecord) {
@@ -350,12 +486,33 @@ export function enforceIdempotency(options: { optional?: boolean } = {}) {
           return;
         }
 
-        // Still pending - return 409 Conflict
+        // Still pending. If the worker's processing lease has expired, the
+        // original attempt is presumed crashed/hung — reclaim the slot and let
+        // this retry run. Otherwise report how long to wait.
+        if (isProcessingLeaseExpired(existingRecord)) {
+          const reclaimed = await reclaimExpiredIdempotencyRecord(
+            idempotencyKey,
+            existingRecord.tenantId,
+          ).catch(() => false);
+
+          if (reclaimed) {
+            logger.log('warn', 'Allowing retry after reclaiming expired idempotency lease', {
+              action: 'idempotency_lease_retry',
+              keyId: idempotencyKey,
+              tenantId: existingRecord.tenantId,
+              ageMs: Date.now() - existingRecord.createdAt.getTime(),
+            });
+            next();
+            return;
+          }
+        }
+
+        // Still pending - return 409 Conflict with the remaining lease time.
         res.status(409).json({
           error: 'Conflict',
           message: 'Request is still being processed. Please wait or retry with a new Idempotency-Key.',
           code: 'IDEMPOTENCY_PENDING',
-          retryAfter: 30,
+          retryAfter: processingLeaseRemainingSeconds(existingRecord),
         });
         return;
       }
@@ -434,4 +591,27 @@ export function startIdempotencyCleanupTask(intervalMs = 3600000): NodeJS.Timer 
       });
     });
   }, intervalMs);
+}
+
+/**
+ * Starts a periodic reaper for abandoned pending records (expired processing
+ * leases). Runs every minute by default; the timer is unref'd so it never keeps
+ * the process alive on its own.
+ */
+export function startIdempotencyLeaseReaper(intervalMs = 60_000): NodeJS.Timer {
+  const timer = setInterval(() => {
+    reclaimExpiredIdempotencyRecords().catch((error) => {
+      logger.log('error', 'Idempotency lease reaper failed', {
+        action: 'idempotency_lease_reaper_error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, Math.max(1_000, intervalMs));
+
+  const maybeUnref = timer as unknown as { unref?: () => void };
+  if (typeof maybeUnref.unref === 'function') {
+    maybeUnref.unref();
+  }
+
+  return timer;
 }

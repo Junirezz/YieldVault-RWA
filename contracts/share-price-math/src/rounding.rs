@@ -3,6 +3,7 @@
 //! The vault must never round in the user's favour: rounding always leaves the
 //! residual dust with the vault, so `deposit -> withdraw` round trips can never
 //! mint value out of nothing.
+
 //!
 //! | Operation  | Direction | Rounding |
 //! |------------|-----------|----------|

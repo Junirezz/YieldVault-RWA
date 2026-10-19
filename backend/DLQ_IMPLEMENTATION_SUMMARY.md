@@ -21,7 +21,7 @@ This document summarizes the comprehensive implementation of production-hardened
 ### ✅ Task #2: Implement Database Persistence for DLQ Records
 **Files Modified**:
 - `backend/prisma/schema.prisma` - Added `JobDeadLetter` model
-- `backend/prisma/migrations/20260729000000_add_job_dead_letter/migration.sql` - Created migration
+- `backend/prisma/migrations/20260729000100_add_job_dead_letter/migration.sql` - Created migration
 - `backend/src/jobGovernance.ts` - Integrated Prisma persistence
 - `backend/src/index.ts` - Added initialization call
 
@@ -173,7 +173,7 @@ This document summarizes the comprehensive implementation of production-hardened
    - Added `JobDeadLetter` model (line 304)
    - Includes all required fields and indexes
 
-4. **backend/prisma/migrations/20260729000000_add_job_dead_letter/migration.sql**
+4. **backend/prisma/migrations/20260729000100_add_job_dead_letter/migration.sql**
    - Creates `JobDeadLetter` table
    - Creates 5 indexes for efficient querying
 
@@ -207,7 +207,7 @@ This document summarizes the comprehensive implementation of production-hardened
 
 2. **Verify schema**:
    ```bash
-   npx prisma db execute --stdin < prisma/migrations/20260729000000_add_job_dead_letter/migration.sql
+   npx prisma db execute --stdin < prisma/migrations/20260729000100_add_job_dead_letter/migration.sql
    ```
 
 3. **Build backend**:

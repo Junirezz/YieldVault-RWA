@@ -1,6 +1,7 @@
 /**
  * Security utilities for XSS prevention and input validation
  */
+import { networkConfig, stellarExplorerBaseUrls } from "../config/network";
 
 /**
  * Validates Stellar transaction hash format
@@ -49,7 +50,9 @@ export function sanitizeExternalUrl(
 }
 
 /**
- * Sanitizes a transaction hash and constructs a safe Stellar Explorer URL
+ * Sanitizes a transaction hash and constructs a safe Stellar Explorer URL.
+ * Explorer base URLs come from the network config so a self-hosted explorer
+ * only needs a single `VITE_STELLAR_EXPLORER_URL` override.
  */
 export function getStellarExplorerUrl(
   transactionHash: string,
@@ -58,12 +61,8 @@ export function getStellarExplorerUrl(
   if (!isValidTransactionHash(transactionHash)) {
     return '#';
   }
-  
-  const baseUrl = network === 'mainnet' 
-    ? 'https://stellar.expert/explorer/public'
-    : 'https://stellar.expert/explorer/testnet';
-  
-  return `${baseUrl}/tx/${transactionHash}`;
+
+  return `${stellarExplorerBaseUrls[network]}/tx/${transactionHash}`;
 }
 
 /**
@@ -100,14 +99,30 @@ export function truncateSafe(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + '...';
 }
 
+function hostnameOf(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Allowed domains for external links
+ * Allowed domains for external links. The configured Horizon and explorer hosts
+ * are included so overriding them through `VITE_` variables does not silently
+ * break outbound links (both defaults are already listed).
  */
-export const ALLOWED_EXTERNAL_DOMAINS = [
-  'stellar.expert',
-  'horizon.stellar.org',
-  'horizon-testnet.stellar.org',
-  'stellar.org',
+export const ALLOWED_EXTERNAL_DOMAINS: string[] = [
+  ...new Set(
+    [
+      'stellar.expert',
+      'horizon.stellar.org',
+      'horizon-testnet.stellar.org',
+      'stellar.org',
+      hostnameOf(networkConfig.explorerUrl),
+      hostnameOf(networkConfig.horizonUrl),
+    ].filter((domain): domain is string => domain !== null),
+  ),
 ];
 
 /**

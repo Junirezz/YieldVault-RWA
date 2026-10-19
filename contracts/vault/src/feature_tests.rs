@@ -134,6 +134,35 @@ fn test_accrue_yield_fee_rounding_deterministic() {
     assert_eq!(vault.total_assets(), 330);
 }
 
+#[test]
+fn test_accrue_yield_uses_admin_enabled_fee_curve() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    assert!(!vault.fee_curve().enabled);
+
+    let curve = fee_curve::FeeCurve {
+        enabled: true,
+        base_fee_bps: 25,
+        optimal_fee_bps: 100,
+        max_fee_bps: 500,
+        optimal_utilization_bps: 8_000,
+    };
+    vault.queue_fee_curve_change(&curve);
+    let pending = vault.pending_fee_curve_change().unwrap();
+    env.ledger().set_timestamp(pending.eta);
+    vault.execute_fee_curve_change();
+    assert!(vault.fee_curve().enabled);
+
+    usdc_sa.mint(&admin, &10_000);
+    vault.accrue_yield(&10_000);
+
+    // With no strategy, utilization is zero and the enabled curve charges its base rate.
+    assert_eq!(vault.treasury_balance(), 25);
+    assert_eq!(vault.total_assets(), 9_975);
+}
+
 // ── Dispute window tests ──────────────────────────────────────────────────────
 
 #[test]

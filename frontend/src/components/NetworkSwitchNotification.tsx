@@ -7,11 +7,6 @@ interface NetworkSwitchNotificationProps {
   onSwitchNetwork?: (network: "testnet" | "mainnet") => Promise<void>;
 }
 
-function detectExpectedNetwork(): "testnet" | "mainnet" {
-  const passphrase = import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE ?? "";
-  return passphrase.includes("Public") ? "mainnet" : "testnet";
-}
-
 const NetworkSwitchNotification: React.FC<NetworkSwitchNotificationProps> = ({
   walletAddress,
   onSwitchNetwork,
@@ -56,10 +51,12 @@ const NetworkSwitchNotification: React.FC<NetworkSwitchNotificationProps> = ({
   if (!isMismatch || isDismissed) return null;
 
   const walletNet = walletNetwork || "Unknown";
-  const appNet = expectedNetwork || detectExpectedNetwork();
+  // `expectedNetwork` comes from `networkConfig` inside `useWalletNetwork`.
+  const appNet = expectedNetwork;
+  const isAppTestnet = appNet.toLowerCase() === "testnet";
 
   const getManualSteps = () => {
-    if (appNet === "testnet") {
+    if (isAppTestnet) {
       return [
         "Open your Stellar wallet extension",
         'Navigate to network settings or preferences',

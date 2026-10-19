@@ -272,7 +272,7 @@ export async function submitWithdrawal(
 
 export async function getXlmPrice(): Promise<number> {
   try {
-    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd");
+    const response = await fetch(networkConfig.xlmPriceApiUrl);
     const data = await response.json();
     return data.stellar.usd;
   } catch (error) {

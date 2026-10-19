@@ -39,8 +39,16 @@ on:
       - 'backend/**'
       - 'frontend/**'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-governance:
+    timeout-minutes: 5
     name: Verify CODEOWNERS, PR Template & Contribution Rules
     runs-on: ubuntu-latest
     steps:
@@ -50,7 +58,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
 
       - name: Enable Corepack & Setup pnpm
         run: |
@@ -80,3 +88,18 @@ jobs:
 
       - name: Run Contribution Standards Validation
         run: pnpm validate:contribution-standards
+
+      - name: Validate Testing Strategy
+        run: pnpm validate:testing-strategy
+
+      - name: Validate Sprint and Triage Conventions
+        run: pnpm validate:sprint-and-triage
+
+      - name: Validate Release Notes
+        run: pnpm validate:release-notes
+
+      - name: Validate NFR Baselines
+        run: pnpm validate:nfr-baselines
+
+      - name: Validate Incident Severity
+        run: pnpm validate:incident-severity

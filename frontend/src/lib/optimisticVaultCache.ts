@@ -178,7 +178,7 @@ export function applyOptimisticVaultPatch(
   queryClient.setQueryData<number | undefined>(keys.balanceKey, (current) =>
     typeof current === "number"
       ? Math.max(current + walletDelta, 0)
-      : current,
+      : Math.max(walletDelta, 0),
   );
   queryClient.setQueryData<PortfolioHolding[] | undefined>(
     keys.holdingsKey,

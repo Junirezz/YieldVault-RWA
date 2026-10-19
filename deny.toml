@@ -1,12 +1,15 @@
 # cargo-deny configuration for supply-chain security checks (CI: rust-security.yml).
 #
-# Advisories and licenses checks are run in CI. Entries below are ignored
+# Advisories, bans, licenses, and sources checks are run in CI. Entries below are ignored
 # only after triage; see contracts/.false-positives.md for the rationale and
 # docs/FALSE_POSITIVE_HANDLING.md for the process.
 [advisories]
 ignore = [
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
     "RUSTSEC-2026-0097", # rand: unsound only with log+thread_rng+custom logger; not used here
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
     "RUSTSEC-2024-0388", # derivative: unmaintained (informational), no known exploit
+    # Review date: 2026-10-17; Rationale & policy: docs/FALSE_POSITIVE_HANDLING.md
     "RUSTSEC-2024-0436", # paste: unmaintained (informational), no known exploit
 ]
 
@@ -27,3 +30,16 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

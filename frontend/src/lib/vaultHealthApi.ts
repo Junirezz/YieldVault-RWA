@@ -30,12 +30,16 @@ export type VaultHealthRecord = z.infer<typeof VaultHealthRecordSchema>;
  * Falls back to mock data if the real endpoint is unavailable.
  */
 export async function getVaultHealth(): Promise<VaultHealthRecord[]> {
+  let data: unknown;
   try {
-    const data = await apiClient.get<unknown>("/mock-api/vault-health.json");
-    return validate(VaultHealthResponseSchema, data, "VaultHealth");
+    data = await apiClient.get<unknown>("/mock-api/vault-health.json");
   } catch {
+    // Backend unavailable – degrade to an empty health list.
     return [];
   }
+  // Validation failures are programming/API-contract errors and must
+  // propagate instead of masquerading as "no health data".
+  return validate(VaultHealthResponseSchema, data, "VaultHealth");
 }
 
 export const VaultMetricsSchema = z.object({

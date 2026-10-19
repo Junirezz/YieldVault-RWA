@@ -21,10 +21,7 @@ use crate::VaultError;
 /// Compute protocol fee and net amount using floor rounding.
 ///
 /// Returns `(fee_amount, net_amount)` where `fee_amount + net_amount == amount`.
-pub fn calculate_protocol_fee(
-    amount: i128,
-    fee_bps: i128,
-) -> Result<(i128, i128), VaultError> {
+pub fn calculate_protocol_fee(amount: i128, fee_bps: i128) -> Result<(i128, i128), VaultError> {
     if amount < 0 {
         return Err(VaultError::InvalidAmount);
     }

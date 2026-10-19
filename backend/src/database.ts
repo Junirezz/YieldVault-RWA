@@ -90,10 +90,10 @@ export class NoopDatabasePool implements IDatabasePool {
  */
 export class DatabaseManager {
   private readonly primaryPool: IDatabasePool;
-  private readonly replicaPool: IDAtabasePool;
+  private readonly replicaPool: IDatabasePool;
   private readonly poolsAreShared: boolean;
 
-  constructor(primaryPool?: IDatabasePool, replicaPool?: IDAtabasePool) {
+  constructor(primaryPool?: IDatabasePool, replicaPool?: IDatabasePool) {
     if (primaryPool) {
       this.primaryPool = primaryPool;
       this.replicaPool = replicaPool || primaryPool;

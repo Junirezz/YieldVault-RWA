@@ -1,7 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
 import { cacheHitCount, cacheMissCount, cacheEvictionCount } from '../metrics';
 import { latencyMonitoringService } from '../latencyMonitoring';
-import { getFromCache, setInCache, redisCacheClient } from '../redisCache';
+import {
+  getFromCacheDetailed,
+  setInCache,
+  redisCacheClient,
+  redisCacheBypassCount,
+} from '../redisCache';
 
 interface CacheEntry {
   data: unknown;
@@ -129,6 +134,68 @@ export function buildCacheKey(req: Request): string {
   return `${req.method}:${pathname}:${pairs.join('&')}`;
 }
 
+// ── Cache Headers ────────────────────────────────────────────────────────────
+
+/**
+ * Requests can force a cache refresh with either `X-Cache-Bypass: true` or a
+ * standard `Cache-Control: no-cache` / `no-store` directive. The lookup is
+ * skipped and the freshly computed response replaces the stored entry, so a
+ * client can recover from a stale fail-open response without waiting for TTL.
+ */
+export function isCacheBypassRequested(req: Request): boolean {
+  const bypassHeader = req.headers['x-cache-bypass'];
+  const bypassValue = Array.isArray(bypassHeader) ? bypassHeader[0] : bypassHeader;
+  if (bypassValue === 'true' || bypassValue === '1') return true;
+
+  const cacheControl = req.headers['cache-control'];
+  const value = Array.isArray(cacheControl) ? cacheControl.join(',') : (cacheControl ?? '');
+  return /\bno-cache\b|\bno-store\b/i.test(value);
+}
+
+const CACHE_META_HEADERS = new Set([
+  'cache-control',
+  'x-cache-hit',
+  'x-cache-backend',
+  'x-cache-stale',
+  'x-cache-age',
+  'x-cache-bypass',
+  'warning',
+]);
+
+interface CacheHeaderOptions {
+  hit: boolean;
+  backend: 'redis' | 'memory' | 'none';
+  stale: boolean;
+  ageMs: number | null;
+  maxAgeSec: number;
+  bypassed: boolean;
+}
+
+/**
+ * Applies the cache metadata headers. When a response is served from the
+ * fail-open LRU fallback we mark it stale and disable downstream caching so a
+ * stale vault summary cannot be re-cached by a CDN or browser indefinitely.
+ */
+function applyCacheHeaders(res: Response, options: CacheHeaderOptions): void {
+  res.setHeader('X-Cache-Hit', String(options.hit));
+  res.setHeader('X-Cache-Backend', options.backend);
+  res.setHeader('X-Cache-Stale', String(options.stale));
+
+  if (options.ageMs !== null) {
+    res.setHeader('X-Cache-Age', String(Math.max(0, Math.floor(options.ageMs / 1000))));
+  }
+  if (options.bypassed) {
+    res.setHeader('X-Cache-Bypass', 'true');
+  }
+
+  if (options.stale) {
+    res.setHeader('Warning', '110 - "Response is stale"');
+    res.setHeader('Cache-Control', 'no-store');
+  } else {
+    res.setHeader('Cache-Control', `public, max-age=${Math.max(options.maxAgeSec, 0)}`);
+  }
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
 export interface CacheOptions {
@@ -163,6 +230,13 @@ export function cacheMiddleware(options: CacheOptions) {
 
     const route = (req.route?.path as string | undefined) ?? req.path;
     const cacheKey = buildCacheKey(req);
+    const bypassRequested = isCacheBypassRequested(req);
+
+    // The synchronous path below does not go through getFromCacheDetailed, so
+    // record bypasses there explicitly.
+    if (bypassRequested && !redisCacheClient.isConfigured) {
+      redisCacheBypassCount.inc({ route: cacheKey });
+    }
 
     // ── Redis-aware async path ───────────────────────────────────────────────
     // When Redis is configured we use the async Redis+LRU path; otherwise we
@@ -170,21 +244,28 @@ export function cacheMiddleware(options: CacheOptions) {
     if (redisCacheClient.isConfigured) {
       const hitStart = Date.now();
 
-      getFromCache(cacheKey)
-        .then((cached) => {
-          if (cached && cached.expiresAt > Date.now()) {
+      getFromCacheDetailed(cacheKey, { bypass: bypassRequested })
+        .then((lookup) => {
+          const cached = lookup.entry;
+          const now = Date.now();
+
+          if (cached && cached.expiresAt > now) {
             // Cache HIT (Redis or LRU fallback)
             cacheHitCount.inc({ method: req.method, route });
 
-            const remainingMs = cached.expiresAt - Date.now();
-            const remainingSec = Math.ceil(remainingMs / 1000);
+            const remainingSec = Math.max(0, Math.ceil((cached.expiresAt - now) / 1000));
 
-            res.setHeader('X-Cache-Hit', 'true');
-            res.setHeader('X-Cache-Backend', redisCacheClient.isReady ? 'redis' : 'memory');
-            res.setHeader('Cache-Control', `public, max-age=${Math.max(remainingSec, 0)}`);
+            applyCacheHeaders(res, {
+              hit: true,
+              backend: lookup.backend,
+              stale: lookup.stale,
+              ageMs: lookup.ageMs,
+              maxAgeSec: remainingSec,
+              bypassed: false,
+            });
 
             for (const [name, value] of Object.entries(cached.headers)) {
-              if (name !== 'Cache-Control' && name !== 'X-Cache-Hit' && name !== 'X-Cache-Backend') {
+              if (!CACHE_META_HEADERS.has(name.toLowerCase())) {
                 res.setHeader(name, value);
               }
             }
@@ -205,9 +286,14 @@ export function cacheMiddleware(options: CacheOptions) {
 
             if (status >= 200 && status < 300) {
               const maxAgeSec = Math.ceil(options.ttl / 1000);
-              res.setHeader('X-Cache-Hit', 'false');
-              res.setHeader('X-Cache-Backend', redisCacheClient.isReady ? 'redis' : 'memory');
-              res.setHeader('Cache-Control', `public, max-age=${maxAgeSec}`);
+              applyCacheHeaders(res, {
+                hit: false,
+                backend: redisCacheClient.isReady ? 'redis' : 'memory',
+                stale: false,
+                ageMs: null,
+                maxAgeSec,
+                bypassed: bypassRequested,
+              });
 
               const entry = {
                 data,
@@ -240,23 +326,32 @@ export function cacheMiddleware(options: CacheOptions) {
     }
 
     // ── Synchronous in-memory-only path (Redis not configured) ───────────────
-    const cached = responseCache.get(cacheKey);
+    const cached = bypassRequested ? undefined : responseCache.get(cacheKey);
 
     if (cached && cached.expiresAt > Date.now()) {
       // Cache HIT
       const hitStart = Date.now();
       cacheHitCount.inc({ method: req.method, route });
 
-      const remainingMs = cached.expiresAt - Date.now();
-      const remainingSec = Math.ceil(remainingMs / 1000);
+      const now = Date.now();
+      const remainingSec = Math.ceil((cached.expiresAt - now) / 1000);
+      const ageMs =
+        Number.isFinite(cached.ttl) && Number.isFinite(cached.expiresAt)
+          ? Math.max(0, now - (cached.expiresAt - cached.ttl))
+          : null;
 
-      res.setHeader('X-Cache-Hit', 'true');
-      res.setHeader('X-Cache-Backend', 'memory');
-      res.setHeader('Cache-Control', `public, max-age=${Math.max(remainingSec, 0)}`);
+      applyCacheHeaders(res, {
+        hit: true,
+        backend: 'memory',
+        stale: false,
+        ageMs,
+        maxAgeSec: remainingSec,
+        bypassed: false,
+      });
 
       // Restore any other cached response headers
       for (const [name, value] of Object.entries(cached.headers)) {
-        if (name !== 'Cache-Control' && name !== 'X-Cache-Hit' && name !== 'X-Cache-Backend') {
+        if (!CACHE_META_HEADERS.has(name.toLowerCase())) {
           res.setHeader(name, value);
         }
       }
@@ -281,9 +376,14 @@ export function cacheMiddleware(options: CacheOptions) {
       // R3 C3: only cache 2xx responses
       if (status >= 200 && status < 300) {
         const maxAgeSec = Math.ceil(options.ttl / 1000);
-        res.setHeader('X-Cache-Hit', 'false');
-        res.setHeader('X-Cache-Backend', 'memory');
-        res.setHeader('Cache-Control', `public, max-age=${maxAgeSec}`);
+        applyCacheHeaders(res, {
+          hit: false,
+          backend: 'memory',
+          stale: false,
+          ageMs: null,
+          maxAgeSec,
+          bypassed: bypassRequested,
+        });
 
         responseCache.set(cacheKey, {
           data,
@@ -353,23 +453,16 @@ export function triggerCacheInvalidation(
       }
 
       if (!Array.isArray(hookPatterns)) {
-        throw new TypeError('invalidation hook must return an array of patterns');
-      }
-
-      if (!Array.isArray(hookPatterns)) {
         console.error(
           JSON.stringify({
             level: 'error',
-            event: 'invalidation_hook_error',
-            error: `InvalidationHook must return string[], got ${typeof hookPatterns}`,
-            eventType,
             event: 'invalidation_hook_invalid_return',
             error: 'Invalidation hook must return an array of cache key patterns',
+            eventType,
           }),
         );
         continue;
       }
-      patterns.push(...hookPatterns);
       patterns.push(...hookPatterns.filter((pattern): pattern is string => typeof pattern === 'string'));
     } catch (err) {
       console.error(

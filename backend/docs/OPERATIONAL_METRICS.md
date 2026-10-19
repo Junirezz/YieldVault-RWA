@@ -529,7 +529,24 @@ LATENCY_UNHEALTHY_THRESHOLD=5000
 
 # Failure rate threshold for "unhealthy" (percent)
 FAILURE_RATE_UNHEALTHY_THRESHOLD=10
+
+# Prometheus scrape credential for GET /metrics (optional; default open)
+METRICS_AUTH_TOKEN=your-scrape-token
 ```
+
+### Scrape Authentication
+
+When `METRICS_AUTH_TOKEN` (or `METRICS_SCRAPE_TOKEN` or `PROMETHEUS_BEARER_TOKEN`) is set in the environment, the `GET /metrics` endpoint requires authentication:
+
+```
+Authorization: Bearer <METRICS_AUTH_TOKEN>
+```
+or
+```
+Authorization: ApiKey <METRICS_AUTH_TOKEN>
+```
+Requests without a valid credential will receive a `401 Unauthorized` plain-text response.
+
 
 ## Data Privacy
 

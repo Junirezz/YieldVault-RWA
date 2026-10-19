@@ -23,12 +23,11 @@
 //! 11. invariant suite     – centralized helpers + deposit/withdraw/invest/divest/rebalance
 //!     scenarios (see `invariant_tests.rs`, Issue #735)
 
-#![cfg(test)]
 extern crate std;
 
 use super::*;
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
-use crate::strategy::{StrategyClient, StrategyTrait};
+use crate::strategy::StrategyTrait;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::xdr::{ContractEventBody, ScSymbol, ScVal};
@@ -2354,6 +2353,9 @@ fn test_whitelist_consistency_with_set_strategy() {
 
     // Removal of the active vault strategy is rejected (#1637)
     assert!(vault.try_whitelist_strategy(&benji_strategy, &false).is_err());
+    assert!(vault
+        .try_whitelist_strategy(&benji_strategy, &false)
+        .is_err());
     assert!(vault.is_strategy_whitelisted(&benji_strategy));
 }
 

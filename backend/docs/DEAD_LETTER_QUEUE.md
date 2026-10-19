@@ -546,7 +546,7 @@ DELETE FROM "JobDeadLetter"
 
 ## 8. Production Deployment Checklist
 
-- [ ] Database migration applied (`20260729000000_add_job_dead_letter`)
+- [ ] Database migration applied (`20260729000100_add_job_dead_letter`)
 - [ ] `JobDeadLetter` table exists with all indexes
 - [ ] `initializeJobGovernance()` called at app startup
 - [ ] API key roles include `JOBS_WRITE` permission for operators

@@ -148,6 +148,45 @@ export function classifyWalletConnectionError(
 }
 
 /**
+ * In-band error payload returned by Freighter API calls such as `getAddress`,
+ * `isAllowed` and `isConnected` (see the `@stellar/freighter-api` typings).
+ */
+export interface FreighterApiErrorLike {
+  code?: number | string;
+  message?: string;
+}
+
+/**
+ * Map a Freighter API error payload onto a typed connection error.
+ *
+ * Freighter reports some failures *in-band* (`{ address: "", error: {...} }`)
+ * rather than throwing, so callers must classify the payload explicitly.
+ * Without this the error details are dropped and every failure collapses into
+ * "no address". The classification reuses the same rules as thrown errors so
+ * the UI keeps showing the code-driven i18n copy.
+ */
+export function classifyFreighterApiError(
+  error: FreighterApiErrorLike | null | undefined,
+): WalletConnectionError {
+  const rawMessage =
+    error && typeof error.message === "string" ? error.message.trim() : "";
+  const codeSuffix =
+    error && error.code !== undefined && error.code !== null
+      ? ` [freighter code ${String(error.code)}]`
+      : "";
+
+  const classified = classifyWalletConnectionError(
+    rawMessage === "" ? "unknown" : rawMessage,
+  );
+  const message =
+    rawMessage === ""
+      ? `Unknown Freighter API error.${codeSuffix}`
+      : `${rawMessage}${codeSuffix}`;
+
+  return { ...classified, message };
+}
+
+/**
  * Pure reducer for wallet connection transitions.
  * Invalid events for the current status are no-ops (except ADDRESS_SYNCED / disconnect).
  */

@@ -6,8 +6,6 @@
 //! Run with:
 //!   cargo test -p vault invariant
 
-#![cfg(test)]
-
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, Env};

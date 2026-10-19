@@ -13,6 +13,7 @@ import type { Request, Response } from 'express';
 import { getPrismaClient } from './prismaClient';
 import { logger } from './middleware/structuredLogging';
 import { getCurrentTraceId } from './tracing';
+import { sendApiError } from './middleware/apiError';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -347,9 +348,9 @@ export async function automatedReconciliationSummaryHandler(
 ): Promise<void> {
   const summary = getLastAutomatedReconciliationSummary();
   if (!summary) {
-    res.status(404).json({
-      error: 'Not Found',
+    sendApiError(req, res, {
       status: 404,
+      code: 'RECONCILIATION_SUMMARY_NOT_FOUND',
       message: 'No automated reconciliation summary available yet',
     });
     return;

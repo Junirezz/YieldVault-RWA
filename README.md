@@ -91,6 +91,22 @@ For detailed setup instructions, prerequisites, validation steps, and troublesho
 
 For a complete environment variable reference with defaults, required flags, and production recommendations, see **[Environment Variable Matrix](./docs/ENV_VARIABLE_MATRIX.md)**.
 
+### Makefile Targets
+
+The root `Makefile` wraps the existing pnpm scripts so common tasks have one entry point. Run `make` (or `make help`) to list them:
+
+| Command         | What it runs                                                                 |
+| --------------- | ---------------------------------------------------------------------------- |
+| `make help`     | Lists all targets (default goal)                                             |
+| `make install`  | `pnpm check:pnpm-version` then `pnpm install` for the whole workspace        |
+| `make test`     | `pnpm test:all` (backend Jest, frontend Vitest, root script tests)           |
+| `make lint`     | ESLint for `backend` and `frontend`                                          |
+| `make build`    | `pnpm build` (API schemas, backend, frontend)                                |
+| `make format`   | Prettier for `backend`, plus `cargo fmt --all` when `cargo` is installed     |
+| `make validate` | Contribution, testing-strategy, triage, release-notes, NFR, CODEOWNERS, PR template and Renovate validators |
+
+The targets use GNU make and POSIX shell, so they run on Linux, macOS and Git Bash on Windows. Git Bash does not ship `make`; install it with `choco install make`, `scoop install make`, or `winget install ezwinports.make`. Set `PNPM` to override the pnpm binary, for example `make install PNPM="corepack pnpm"`.
+
 ## API Documentation
 
 Generate contract and frontend API docs:

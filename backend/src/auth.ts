@@ -40,7 +40,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { logger } from './middleware/structuredLogging';
 import { sendApiError } from './middleware/apiError';
 import Redis from 'ioredis';
-import { normalizeWalletAddress } from './walletUtils';
+import { normalizeWalletAddress, formatWalletForLog } from './walletUtils';
 import { walletAliasMappingService } from './walletAliasService';
 import {
   walletNonceService,
@@ -500,7 +500,7 @@ export async function revokeAccessToken(
 
   logger.log('info', 'Access token revoked', {
     reason,
-    wallet: payload.sub.slice(0, 8) + '…',
+    wallet: formatWalletForLog(payload.sub),
     jti: payload.jti,
   });
 }
@@ -521,7 +521,7 @@ export async function revokeAllAccessTokens(
 
   logger.log('info', 'All access tokens revoked for wallet', {
     reason,
-    wallet: normalizedAddress.slice(0, 8) + '…',
+    wallet: formatWalletForLog(normalizedAddress),
     revokedCount: removed,
   });
 
@@ -566,7 +566,7 @@ export async function revokeCurrentSession(refreshToken: string): Promise<void> 
 
   logger.log('info', 'Current session revoked', {
     familyId: entry.familyId,
-    wallet: entry.walletAddress.slice(0, 8) + '…',
+    wallet: formatWalletForLog(entry.walletAddress),
   });
 }
 
@@ -598,7 +598,7 @@ export async function revokeAllSessions(walletAddress: string): Promise<number> 
       inMem.revokedFamilies.add(familyId);
     }
     logger.log('info', 'All sessions revoked for wallet', {
-      wallet: normalizedAddress.slice(0, 8) + '…',
+      wallet: formatWalletForLog(normalizedAddress),
       revokedCount,
     });
     return revokedCount;
@@ -607,7 +607,7 @@ export async function revokeAllSessions(walletAddress: string): Promise<number> 
   // Redis path: we cannot efficiently scan all tokens for a wallet without a
   // secondary index. Return 1 to indicate the operation was attempted.
   logger.log('info', 'logout-all requested (Redis: family-level revocation only)', {
-    wallet: normalizedAddress.slice(0, 8) + '…',
+    wallet: formatWalletForLog(normalizedAddress),
   });
   return 1;
 }
@@ -671,7 +671,7 @@ export async function rotateRefreshToken(oldRefreshToken: string): Promise<Token
     await refreshTokenStore.deleteFamily(entry.familyId);
     logger.log('warn', 'Refresh token replay detected – entire session invalidated', {
       familyId: entry.familyId,
-      wallet: entry.walletAddress.slice(0, 8) + '…',
+      wallet: formatWalletForLog(entry.walletAddress),
     });
     throw new SessionRevokedError(
       'Refresh token has already been used. Session revoked for security.',
@@ -860,7 +860,7 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
   const tokens = await issueTokenPair(canonicalWallet);
 
   logger.log('info', 'JWT tokens issued on login', {
-    wallet: canonicalWallet.slice(0, 8) + '…',
+    wallet: formatWalletForLog(canonicalWallet),
     identitySource,
   });
 

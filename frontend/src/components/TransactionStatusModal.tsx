@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Check, AlertCircle, Copy, X } from "./icons";
 import { getStellarExplorerUrl, sanitizeExternalLink } from "../lib/security";
+import { networkConfig } from "../config/network";
 
 export type TransactionStatusState = "submitting" | "confirming" | "success" | "failure";
 
@@ -15,16 +16,6 @@ interface TransactionStatusModalProps {
   onSuccess?: () => void;
   onFailure?: (error: string) => void;
   mockMode?: boolean;
-}
-
-const HORIZON_BASE_URL = "https://horizon-testnet.stellar.org";
-
-function resolveNetworkMode(): "testnet" | "mainnet" {
-  const networkPassphrase =
-    import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE ?? "";
-  return networkPassphrase.toLowerCase().includes("public")
-    ? "mainnet"
-    : "testnet";
 }
 
 const TransactionStatusModal: React.FC<TransactionStatusModalProps> = ({
@@ -105,7 +96,7 @@ const TransactionStatusModal: React.FC<TransactionStatusModalProps> = ({
 
   // Check transaction status on Stellar Horizon
   const checkTxStatus = useCallback(async (hash: string): Promise<boolean> => {
-    const url = `${HORIZON_BASE_URL}/transactions/${hash}`;
+    const url = `${networkConfig.horizonUrl}/transactions/${hash}`;
     try {
       const response = await fetch(url);
       if (response.ok) {
@@ -223,7 +214,12 @@ const TransactionStatusModal: React.FC<TransactionStatusModalProps> = ({
   };
 
   const explorerUrl = txHash
-    ? sanitizeExternalLink(getStellarExplorerUrl(txHash, resolveNetworkMode()))
+    ? sanitizeExternalLink(
+        getStellarExplorerUrl(
+          txHash,
+          networkConfig.isTestnet ? "testnet" : "mainnet",
+        ),
+      )
     : null;
 
   return createPortal(

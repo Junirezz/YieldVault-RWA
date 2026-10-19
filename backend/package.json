@@ -2,6 +2,9 @@
   "name": "yieldviault-backend",
   "version": "1.0.0",
   "description": "YieldVault Stellar RWA Backend API",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "dist/index.js",
   "scripts": {
     "predev": "npm run build:schemas",

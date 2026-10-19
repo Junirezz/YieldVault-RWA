@@ -65,3 +65,92 @@ groups:
         annotations:
           summary: "YieldVault external dependency is slow"
           description: "P95 {{ $labels.dependency }} {{ $labels.operation }} latency is above 2 seconds."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#database-and-dependencies"
+
+      - alert: YieldVaultBackgroundJobUnhealthy
+        expr: job_health_status == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault background job is unhealthy"
+          description: "Job {{ $labels.job_name }} is reporting degraded health."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#background-jobs"
+
+      - alert: YieldVaultJobDeadLettersPresent
+        expr: job_dead_letter_count > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault background job has dead letters"
+          description: "Job {{ $labels.job_name }} has {{ $value }} dead-letter records."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#background-jobs"
+
+      - alert: YieldVaultDatabaseBackupUnhealthy
+        expr: job_health_status{job_name="databaseBackup"} == 0 or job_dead_letter_count{job_name="databaseBackup"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault database backup job is unhealthy"
+          description: "The scheduled database backup job is reporting degraded health."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#database-backups"
+
+      - alert: YieldVaultEventOutboxLagHigh
+        expr: event_outbox_oldest_pending_age_seconds > 60 or event_outbox_pending_count > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault event outbox is lagging"
+          description: "Outbox events are older than 60 seconds or more than 100 events are awaiting relay."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#webhooks-and-event-outbox"
+
+      - alert: YieldVaultEmailQueueLagHigh
+        expr: email_queue_oldest_pending_age_seconds > 300 or email_queue_pending_count > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault email queue is lagging"
+          description: "Queued email is older than 5 minutes or more than 100 emails are awaiting delivery."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#email-queue"
+
+      - alert: YieldVaultWebhookDeliveryBacklog
+        expr: webhook_delivery_failed_count > 0 or webhook_delivery_pending_count > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault webhook deliveries are failing or backlogged"
+          description: "Webhook deliveries have failures or more than 100 pending deliveries."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#webhooks-and-event-outbox"
+
+      - alert: YieldVaultDatabaseQueryLatencyHigh
+        expr: histogram_quantile(0.95, sum by (model, action, le) (rate(db_query_duration_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault database query latency is high"
+          description: "P95 {{ $labels.model }}.{{ $labels.action }} query latency is above the 1-second SLO."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#database-and-dependencies"
+
+      - alert: YieldVaultDatabaseQueryBudgetBreaches
+        expr: sum(rate(db_query_budget_breach_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault database query budgets are being exceeded"
+          description: "Database query budget breaches continue to occur."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#database-and-dependencies"

@@ -48,6 +48,8 @@ export interface PaginationMeta {
   prevCursor: string | null;
   /** Current page number (for offset-based pagination). */
   currentPage: number | null;
+  /** Legacy alias for currentPage. */
+  page?: number;
   /** Total number of pages (if total is known). */
   totalPages: number | null;
   /** Whether there are more items after this page. */
@@ -219,7 +221,6 @@ export function parsePaginationQuery(
     } else {
       query.page = 1;
     }
-  }
   }
 
   // Parse sortBy
@@ -454,6 +455,7 @@ export function createPaginationEnvelope(meta: {
     nextCursor: meta.nextCursor ?? null,
     prevCursor: meta.prevCursor ?? null,
     currentPage: meta.currentPage ?? null,
+    page: meta.currentPage ?? undefined,
     totalPages: meta.totalPages ?? null,
     hasNextPage: meta.hasNextPage,
     hasPrevPage: meta.hasPrevPage,
