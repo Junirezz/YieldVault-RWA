@@ -35,6 +35,11 @@ import { Button } from "./ui/Button";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useFeeEstimate } from "../hooks/useFeeEstimate";
 import { useSlippage } from "../hooks/useSlippage";
+import {
+  SLIPPAGE_MAX_PERCENT,
+  SLIPPAGE_MIN_PERCENT,
+  isValidSlippagePercent,
+} from "../forms/schemas/slippageSchema";
 import HelpIcon from "./ui/HelpIcon";
 import EmptyState from "./ui/EmptyState";
 import { useTranslation } from "../i18n";
@@ -281,6 +286,23 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   const { slippage, setSlippage, presets, isHighSlippage, minReceived } = useSlippage();
   const [customSlippage, setCustomSlippage] = useState("");
+  const [customSlippageError, setCustomSlippageError] = useState<string | null>(null);
+
+  const handleCustomSlippageChange = (value: string) => {
+    setCustomSlippage(value);
+    if (value.trim() === "") {
+      setCustomSlippageError(null);
+      return;
+    }
+    const n = parseFloat(value);
+    if (isValidSlippagePercent(n)) {
+      setSlippage(n);
+      setCustomSlippageError(null);
+    } else {
+      // Reject out-of-range values and announce the error.
+      setCustomSlippageError(t("vaultDashboard.slippageOutOfRange"));
+    }
+  };
   const { isStale: feeIsStale, ageText: feeAgeText } = useStaleIndicator(feeLastUpdated);
 
   // Create validation schema based on transaction type and current state
@@ -1600,19 +1622,21 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                       {p}%
                                     </button>
                                   ))}
+                                  <label
+                                    htmlFor="vault-custom-slippage"
+                                    style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}
+                                  >
+                                    {t("vaultDashboard.customSlippageLabel")}
+                                  </label>
                                   <input
+                                    id="vault-custom-slippage"
                                     type="number"
-                                    min="0"
-                                    max="50"
+                                    min={SLIPPAGE_MIN_PERCENT}
+                                    max={SLIPPAGE_MAX_PERCENT}
                                     step="0.1"
                                     placeholder={t("vaultDashboard.customPlaceholder")}
                                     value={customSlippage}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setCustomSlippage(v);
-                                      const n = parseFloat(v);
-                                      if (isFinite(n) && n >= 0) setSlippage(n);
-                                    }}
+                                    onChange={(e) => handleCustomSlippageChange(e.target.value)}
                                     style={{
                                       width: "80px",
                                       padding: "5px 8px",
@@ -1624,9 +1648,24 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
                                       outline: "none",
                                     }}
                                     aria-label={t("vaultDashboard.customSlippageAria")}
+                                    aria-invalid={customSlippageError ? true : undefined}
+                                    aria-describedby={customSlippageError ? "vault-custom-slippage-error" : undefined}
                                   />
                                   <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>%</span>
                                 </div>
+                                {customSlippageError && (
+                                  <p
+                                    id="vault-custom-slippage-error"
+                                    role="alert"
+                                    style={{
+                                      margin: "6px 0 0",
+                                      fontSize: "0.78rem",
+                                      color: "var(--text-error)",
+                                    }}
+                                  >
+                                    {customSlippageError}
+                                  </p>
+                                )}
                                 {isHighSlippage && (
                                   <div className="flex items-center gap-xs animate-in fade-in duration-200" style={{ marginTop: "8px" }}>
                                     <AlertTriangle size={13} color="var(--text-warning, #f59e0b)" />

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  SLIPPAGE_RANGE_ERROR,
+  isValidSlippagePercent,
+} from "./slippageSchema";
 
 export const settingsFormSchema = z.object({
   username: z
@@ -9,11 +13,11 @@ export const settingsFormSchema = z.object({
   email: z.string().email("Please enter a valid email address."),
   slippageTolerance: z
     .string()
-    .refine((val) => !isNaN(Number(val)) && Number(val) >= 0.1 && Number(val) <= 5.0, {
-      message: "Slippage tolerance must be between 0.1% and 5.0%.",
+    .refine((val) => isValidSlippagePercent(Number(val)), {
+      message: SLIPPAGE_RANGE_ERROR,
     }),
   currency: z.enum(["USD", "EUR", "GBP", "XLM"], {
-    errorMap: () => ({ message: "Please select a supported currency." }),
+    error: () => ({ message: "Please select a supported currency." }),
   }),
 });
 

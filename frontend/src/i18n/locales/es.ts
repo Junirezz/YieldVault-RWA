@@ -849,6 +849,8 @@ export const es = {
     slippageTolerance: "Tolerancia de deslizamiento",
     customPlaceholder: "Personalizado",
     customSlippageAria: "Porcentaje de deslizamiento personalizado",
+    customSlippageLabel: "Deslizamiento personalizado",
+    slippageOutOfRange: "Introduce un deslizamiento entre 0.1% y 50%.",
     highSlippageWarning: "Deslizamiento alto — podrías recibir significativamente menos de lo esperado.",
     minimumReceived: "Mínimo recibido",
     apyQuoteStale: "Cotización de APY desactualizada {{age}}",

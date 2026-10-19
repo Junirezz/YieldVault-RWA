@@ -875,6 +875,8 @@ export const en = {
     slippageTolerance: "Slippage Tolerance",
     customPlaceholder: "Custom",
     customSlippageAria: "Custom slippage percentage",
+    customSlippageLabel: "Custom slippage",
+    slippageOutOfRange: "Enter a slippage between 0.1% and 50%.",
     highSlippageWarning: "High slippage — you may receive significantly less than expected.",
     minimumReceived: "Minimum received",
     apyQuoteStale: "APY quote stale {{age}}",
