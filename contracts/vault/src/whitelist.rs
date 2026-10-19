@@ -6,6 +6,7 @@ use soroban_sdk::{Address, Env};
 
 use crate::strategy_registration::{self, STATE_RETIRED};
 use crate::upgrade::get_admin;
+use crate::DataKey;
 
 /// Errors that can occur during whitelist operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +31,8 @@ impl SecureWhitelist {
 
         match strategy_registration::read_registration_state(env, strategy) {
             None => {
-                let _ = strategy_registration::register_strategy_internal(env, strategy);
+                strategy_registration::register_strategy_internal(env, strategy)
+                    .map_err(|_| WhitelistError::OperationFailed)?;
             }
             Some(STATE_RETIRED) => {
                 return Err(WhitelistError::OperationFailed);
@@ -51,8 +53,10 @@ impl SecureWhitelist {
             return Err(WhitelistError::Unauthorized);
         }
 
-        strategy_registration::remove_registration(env, strategy);
-        Ok(())
+        let active_vault_strategy: Option<Address> =
+            env.storage().instance().get(&DataKey::Strategy);
+        strategy_registration::remove_registration_guarded(env, strategy, active_vault_strategy)
+            .map_err(|_| WhitelistError::OperationFailed)
     }
 
     pub fn is_strategy_whitelisted(env: &Env, strategy: &Address) -> bool {
@@ -193,6 +197,46 @@ mod tests {
             // Removing already removed strategy is safe/idempotent
             assert_eq!(SecureWhitelist::remove_strategy(&env, &admin, &strategy), Ok(()));
             assert_eq!(read_registration_state(&env, &strategy), None);
+        });
+    }
+
+    #[test]
+    fn test_remove_strategy_rejects_active_and_retired() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::YieldVault, ());
+
+        env.as_contract(&contract_id, || {
+            let admin = Address::generate(&env);
+            let active = Address::generate(&env);
+            let retired = Address::generate(&env);
+            let in_use = Address::generate(&env);
+            set_admin(&env, &admin);
+
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &active), Ok(()));
+            assert_eq!(activate_strategy_internal(&env, &active), Ok(STATE_ACTIVE));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &active),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &active), Some(STATE_ACTIVE));
+
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &retired), Ok(()));
+            assert_eq!(retire_strategy_internal(&env, &retired, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &retired),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &retired), Some(STATE_RETIRED));
+
+            // Pending strategy that is the vault's current strategy is protected too
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &in_use), Ok(()));
+            env.storage().instance().set(&DataKey::Strategy, &in_use);
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &in_use),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &in_use), Some(STATE_PENDING));
         });
     }
 
