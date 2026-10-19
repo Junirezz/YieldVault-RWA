@@ -19,11 +19,10 @@ export function useUsdcBalance(walletAddress: string | null) {
       if (e2eStub) {
         return 1250.5;
       }
-      try {
-        return await fetchUsdcBalance(walletAddress);
-      } catch {
-        return 0;
-      }
+      // Let failures propagate so React Query exposes `isError`/`error` and
+      // consumers can render an error state instead of a misleading zero
+      // balance (issue #1624).
+      return fetchUsdcBalance(walletAddress);
     },
     staleTime: 10000, // 10 seconds
     enabled: !!walletAddress, // Only fetch when wallet is connected
@@ -47,11 +46,10 @@ export function useXlmBalance(walletAddress: string | null) {
       if (e2eStub) {
         return 5;
       }
-      try {
-        return await fetchXlmBalance(walletAddress);
-      } catch {
-        return 0;
-      }
+      // Let failures propagate so React Query exposes `isError`/`error` and
+      // consumers can render an error state instead of a misleading zero
+      // balance (issue #1624).
+      return fetchXlmBalance(walletAddress);
     },
     staleTime: 10000, // 10 seconds
     enabled: !!walletAddress, // Only fetch when wallet is connected

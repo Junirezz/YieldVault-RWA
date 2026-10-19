@@ -8,9 +8,11 @@ interface HomeProps {
   walletAddress: string | null;
   usdcBalance: number;
   xlmBalance: number;
+  /** True when the balance queries failed, so children can show an error state. */
+  balancesError?: boolean;
 }
 
-const Home: React.FC<HomeProps> = ({ walletAddress, usdcBalance, xlmBalance }) => {
+const Home: React.FC<HomeProps> = ({ walletAddress, usdcBalance, xlmBalance, balancesError = false }) => {
   const headingRef = usePageHeadingFocus<HTMLHeadingElement>();
   const { t } = useTranslation();
 
@@ -31,7 +33,12 @@ const Home: React.FC<HomeProps> = ({ walletAddress, usdcBalance, xlmBalance }) =
 
       <SecurityAuditOfferBanner />
 
-      <VaultDashboard walletAddress={walletAddress} usdcBalance={usdcBalance} xlmBalance={xlmBalance} />
+      <VaultDashboard
+        walletAddress={walletAddress}
+        usdcBalance={usdcBalance}
+        xlmBalance={xlmBalance}
+        balancesError={balancesError}
+      />
     </>
   );
 };

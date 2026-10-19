@@ -16,7 +16,8 @@ export type { DisconnectReason } from "../hooks/useWalletConnection";
 
 interface WalletConnectProps {
   walletAddress: string | null;
-  usdcBalance?: number;
+  /** `null` renders the balance as unavailable instead of a misleading zero. */
+  usdcBalance?: number | null;
   onConnect: (address: string) => void;
   onDisconnect: (reason?: import("../hooks/useWalletConnection").DisconnectReason) => void;
 }
@@ -149,11 +150,17 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
             minWidth: "130px",
             textAlign: "right",
           }}
-          aria-label="USDC wallet balance"
+          aria-label={usdcBalance === null ? t("wallet.balanceUnavailable") : t("wallet.usdcBalanceAria")}
         >
           USDC:{" "}
-          <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-            {usdcBalance.toFixed(2)}
+          <span
+            style={{
+              color: usdcBalance === null ? "var(--text-error)" : "var(--text-primary)",
+              fontWeight: 600,
+            }}
+            title={usdcBalance === null ? t("wallet.balanceUnavailable") : undefined}
+          >
+            {usdcBalance === null ? "—" : usdcBalance.toFixed(2)}
           </span>
         </div>
 

@@ -185,7 +185,8 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
     },
   });
 
-  const { data: referralStats } = useReferralStats(walletAddress);
+  const { data: referralStats, isError: referralStatsError } =
+    useReferralStats(walletAddress);
   const { referralLink, referralCode } = useReferralLink(walletAddress);
 
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
@@ -387,6 +388,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
             locale={locale}
             formatSensitiveCurrency={formatSensitiveCurrency}
             referralStats={referralStats}
+            referralStatsError={referralStatsError}
             onShareClick={() => setShowShareModal(true)}
           />
 

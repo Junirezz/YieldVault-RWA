@@ -76,8 +76,9 @@ function AppContent() {
   const location = useLocation();
   const { sessionState, intendedPath, setSessionExpired, clearSessionExpired, renewSession } = useAuth();
   usePageViewTracking();
-  const { data: usdcBalance = 0 } = useUsdcBalance(walletAddress);
-  const { data: xlmBalance = 0 } = useXlmBalance(walletAddress);
+  const { data: usdcBalance, isError: usdcBalanceError } = useUsdcBalance(walletAddress);
+  const { data: xlmBalance, isError: xlmBalanceError } = useXlmBalance(walletAddress);
+  const balancesError = usdcBalanceError || xlmBalanceError;
   const { tvl } = useVault();
   const role = useMemo(() => resolveUserRole(walletAddress), [walletAddress]);
   useRestoreGuardedRoute(role);
@@ -188,12 +189,12 @@ function AppContent() {
         <NetworkBannerStack
           walletAddress={walletAddress}
           lastKnownTvl={tvl}
-          lastKnownBalance={usdcBalance}
+          lastKnownBalance={usdcBalance ?? 0}
         />
         <div className="app-container">
           <Navbar
             walletAddress={walletAddress}
-            usdcBalance={usdcBalance}
+            usdcBalance={usdcBalanceError ? null : usdcBalance ?? 0}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
             role={role}
@@ -208,8 +209,9 @@ function AppContent() {
                     <RouteErrorBoundary routeName="home">
                       <LazyHome
                         walletAddress={walletAddress}
-                        usdcBalance={usdcBalance}
-                        xlmBalance={xlmBalance}
+                        usdcBalance={usdcBalance ?? 0}
+                        xlmBalance={xlmBalance ?? 0}
+                        balancesError={balancesError}
                       />
                     </RouteErrorBoundary>
                   }
