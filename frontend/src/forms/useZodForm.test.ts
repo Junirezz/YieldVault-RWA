@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import type { FormEvent } from "react";
 import { useForm } from "./useForm";
 import { settingsFormSchema } from "./schemas/settingsFormSchema";
-import { z } from "zod";
 
 describe("Zod Form Validation & Submission States", () => {
   const initialValues = {
     username: "",
     email: "invalid-email",
-    slippageTolerance: "10.0",
+    slippageTolerance: "55.0",
     currency: "USD" as const,
   };
 
@@ -23,7 +23,7 @@ describe("Zod Form Validation & Submission States", () => {
     expect(isValid).toBe(false);
     expect(result.current.errors.username).toBe("Username must be at least 3 characters.");
     expect(result.current.errors.email).toBe("Please enter a valid email address.");
-    expect(result.current.errors.slippageTolerance).toBe("Slippage tolerance must be between 0.1% and 5.0%.");
+    expect(result.current.errors.slippageTolerance).toBe("Slippage tolerance must be between 0.1% and 50%.");
   });
 
   it("clears field errors when valid data is entered", () => {
@@ -59,7 +59,7 @@ describe("Zod Form Validation & Submission States", () => {
 
     const onSubmitSuccess = vi.fn().mockResolvedValue(undefined);
 
-    const fakeEvent = { preventDefault: vi.fn() } as any;
+    const fakeEvent = { preventDefault: vi.fn() } as unknown as FormEvent;
 
     await act(async () => {
       await result.current.handleSubmit(onSubmitSuccess)(fakeEvent);
