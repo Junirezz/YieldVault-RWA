@@ -14,6 +14,14 @@
  * Prometheus counters are exported so operators can track Redis vs in-memory
  * hit/miss ratios from the /metrics endpoint.
  *
+ * Fail-open staleness (issue #1553):
+ *   When Redis is configured but unavailable, reads fall back to the in-memory
+ *   LRU. Those reads are reported as `stale` by `getFromCacheDetailed`, counted
+ *   by `redis_cache_fallback_total` / `redis_cache_stale_serve_total`, and the
+ *   cache middleware emits `X-Cache-Stale` + `Warning` and disables downstream
+ *   caching. A request may force a refresh with `X-Cache-Bypass: true` or
+ *   `Cache-Control: no-cache`.
+ *
  * Environment variables:
  *   REDIS_URL                  – Redis connection URL (required to enable Redis)
  *   REDIS_CACHE_KEY_PREFIX     – Key namespace prefix (default: "cache:")
@@ -103,6 +111,48 @@ export const redisCacheConnectionStatus = createOrGet(
       registers: [defaultRegister],
     }),
   'redis_cache_connection_status',
+);
+
+/**
+ * Counts reads that were served from the in-memory LRU because Redis was
+ * configured but unreachable. A non-zero rate means responses may be stale.
+ */
+export const redisCacheFallbackCount = createOrGet(
+  () =>
+    new Counter({
+      name: 'redis_cache_fallback_total',
+      help: 'Total cache reads served from the in-memory LRU fallback while Redis was unavailable',
+      labelNames: ['route', 'reason'] as const,
+      registers: [defaultRegister],
+    }),
+  'redis_cache_fallback_total',
+);
+
+/**
+ * Counts stale responses actually returned to clients from the fallback store.
+ * Alert on this counter: a sustained rate means the vault summary can drift.
+ */
+export const redisCacheStaleServeCount = createOrGet(
+  () =>
+    new Counter({
+      name: 'redis_cache_stale_serve_total',
+      help: 'Total stale cache entries served from the in-memory fallback',
+      labelNames: ['route', 'backend'] as const,
+      registers: [defaultRegister],
+    }),
+  'redis_cache_stale_serve_total',
+);
+
+/** Counts requests that explicitly bypassed the cache (force refresh). */
+export const redisCacheBypassCount = createOrGet(
+  () =>
+    new Counter({
+      name: 'redis_cache_bypass_total',
+      help: 'Total cache reads skipped because the caller requested a force refresh',
+      labelNames: ['route'] as const,
+      registers: [defaultRegister],
+    }),
+  'redis_cache_bypass_total',
 );
 
 // ─── Redis Client ─────────────────────────────────────────────────────────────
@@ -373,36 +423,128 @@ export const redisCacheClient = new RedisCacheClient();
 
 // ─── High-level Cache Operations ─────────────────────────────────────────────
 
+/** Which store produced a cache lookup result. */
+export type CacheBackend = 'redis' | 'memory' | 'none';
+
+/** Options accepted by {@link getFromCacheDetailed}. */
+export interface CacheReadOptions {
+  /**
+   * Force a cache miss so the caller re-computes and re-populates the entry.
+   * Used to implement `Cache-Control: no-cache` / `X-Cache-Bypass` requests.
+   */
+  bypass?: boolean;
+}
+
+/**
+ * Rich result of a cache lookup. The middleware uses the extra metadata to
+ * emit staleness headers and metrics for the in-memory fail-open path.
+ */
+export interface CacheLookupResult {
+  entry: RedisCacheEntry | null;
+  backend: CacheBackend;
+  /** True when a fallback (LRU) entry was served while Redis was configured but unavailable. */
+  stale: boolean;
+  /** True when the entry came from the in-memory fallback, even if Redis is not configured. */
+  fromFallback: boolean;
+  /** Approximate age of the entry in milliseconds, when known. */
+  ageMs: number | null;
+}
+
+/** Age of an entry derived from its TTL and expiry timestamp. */
+function entryAgeMs(entry: RedisCacheEntry, now: number): number | null {
+  if (!Number.isFinite(entry.ttl) || !Number.isFinite(entry.expiresAt)) return null;
+  const writtenAt = entry.expiresAt - entry.ttl;
+  return Math.max(0, now - writtenAt);
+}
+
+function lookupResult(
+  entry: RedisCacheEntry | null,
+  backend: CacheBackend,
+  stale: boolean,
+  fromFallback: boolean,
+  now: number,
+): CacheLookupResult {
+  return {
+    entry,
+    backend,
+    stale,
+    fromFallback,
+    ageMs: entry ? entryAgeMs(entry, now) : null,
+  };
+}
+
+/**
+ * Read a cache entry together with failover metadata.
+ *
+ * Order of preference:
+ *   1. Redis (when configured and healthy)
+ *   2. In-memory LRU (fail-open)
+ *
+ * A fallback hit is marked `stale: true` whenever Redis was configured but
+ * unavailable: the entry may be arbitrarily old and the caller MUST surface
+ * that to clients (see the cache middleware's `X-Cache-Stale` header).
+ */
+export async function getFromCacheDetailed(
+  key: string,
+  options: CacheReadOptions = {},
+): Promise<CacheLookupResult> {
+  const now = Date.now();
+
+  if (options.bypass) {
+    redisCacheBypassCount.inc({ route: key });
+    return lookupResult(null, 'none', false, false, now);
+  }
+
+  // Try Redis first
+  if (redisCacheClient.isReady) {
+    const entry = await redisCacheClient.get(key);
+    if (entry && entry.expiresAt > now) {
+      redisCacheHitCount.inc({ route: key });
+      return lookupResult(entry, 'redis', false, false, now);
+    }
+    if (entry) {
+      // Stale entry – Redis should have expired it but hadn't yet; treat as miss
+      redisCacheMissCount.inc({ route: key });
+      return lookupResult(null, 'redis', false, false, now);
+    }
+    redisCacheMissCount.inc({ route: key });
+    return lookupResult(null, 'redis', false, false, now);
+  }
+
+  // Redis is configured but not ready (outage) -> fail open to LRU.
+  // When Redis is not configured at all the LRU is the primary store and a hit
+  // is not stale.
+  const redisConfigured = redisCacheClient.isConfigured;
+  const reason = redisConfigured ? 'redis_unavailable' : 'redis_not_configured';
+
+  const lruEntry = responseCache.get(key) as RedisCacheEntry | undefined;
+  if (lruEntry && lruEntry.expiresAt > now) {
+    redisCacheHitCount.inc({ route: key });
+    if (redisConfigured) {
+      redisCacheFallbackCount.inc({ route: key, reason });
+      redisCacheStaleServeCount.inc({ route: key, backend: 'memory' });
+    }
+    return lookupResult(lruEntry, 'memory', redisConfigured, true, now);
+  }
+
+  redisCacheMissCount.inc({ route: key });
+  if (redisConfigured) {
+    redisCacheFallbackCount.inc({ route: key, reason });
+  }
+  return lookupResult(null, 'memory', false, true, now);
+}
+
 /**
  * Read a cache entry by key, consulting Redis first then falling back to the
  * in-memory LRU store.
  *
  * Returns `null` when neither source has a valid (non-expired) entry.
+ * Callers that need to know whether a hit came from the fail-open fallback
+ * should use {@link getFromCacheDetailed} instead.
  */
 export async function getFromCache(key: string): Promise<RedisCacheEntry | null> {
-  // Try Redis first
-  if (redisCacheClient.isReady) {
-    const entry = await redisCacheClient.get(key);
-    if (entry && entry.expiresAt > Date.now()) {
-      redisCacheHitCount.inc({ route: key });
-      return entry;
-    }
-    if (entry) {
-      // Stale entry – Redis should have expired it but hadn't yet; treat as miss
-      redisCacheMissCount.inc({ route: key });
-      return null;
-    }
-    redisCacheMissCount.inc({ route: key });
-    return null;
-  }
-
-  // Fall back to in-memory LRU
-  const lruEntry = responseCache.get(key);
-  if (lruEntry && lruEntry.expiresAt > Date.now()) {
-    return lruEntry as RedisCacheEntry;
-  }
-
-  return null;
+  const result = await getFromCacheDetailed(key);
+  return result.entry;
 }
 
 /**

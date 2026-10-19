@@ -20,7 +20,6 @@
   "scripts": {
     "check:pnpm-version": "node scripts/check-pnpm-version.js",
     "prepare": "husky",
-    "test": "vitest run",
     "lint:staged": "lint-staged",
     "commitlint": "commitlint",
     "build:schemas": "npm --prefix packages/api-schemas run build",
@@ -78,6 +77,5 @@
   },
   "resolutions": {
     "lodash": "^4.17.21"
-  },
-  
+  }
 }

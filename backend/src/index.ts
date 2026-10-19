@@ -8,21 +8,11 @@ dotenv.config();
 import { initTracing, shutdownTracing, getCurrentTraceId } from './tracing';
 initTracing();
 
+import 'express-async-errors';
 import express, { Express, Request, Response, NextFunction, ErrorRequestHandler } from 'express';
-import NodeCache from 'node-cache';
-import {
-  loginHandler,
-  nonceHandler,
-  refreshHandler,
-  requireAuth,
-  verifyJwt,
-  revokeAccessToken,
-  revokeAllAccessTokens,
-  revokeCurrentSession,
-  revokeAllSessions,
-} from './auth';
+import { loginHandler, nonceHandler, refreshHandler, requireAuth, revokeAccessToken, revokeAllAccessTokens, revokeCurrentSession, revokeAllSessions } from './auth';
 import vaultListRouter from './routes/vaults';
-import { loginHandler, nonceHandler, refreshHandler, requireAuth, verifyJwt } from './auth';
+import { loginHandler, nonceHandler, refreshHandler, requireAuth } from './auth';
 import {
   authLimiter,
   authIpLimiter,
@@ -34,10 +24,12 @@ import {
   getRateLimitMonitorSnapshot,
   loadConfig as loadRateLimiterConfig,
 } from './rateLimiter';
+import { createAdminAuditMiddleware } from './auditLog';
+import { getActorFromRequest } from './adminConfigChangeAudit';
 import { idempotencyStore } from './idempotency';
 import { createAdminAuditMiddleware, getAuditLogs, countAuditLogs, getAuditLogMetrics } from './auditLog';
 import { AuditLogQuerySchema } from './middleware/validate';
-import { recordAdminAuditLog } from './adminAudit';
+import { recordAdminAuditLog, recordAdminAuditLogInBackground } from './adminAudit';
 import {
   recordAdminConfigChange, listAdminConfigChanges, getActorFromRequest
 } from './adminConfigChangeAudit';
@@ -70,45 +62,18 @@ import {
 } from './errors';
 import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
-import { cacheMiddleware, invalidateCache, getCacheStats, registerInvalidationHook } from './middleware/cache';
+import { registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
 import { getRedisCacheHealth, redisCacheClient } from './redisCache';
 import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, TransferResolveBodySchema, TransferResolveParamsSchema } from './middleware/validate';
+import { redisCacheClient } from './redisCache';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema } from './middleware/validate';
 import { tieredJsonBodyParser } from './middleware/payloadLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
-import { timeoutMiddleware, createTimeoutFor } from './middleware/timeoutMiddleware';
-import {
-  setWithdrawalLimitOverride,
-  listWithdrawalLimitAuditEntries,
-} from './middleware/withdrawalDailyLimit';
+import { timeoutMiddleware } from './middleware/timeoutMiddleware';
 import { adaptiveThrottleMiddleware } from './middleware/adaptiveThrottle';
-import {
-  validateApiKey,
-  authenticateApiKeyValue,
-  registerApiKey,
-  rotateApiKey,
-  revokeApiKey,
-  getApiKeyMetadata,
-  restoreApiKey,
-  hasRequiredApiKeyRole,
-  normalizeApiKeyRole,
-} from './middleware/apiKeyAuth';
-import {
-  API_KEY_AUDIT_ACTIONS,
-  isApiKeyHash,
-  getApiKeyFingerprintFromHash,
-  getApiKeyFingerprintFromValue,
-  resolveApiKeyAuditActor,
-  recordApiKeyAuditEvent,
-  listApiKeyAuditEvents,
-} from './apiKeyAudit';
-import {
-  addAddress,
-  removeAddress,
-  listAddresses,
-  allowlistSize,
-} from './middleware/allowlist';
-import { adminRbacMiddleware, assertWebhookParameterUpdate } from './middleware/rbac';
+import { validateApiKey } from './middleware/apiKeyAuth';
+import { adminRbacMiddleware } from './middleware/rbac';
 import { apiVersionMiddleware } from './middleware/versionNegotiation';
 import { versionRoutingMiddleware } from './middleware/versionRouting';
 import { createVersionDiscoveryRouter } from './routes/apiVersions';
@@ -119,22 +84,10 @@ import vaultsListRouter from './routes/vaults';
 import walletAliasRouter from './walletAliasEndpoints';
 import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
-import {
-  buildPortfolioHoldingsResponse,
-  buildTransactionExportArtifact,
-  buildTransactionsResponse,
-  buildVaultHistoryResponse,
-  TRANSACTION_PAGINATION_CONFIG,
-} from './listEndpoints';
-import { createPaginatedResponse, createPaginationEnvelope, encodeCursor } from './pagination';
+import { buildTransactionsResponse } from './listEndpoints';
 import listRouter from './listEndpoints';
-import referralRouter, {
-  buildReferralCodeErrorBody,
-  buildReferralStatsErrorBody,
-  buildReferralStatsNotFoundBody,
-} from './referralEndpoints';
+import referralRouter from './referralEndpoints';
 import auditLogRouter from './auditLogEndpoints';
-import { referralService } from './referralService';
 import {
   register,
   httpRequestCount,
@@ -157,89 +110,13 @@ import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
 import { getEventPollingHealth, startEventPollingService, stopEventPollingService } from './eventPollingService';
 import { eventOutboxService } from './eventOutbox';
-import { prisma, getPrismaRuntimeConfig } from './prisma';
-import { getPrismaClient } from './prismaClient';
-import { computeVaultApy } from './services/apy';
-import {
-  verifyWebhookEndpoint,
-  registerWebhookEndpoint,
-  updateWebhookEndpoint,
-  deleteWebhookEndpoint,
-  restoreWebhookEndpoint,
-  listWebhookEndpoints,
-  listWebhookDeliveryPage,
-  getWebhookDeliveryMetrics,
-  createWebhookSignature,
-  verifyWebhookSignature,
-  listWebhookDeadLetters,
-  retryWebhookDeadLetter,
-  initializeWebhookEndpoints,
-  WEBHOOK_SCHEMA_VERSION,
-} from './webhookDelivery';
-import { webhookDeduplicationStore } from './webhookDeduplication';
+import { prisma } from './prisma';
+import { initializeWebhookEndpoints, WEBHOOK_SCHEMA_VERSION } from './webhookDelivery';
 import { healthProbeService } from './healthProbe';
-import { writeAheadAuditLog } from './writeAheadAuditLog';
-import {
-  withdrawalRecoveryCoordinator,
-  type WithdrawalSagaStatus,
-} from './withdrawalRecovery';
-import {
-  maintenanceModeMiddleware,
-  getMaintenanceModeState,
-  updateMaintenanceModeState,
-  logMaintenanceTransition,
-} from './maintenanceMode';
-import {
-  buildMaintenanceStatusPayload,
-  cancelMaintenanceWindow,
-  listMaintenanceWindows,
-  scheduleMaintenanceWindow,
-  startMaintenanceWindowScheduler,
-} from './maintenanceWindow';
-import {
-  buildExportMetadataHeaderValue,
-  getExportJobById,
-  listExportJobs,
-  recordExportJob,
-  resolveExportGeneratedBy,
-} from './exportJobs';
-import { parseUtcDateRange, DateRangeParseError } from './dateRange';
-import { backfillApySnapshots } from './apySnapshot';
-import {
-  getJobMetrics,
-  getJobHealthStatus,
-  listDeadLetters,
-  getDeadLetterRecord,
-  retryDeadLetter,
-  resolveDeadLetter,
-  discardDeadLetter,
-  bulkRetryDeadLetters,
-  bulkDiscardDeadLetters,
-  processDeadLetterQueue,
-  type JobName,
-  type DeadLetterStatus,
-} from './jobGovernance';
-import {
-  createBulkExportJob,
-  getBulkExportJob,
-  listBulkExportJobs,
-  cancelBulkExportJob,
-  processBulkExportJob,
-  getBulkExportArtifact,
-} from './bulkExportJobs';
-import { normalizeWalletAddress } from './walletUtils';
-import { emailQueueService } from './emailQueue';
-import {
-  createOrResumeTransactionBackfill,
-  getTransactionBackfillJob,
-  listTransactionBackfillJobs,
-} from './transactionBackfill';
-import {
-  createExportManifest,
-  getExportManifestById,
-  listExportManifests,
-  verifyExportManifestChecksum,
-} from './exportManifest';
+import { withdrawalRecoveryCoordinator } from './withdrawalRecovery';
+import { maintenanceModeMiddleware } from './maintenanceMode';
+import { buildMaintenanceStatusPayload, startMaintenanceWindowScheduler } from './maintenanceWindow';
+import { getJobHealthStatus } from './jobGovernance';
 import {
   reconciliationReportHandler,
   automatedReconciliationSummaryHandler,
@@ -261,6 +138,13 @@ import {
   listInDoubtTransfers,
   resolveInDoubtTransfer,
 } from './transferOrchestrator';
+import { startIdempotencyRetentionScheduler } from './idempotencyRetention';
+import vaultRoutes from './routes/vault';
+import transactionRoutes from './routes/transactions';
+import webhookRoutes, { apiV1WebhookRoutes } from './routes/webhooks';
+import exportRoutes from './routes/exports';
+import adminRoutes from './routes/admin';
+import { cache } from './routes/shared';
 
 declare global {
   namespace Express {
@@ -279,10 +163,18 @@ const port = process.env.PORT || 3000;
 const nodeEnv = process.env.NODE_ENV || 'development';
 const logLevel = (process.env.LOG_LEVEL || (nodeEnv === 'development' ? 'debug' : 'info')) as LogLevel;
 const drainTimeout = parseInt(process.env.DRAIN_TIMEOUT_MS || '30000', 10);
-const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CACHE_VAULT_METRICS_TTL_MS || '60000', 10);
 
 // Configure logger
 logger.configure(logLevel);
+
+if (nodeEnv !== 'test') {
+  process.on('unhandledRejection', (reason: unknown) => {
+    logger.error('Unhandled promise rejection', {
+      error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  });
+}
 
 // Coordinates SIGTERM/SIGINT: stops new requests immediately, drains
 // in-flight ones, then runs DB/job cleanup — see onShutdown registrations
@@ -294,412 +186,6 @@ void walletAliasMappingService.loadFromDatabase().catch((error) => {
     error: error instanceof Error ? error.message : String(error),
   });
 });
-
-// Health check cache to track dependency status
-const cache = new NodeCache({ stdTTL: 30 });
-
-type VaultHealthResponse = {
-  vaultId: string;
-  status: 'healthy' | 'degraded';
-  uptimeSeconds: number;
-  metrics: {
-    totalAssets: string;
-    totalShares: string;
-    sharePrice: string;
-    apy: number;
-  };
-  dependencies: Record<string, 'up' | 'down' | 'degraded'>;
-  cached: boolean;
-  timestamp: string;
-};
-
-/**
- * Reads the vault summary from the VaultState table and the most recent
- * SharePriceSnapshot for the share price. Falls back to zeroed values when
- * the database is unavailable (e.g., during startup or in tests).
- */
-async function buildVaultSummaryResponseFromDb(): Promise<{
-  totalAssets: string;
-  totalShares: string;
-  sharePrice: string;
-  apy: number;
-  timestamp: string;
-}> {
-  try {
-    const prismaClient = getPrismaClient();
-    const [vaultState, latestSnapshot] = await Promise.all([
-      prismaClient.vaultState.findUnique({ where: { id: 1 } }),
-      prismaClient.sharePriceSnapshot
-        .findFirst({ orderBy: { recordedAt: 'desc' } })
-        .catch(() => null),
-    ]);
-
-    const totalAssets = vaultState?.totalAssets ?? '0';
-    const totalShares = vaultState?.totalShares ?? '0';
-    const sharePrice = latestSnapshot?.sharePrice ?? '1.000000';
-
-    return {
-      totalAssets,
-      totalShares,
-      sharePrice,
-      apy: 0, // APY is computed by the nightly snapshot job; placeholder until first run
-      timestamp: new Date().toISOString(),
-    };
-  } catch {
-    // Fail-open: return safe zero values so the endpoint never 500s
-    return {
-      totalAssets: '0',
-      totalShares: '0',
-      sharePrice: '1.000000',
-      apy: 0,
-      timestamp: new Date().toISOString(),
-    };
-  }
-}
-
-async function buildVaultHealthResponse(vaultId: string): Promise<VaultHealthResponse> {
-  const cacheKey = `vault-health:${vaultId}`;
-  const cached = cache.get<Omit<VaultHealthResponse, 'cached'>>(cacheKey);
-  if (cached) {
-    return { ...cached, cached: true };
-  }
-
-  const [summary, probes] = await Promise.all([
-    buildVaultSummaryResponseFromDb(),
-    healthProbeService.checkAll().catch(
-      () => ({}) as Record<string, { status: 'up' | 'down' | 'degraded' }>,
-    ),
-  ]);
-  const dependencies = Object.fromEntries(
-    Object.entries(probes).map(([name, state]) => [name, state.status]),
-  ) as Record<string, 'up' | 'down' | 'degraded'>;
-  const degraded = Object.values(dependencies).some((state) => state !== 'up');
-  const body = {
-    vaultId,
-    status: degraded ? 'degraded' as const : 'healthy' as const,
-    uptimeSeconds: Math.floor(process.uptime()),
-    metrics: {
-      totalAssets: summary.totalAssets,
-      totalShares: summary.totalShares,
-      sharePrice: summary.sharePrice,
-      apy: summary.apy,
-    },
-    dependencies,
-    timestamp: new Date().toISOString(),
-  };
-
-  cache.set(cacheKey, body, 5);
-  return { ...body, cached: false };
-}
-
-function resolveActingAdminAddress(req: Request): string {
-  const address =
-    req.get('x-admin-address') ||
-    req.get('x-admin-id') ||
-    req.get('x-wallet-address') ||
-    'unknown';
-  return address === 'unknown' ? address : normalizeWalletAddress(address);
-}
-
-function parseLimited(v: unknown, fallback: number, min: number, max: number): number {
-  const n = parseInt(String(v ?? ''), 10);
-  return Number.isNaN(n) ? fallback : Math.min(Math.max(n, min), max);
-}
-
-function isDryRunRequest(req: Request): boolean {
-  const value = req.body?.dryRun ?? req.query.dryRun;
-  return value === true || value === 'true' || value === '1';
-}
-
-function countInclusiveDays(start: string, end: string): number {
-  const startMs = Date.parse(start + 'T00:00:00.000Z');
-  const endMs = Date.parse(end + 'T00:00:00.000Z');
-  return Math.floor((endMs - startMs) / 86400000) + 1;
-}
-
-function paginateByLimit<T>(rows: T[], limit: number): { data: T[]; hasNextPage: boolean } {
-  const hasNextPage = rows.length > limit;
-  return {
-    data: hasNextPage ? rows.slice(0, limit) : rows,
-    hasNextPage,
-  };
-}
-
-function sendStandardListEnvelope<T>(
-  res: Response,
-  input: {
-    data: T[];
-    limit: number;
-    hasNextPage?: boolean;
-    hasPrevPage?: boolean;
-    nextCursor?: string;
-    total?: number;
-    statusCode?: number;
-    extras?: Record<string, unknown>;
-  },
-): void {
-  const payload = createPaginatedResponse(input.data, {
-    count: input.data.length,
-    total: input.total ?? input.data.length,
-    nextCursor: input.nextCursor ?? null,
-    prevCursor: null,
-    currentPage: null,
-    totalPages: null,
-    hasNextPage: input.hasNextPage ?? false,
-    hasPrevPage: input.hasPrevPage ?? false,
-    limit: input.limit,
-  });
-
-  res.status(input.statusCode ?? 200).json({
-    ...payload,
-    ...(input.extras || {}),
-  });
-}
-
-async function buildReferralStatsSnapshot(wallet: string) {
-  const normalizedWallet = normalizeWalletAddress(wallet);
-
-  try {
-    const stats = await referralService.getReferralStats(normalizedWallet);
-
-    if (!stats) {
-      // Must be the exact envelope GET /api/v1/referrals/:wallet returns, not
-      // a hand-rolled stand-in — admin impersonation is compared against that
-      // endpoint field-for-field by the governance contract test.
-      return {
-        statusCode: 404,
-        body: buildReferralStatsNotFoundBody(),
-      };
-    }
-
-    return {
-      statusCode: 200,
-      body: stats,
-    };
-  } catch (error) {
-    // Same reasoning as the 404 above. The route reports a failed lookup as a
-    // 500 with the canonical envelope; letting the rejection escape instead
-    // would 500 the entire impersonation response with a different message, so
-    // one broken sub-resource would take the whole snapshot with it (#1319).
-    logger.log('error', 'Error building referral stats snapshot', {
-      error: error instanceof Error ? error.message : String(error),
-      wallet: normalizedWallet,
-    });
-    return {
-      statusCode: 500,
-      body: buildReferralStatsErrorBody(),
-    };
-  }
-}
-
-async function buildReferralCodeSnapshot(wallet: string) {
-  const normalizedWallet = normalizeWalletAddress(wallet);
-
-  try {
-    const code = await referralService.getOrCreateReferralCode(normalizedWallet);
-    return {
-      statusCode: 200,
-      body: { code },
-    };
-  } catch (error) {
-    logger.log('error', 'Error building referral code snapshot', {
-      error: error instanceof Error ? error.message : String(error),
-      wallet: normalizedWallet,
-    });
-    return {
-      statusCode: 500,
-      body: buildReferralCodeErrorBody(),
-    };
-  }
-}
-
-async function buildWalletTransactionsSnapshot(wallet: string) {
-  const normalizedWallet = normalizeWalletAddress(wallet);
-  const prisma = getPrismaClient();
-  // Shared with GET /api/v1/transactions so the proxy can never drift to a
-  // different page size than the endpoint it stands in for (#1322).
-  const limit = TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20;
-  const where = { user: normalizedWallet };
-  const [total, transactions] = await Promise.all([
-    prisma.transaction.count({ where }),
-    prisma.transaction.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: limit + 1,
-    }),
-  ]);
-  const hasNextPage = transactions.length > limit;
-  const data = hasNextPage ? transactions.slice(0, limit) : transactions;
-
-  return createPaginatedResponse(
-    data,
-    createPaginationEnvelope({
-      count: data.length,
-      limit,
-      total,
-      hasNextPage,
-      hasPrevPage: false,
-      nextCursor: hasNextPage && data.length > 0 ? encodeCursor(data[data.length - 1].id) : null,
-    }),
-  );
-}
-
-async function buildImpersonatedVaultState(wallet: string) {
-  const normalizedWallet = normalizeWalletAddress(wallet);
-  return {
-    walletAddress: normalizedWallet,
-    // Impersonation must show an admin exactly what the wallet's own
-    // dashboard would show, so read the same DB-backed summary
-    // GET /api/v1/vault/summary serves.
-    summary: await buildVaultSummaryResponseFromDb(),
-    transactions: await buildWalletTransactionsSnapshot(normalizedWallet),
-    portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: normalizedWallet }),
-    vaultHistory: buildVaultHistoryResponse({}),
-    referralStats: await buildReferralStatsSnapshot(normalizedWallet),
-    referralCode: await buildReferralCodeSnapshot(normalizedWallet),
-  };
-}
-
-function resolveTransactionExportAccess(req: Request):
-  | { kind: 'admin'; walletAddress?: string }
-  | { kind: 'user'; walletAddress: string }
-  | null {
-  const authHeader = req.get('authorization') || '';
-  const walletAddress =
-    typeof req.query.walletAddress === 'string' ? normalizeWalletAddress(req.query.walletAddress) : undefined;
-
-  const apiKeyMatch = authHeader.match(/^ApiKey\s+(.+)$/i);
-  if (apiKeyMatch) {
-    const authenticated = authenticateApiKeyValue(apiKeyMatch[1]);
-    if (!authenticated) {
-      return null;
-    }
-    req.authApiKeyHash = authenticated.hash;
-    req.authApiKeyRole = authenticated.role;
-    return {
-      kind: 'admin',
-      walletAddress: walletAddress || undefined,
-    };
-  }
-
-  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!bearerMatch) {
-    return null;
-  }
-
-  const payload = verifyJwt(bearerMatch[1]);
-  const userWallet = normalizeWalletAddress(payload.sub);
-  if (walletAddress && walletAddress !== userWallet) {
-    throw new Error('FORBIDDEN_WALLET_EXPORT');
-  }
-
-  return {
-    kind: 'user',
-    walletAddress: userWallet,
-  };
-}
-
-function buildTransactionExportFilename(format: 'csv' | 'json'): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `transaction-history-${timestamp}.${format}`;
-}
-
-async function handleTransactionExport(req: Request, res: Response): Promise<void> {
-  const format = req.query.format === 'csv' ? 'csv' : req.query.format === 'json' ? 'json' : null;
-  if (!format) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'format query parameter must be either csv or json',
-    });
-    return;
-  }
-
-  let access;
-  try {
-    access = resolveTransactionExportAccess(req);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'FORBIDDEN_WALLET_EXPORT') {
-      res.status(403).json({
-        error: 'Forbidden',
-        status: 403,
-        message: 'Users may only export their own wallet transactions',
-      });
-      return;
-    }
-
-    res.status(401).json({
-      error: 'Unauthorized',
-      status: 401,
-      message: error instanceof Error ? error.message : 'Invalid authorization header',
-    });
-    return;
-  }
-
-  if (!access) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      status: 401,
-      message: 'Authorization header must contain a Bearer token or ApiKey',
-    });
-    return;
-  }
-
-  const exportQuery = {
-    type: typeof req.query.type === 'string' ? req.query.type : undefined,
-    status: typeof req.query.status === 'string' ? req.query.status : undefined,
-    sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
-    sortOrder: (
-      req.query.sortOrder === 'asc' || req.query.sortOrder === 'desc'
-        ? req.query.sortOrder
-        : undefined
-    ) as 'asc' | 'desc' | undefined,
-    walletAddress: access.walletAddress,
-    startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
-    endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
-  };
-
-  try {
-    const artifact = buildTransactionExportArtifact(format, exportQuery);
-    const fileName = buildTransactionExportFilename(format);
-    const job = await recordExportJob({
-      format,
-      fileName,
-      contentType: artifact.contentType,
-      checksum: artifact.checksum,
-      checksumAlgorithm: artifact.checksumAlgorithm,
-      generatedBy: resolveExportGeneratedBy(req),
-      walletAddress: access.walletAddress,
-      rowCount: artifact.rowCount,
-      filters: {
-        type: exportQuery.type || null,
-        status: exportQuery.status || null,
-        sortBy: exportQuery.sortBy || null,
-        sortOrder: exportQuery.sortOrder || null,
-        startDate: exportQuery.startDate || null,
-        endDate: exportQuery.endDate || null,
-        walletAddress: exportQuery.walletAddress || null,
-      },
-    });
-
-    res.setHeader('Content-Type', artifact.contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('X-Export-Job-Id', job.id);
-    res.setHeader('X-Export-Checksum', artifact.checksum);
-    res.setHeader('X-Export-Checksum-Algorithm', artifact.checksumAlgorithm);
-    res.setHeader('X-Export-Metadata', buildExportMetadataHeaderValue(job));
-    res.status(200).send(artifact.body);
-  } catch (error) {
-    logger.log('error', 'Transaction export failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    res.status(500).json({
-      error: 'Internal Server Error',
-      status: 500,
-      message: 'Failed to generate transaction export',
-    });
-  }
-}
 
 // â”€â”€â”€ Rate Limiting Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Issue #455: Use the Redis-backed limiter factory from rateLimiter.ts.
@@ -1061,6 +547,7 @@ apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
 apiV1.use('/transactions', transactionRouter);
 apiV1.use('/audit-logs', auditLogRouter);
+apiV1.get('/admin/diagnostics', validateApiKey, diagnosticsBundleHandler);
 apiV1.use('/', listRouter);
 
 // Register vault data cache invalidation hooks
@@ -1087,40 +574,8 @@ apiV1.post('/auth/login', authIpLimiter, authLimiter, authUserLimiter, validate(
  */
 apiV1.post('/auth/refresh', authIpLimiter, authLimiter, authUserLimiter, validate({ body: RefreshSchema }), refreshHandler);
 
-/**
- * POST /api/v1/webhooks — authenticated clients register an HTTPS callback
- * instead of polling for transaction/vault events.
- */
-apiV1.post('/webhooks', requireAuth, validate({ body: WebhookRegisterSchema }), (req: Request, res: Response) => {
-  try {
-    const { url, eventTypes, enabled, secret } = req.body;
-    const endpoint = registerWebhookEndpoint({
-      url,
-      eventTypes,
-      enabled: enabled ?? true,
-      secret,
-    });
-    res.status(201).json({
-      message: 'Webhook endpoint registered',
-      endpoint,
-    });
-  } catch (error) {
-    res.status(422).json({
-      error: 'Unprocessable Entity',
-      status: 422,
-      message: error instanceof Error ? error.message : 'Invalid webhook configuration',
-    });
-  }
-});
-
-apiV1.get('/webhooks', requireAuth, validate({ query: PaginationQuerySchema }), (req: Request, res: Response) => {
-  const includeDeleted = req.query.includeDeleted === 'true';
-  const endpoints = listWebhookEndpoints(includeDeleted);
-  res.status(200).json({
-    endpoints,
-    metrics: getWebhookDeliveryMetrics(),
-  });
-});
+// Webhook registration on /api/v1 (src/routes/webhooks.ts).
+apiV1.use(apiV1WebhookRoutes);
 
 // Admin routes share API-key authentication and role-based authorization.
 app.use('/admin', validateApiKey, adminRbacMiddleware);
@@ -1231,55 +686,6 @@ app.post('/auth/logout-all', (req: Request, res: Response) => {
   res.redirect(301, '/api/v1/auth/logout-all');
 });
 
-// /api/vault/* â†’ /api/v1/vault/*
-app.get('/api/vault/summary', (_req: Request, res: Response) => {
-  res.setHeader('deprecation', 'true');
-  res.redirect(301, '/api/v1/vault/summary');
-});
-app.get('/api/vault/transactions/export', (_req: Request, res: Response) => {
-  res.redirect(301, '/api/v1/vault/transactions/export');
-});
-app.get('/api/vault/metrics', (_req: Request, res: Response) => {
-  res.redirect(301, '/api/v1/vault/metrics');
-});
-app.get('/api/vault/apy', (_req: Request, res: Response) => {
-  res.redirect(301, '/api/v1/vault/apy');
-});
-
-// /webhooks/verify â†’ /api/v1/webhooks/verify
-app.post('/webhooks/verify', validate({ body: WebhookVerifyBodySchema }), (req: Request, res: Response) => {
-  const { secret, payload, signature } = req.body || {};
-  if (typeof secret !== 'string' || !secret.trim()) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'secret is required and must be a non-empty string',
-    });
-    return;
-  }
-
-  if (typeof payload === 'undefined') {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'payload is required',
-    });
-    return;
-  }
-
-  const computedSignature = createWebhookSignature(secret, payload);
-  const verified =
-    typeof signature === 'string' && signature.length > 0
-      ? verifyWebhookSignature(secret, payload, signature)
-      : null;
-
-  res.status(200).json({
-    algorithm: 'HMAC-SHA256',
-    signature: computedSignature,
-    verified,
-  });
-});
-
 // â”€â”€â”€ Backward-compatibility redirects for list/router-mounted paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Generic catch-all redirects for unversioned /vault/*, /referrals/*,
 // /transactions/*, /portfolio/* paths â†’ /api/v1 equivalents.
@@ -1300,215 +706,71 @@ app.use('/portfolio', (req: Request, res: Response) => {
   res.redirect(301, `/api/v1/portfolio${req.path}${qs}`);
 });
 
-// â”€â”€â”€ Versioned export & summary endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-app.get('/api/v1/vault/transactions/export', handleTransactionExport);
-
-// â”€â”€â”€ Versioned vault summary/metrics/apy endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/**
- * GET /api/v1/vaults/:id/health - monitoring-friendly vault health payload.
- *
- * Kept separate from /health so external monitors can target one vault and
- * receive vault metrics, dependency state, uptime, and cache status. Responses
- * are cached for five seconds to avoid turning health probes into DB pressure.
- */
-app.get(
-  '/api/v1/vaults/:id/health',
-  readsLimiter,
-  createTimeoutFor.read({
-    timeoutMs: 1500,
-    routeName: '/api/v1/vaults/:id/health',
-    message: 'Vault health took too long to load',
-    fallbackResponse: () => ({
-      error: 'Service Unavailable',
-      status: 503,
-      code: 'VAULT_HEALTH_TIMEOUT',
-      message: 'Vault health is temporarily unavailable. Please retry shortly.',
-      timestamp: new Date().toISOString(),
-    }),
-  }),
-  async (req: Request, res: Response) => {
-    const health = await buildVaultHealthResponse(req.params.id);
-    res.status(health.status === 'healthy' ? 200 : 503).json(health);
-  },
-);
-
-app.get('/api/v2/vaults/:id/health', (req: Request, res: Response) => {
-  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-  res.set('X-API-Preview', 'v2');
-  res.redirect(307, `/api/v1/vaults/${encodeURIComponent(req.params.id)}/health${qs}`);
-});
+// ─── Feature routers (src/routes/, issue #1545) ─────────────────────────────
+// Mounted where these routes were previously registered, after the legacy
+// redirects above, so request handling order is unchanged.
+app.use(vaultRoutes);
+app.use(transactionRoutes);
+app.use(webhookRoutes);
+app.use(exportRoutes);
+app.use(adminRoutes);
 
 /**
- * GET /api/v1/vaults/:id/apy
- *
- * Returns the annualised APY for the vault.  Returns `apy: null` with
- * `apyStatus: 'insufficient_data'` for new vaults that have zero shares or
- * fewer than 2 price snapshots, preventing Infinity / NaN from reaching the
- * frontend (Issue #1456).
+ * Mock vault metrics poll cycle
+ * In a real application, this would fetch data from a database or Stellar RPC
  */
-app.get(
-  '/api/v1/vaults/:id/apy',
-  readsLimiter,
-  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
-  createTimeoutFor.read({
-    timeoutMs: 1500,
-    routeName: '/api/v1/vaults/:id/apy',
-    message: 'Vault APY took too long to load',
-    fallbackResponse: () => ({
-      error: 'Service Unavailable',
-      status: 503,
-      code: 'VAULT_APY_TIMEOUT',
-      message: 'Vault APY is temporarily unavailable. Please try again shortly.',
-      timestamp: new Date().toISOString(),
-    }),
-  }),
-  async (_req: Request, res: Response) => {
-    const result = await computeVaultApy();
-    res.json({
-      ...result,
-      timestamp: new Date().toISOString(),
-    });
-  },
-);
+const pollVaultMetrics = () => {
+  // Mock data for TVL and Share Price
+  const mockTvl = 1000000 + Math.random() * 100000;
+  const mockSharePrice = 1.25 + Math.random() * 0.05;
 
-/**
- * @openapi
- * /vault/summary:
- *   get:
- *     summary: Vault summary
- *     description: Returns high-level vault metrics including total assets, shares, and APY.
- *     tags: [Vault]
- *     responses:
- *       200:
- *         description: Vault summary metrics
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/VaultSummary'
- */
-/**
- * GET /api/v1/vault/summary – read-only summary; relaxed rate limit.
- * Data is sourced from VaultState + SharePriceSnapshot (DB) and cached via
- * the Redis-backed response cache.
- */
-app.get(
-  '/api/v1/vault/summary',
-  readsLimiter,
-  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
-  createTimeoutFor.read({
-    timeoutMs: 1500,
-    routeName: '/api/v1/vault/summary',
-    message: 'Vault summary took too long to load',
-    fallbackResponse: () => ({
-      error: 'Service Unavailable',
-      status: 503,
-      code: 'VAULT_SUMMARY_TIMEOUT',
-      message: 'Vault summary is temporarily unavailable. Please refresh in a moment.',
-      stale: true,
-      data: {
-        totalAssets: '0',
-        totalShares: '0',
-        sharePrice: '1.000000',
-        apy: 0,
-        timestamp: new Date().toISOString(),
-      },
-      timestamp: new Date().toISOString(),
-    }),
-  }),
-  async (_req: Request, res: Response) => {
-    const summary = await buildVaultSummaryResponseFromDb();
-    res.json(summary);
-  },
-);
+  updateVaultMetrics(mockTvl, mockSharePrice);
 
-/**
- * GET /api/v1/vault/metrics - Cache with configurable TTL
- */
-app.get(
-  '/api/v1/vault/metrics',
-  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
-  createTimeoutFor.read({
-    timeoutMs: 2000,
-    routeName: '/api/v1/vault/metrics',
-    message: 'Vault metrics took too long to load',
-    fallbackResponse: () => ({
-      error: 'Service Unavailable',
-      status: 503,
-      code: 'VAULT_METRICS_TIMEOUT',
-      message: 'Vault metrics are temporarily unavailable. Showing the last known state.',
-      stale: true,
-      timestamp: new Date().toISOString(),
-    }),
-  }),
-  (_req: Request, res: Response) => {
-    res.json({
-      message: 'Vault metrics',
-      timestamp: new Date().toISOString(),
-    });
-  },
-);
+  logger.log('info', 'Vault metrics updated in Prometheus gauges', {
+    tvl: mockTvl,
+    sharePrice: mockSharePrice,
+  });
+};
 
-/**
- * GET /api/v1/vault/apy - Cache with configurable TTL
- */
-app.get(
-  '/api/v1/vault/apy',
-  cacheMiddleware({ ttl: cacheVaultMetricsTtl }),
-  createTimeoutFor.read({
-    timeoutMs: 1200,
-    routeName: '/api/v1/vault/apy',
-    message: 'Vault APY took too long to load',
-    fallbackResponse: () => ({
-      error: 'Service Unavailable',
-      status: 503,
-      code: 'VAULT_APY_TIMEOUT',
-      message: 'Vault APY is temporarily unavailable. Please try again shortly.',
-      stale: true,
-      timestamp: new Date().toISOString(),
-    }),
-  }),
-  (_req: Request, res: Response) => {
-    res.json({
-      message: 'Vault APY',
-      timestamp: new Date().toISOString(),
-    });
-  },
-);
+// Start poll cycle every 60 seconds (configurable)
+const METRICS_POLL_INTERVAL = parseInt(process.env.METRICS_POLL_INTERVAL_MS || '60000', 10);
+const metricsInterval =
+  process.env.NODE_ENV === 'test'
+    ? null
+    : setInterval(pollVaultMetrics, METRICS_POLL_INTERVAL);
 
-// â”€â”€â”€ Admin Routes (with API key authentication) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (process.env.NODE_ENV !== 'test') {
+  pollVaultMetrics(); // Initial call
+  void initializeWebhookEndpoints();
+}
 
-/**
- * POST /admin/apy/backfill - backfill missing APY snapshots for a date range
- * Body: { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
- * Requires API key authentication.
- */
-app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBodySchema }), async (req: Request, res: Response) => {
-  const { start, end } = req.body;
-  if (!start || !end || typeof start !== 'string' || typeof end !== 'string') {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: '`start` and `end` (YYYY-MM-DD) are required',
-    });
-    return;
-  }
+// Start latency monitoring
+latencyMonitoringService.startMonitoring();
 
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-  if (!datePattern.test(start) || !datePattern.test(end)) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: '`start` and `end` must be in YYYY-MM-DD format',
-    });
-    return;
-  }
+// â”€â”€â”€ Event Polling Service (Issue: Event Replay) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (process.env.NODE_ENV !== 'test' && process.env.VAULT_CONTRACT_ID) {
+  startEventPollingService({
+    rpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+    contractId: process.env.VAULT_CONTRACT_ID,
+    pollIntervalMs: parseInt(process.env.EVENT_POLL_INTERVAL_MS || '10000', 10),
+    batchSize: parseInt(process.env.EVENT_REPLAY_BATCH_SIZE || '100', 10),
+  });
 
-  if (end < start) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: '`end` must be >= `start`',
+  // stopEventPollingService() is a no-op if the service was never started,
+  // so this is safe to register unconditionally alongside the block above.
+  shutdownHandler.onShutdown(async () => {
+    stopEventPollingService();
+  });
+}
+
+// â”€â”€â”€ Outbox Pattern Processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Starts the background outbox event relay processor.
+// Writes from vault operations go to the EventOutbox table atomically;
+// this processor reads them and delivers via the webhook system.
+if (process.env.NODE_ENV !== 'test') {
+  eventOutboxService.replayOnStartup().catch((err) => {
+    logger.log('error', 'Outbox startup replay failed', {
+      error: err instanceof Error ? err.message : String(err),
     });
     return;
   }
@@ -1518,7 +780,7 @@ app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBody
 
   try {
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'apy.backfill.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'apy.backfill.dry_run', 200, {
         start,
         end,
         actor,
@@ -1551,7 +813,7 @@ app.post('/admin/apy/backfill', validateApiKey, validate({ body: ApyBackfillBody
       },
     });
 
-    void recordAdminAuditLog(req, 'apy.backfill', 200, {
+    recordAdminAuditLogInBackground(req, 'apy.backfill', 200, {
       start,
       end,
       created: result.created,
@@ -1625,7 +887,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
   };
 
   if (dryRun) {
-    void recordAdminAuditLog(req, 'maintenance.toggle.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'maintenance.toggle.dry_run', 200, {
       enabled: preview.enabled,
       previousEnabled: previous.enabled,
       reason: preview.reason,
@@ -1675,7 +937,7 @@ app.post('/admin/maintenance', validateApiKey, validate({ body: MaintenanceToggl
     previousEnabled: previous.enabled,
   });
 
-  void recordAdminAuditLog(req, 'maintenance.toggle', 200, {
+  recordAdminAuditLogInBackground(req, 'maintenance.toggle', 200, {
     enabled: next.enabled,
     previousEnabled: previous.enabled,
     reason: next.reason,
@@ -2091,7 +1353,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
 
     const actor = resolveActingAdminAddress(req);
     if (isDryRunRequest(req)) {
-      void recordAdminAuditLog(req, 'events.replay.manual.dry_run', 200, {
+      recordAdminAuditLogInBackground(req, 'events.replay.manual.dry_run', 200, {
         fromLedger,
         toLedger,
         ledgerCount: toLedger - fromLedger + 1,
@@ -2130,7 +1392,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     });
     
     // Record replay job metadata
-    void recordAdminAuditLog(req, 'events.replay.manual', 200, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual', 200, {
       fromLedger,
       toLedger,
       processedCount: result.processedCount,
@@ -2154,7 +1416,7 @@ app.post('/admin/events/replay', validateApiKey, validate({ body: EventReplayBod
     const errorMessage = err instanceof Error ? err.message : String(err);
     
     // Record failed replay attempt
-    void recordAdminAuditLog(req, 'events.replay.manual.failed', 500, {
+    recordAdminAuditLogInBackground(req, 'events.replay.manual.failed', 500, {
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
@@ -2285,7 +1547,7 @@ app.post('/admin/allowlist/add', validateApiKey, validate({ body: AllowlistWalle
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.add', added ? 201 : 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.add', added ? 201 : 200, {
     walletAddress,
     added,
     actor,
@@ -2329,7 +1591,7 @@ app.delete('/admin/allowlist/remove', validateApiKey, validate({ body: Allowlist
     },
   });
 
-  void recordAdminAuditLog(req, 'allowlist.remove', 200, {
+  recordAdminAuditLogInBackground(req, 'allowlist.remove', 200, {
     walletAddress,
     actor,
     receiptId: receipt.id,
@@ -2398,7 +1660,7 @@ app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Req
   }
 
   const actor = resolveActingAdminAddress(req);
-  void recordAdminAuditLog(req, 'wallet-alias.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'wallet-alias.delete', 200, {
     actor,
     canonicalId,
     aliases: existing.aliases,
@@ -3167,7 +2429,7 @@ app.delete('/admin/webhooks/:id', validateApiKey, validate({ params: IdParamSche
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.delete', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.delete', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -3195,7 +2457,7 @@ app.post('/admin/webhooks/:id/restore', validateApiKey, validate({ params: IdPar
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.restore', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.restore', 200, {
     endpointId: endpoint.id,
     url: endpoint.url,
     actor,
@@ -3395,7 +2657,7 @@ app.get('/admin/audit-logs', validateApiKey, validate({ query: AuditLogQuerySche
   const rows = getAuditLogs({ ...filters, limit: limit + 1, offset });
   const { data, hasNextPage } = paginateByLimit(rows, limit);
 
-  void recordAdminAuditLog(req, 'audit-logs.read', 200, {
+  recordAdminAuditLogInBackground(req, 'audit-logs.read', 200, {
     limit,
     returned: data.length,
   });
@@ -3563,7 +2825,12 @@ app.post('/admin/exports/bulk', validateApiKey, validate({ body: BulkExportBodyS
       filters: filters || {},
     });
 
-    void processBulkExportJob(job.id).catch(() => {});
+    void processBulkExportJob(job.id).catch((error: unknown) => {
+      logger.error('Bulk export job failed', {
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     res.status(201).json({
       message: 'Bulk export job created',
@@ -3700,7 +2967,7 @@ app.get('/admin/jobs/metrics', validateApiKey, (req: Request, res: Response) => 
     activeJobs: Object.values(metrics.runtime).filter((job) => job.inFlight > 0).length,
   };
 
-  void recordAdminAuditLog(req, 'jobs.metrics.read', 200);
+  recordAdminAuditLogInBackground(req, 'jobs.metrics.read', 200);
 
   res.json({
     summary,
@@ -4296,7 +3563,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   const actor = resolveActingAdminAddress(req);
 
   if (isDryRunRequest(req)) {
-    void recordAdminAuditLog(req, 'jobs.dlq.retry.dry_run', 200, {
+    recordAdminAuditLogInBackground(req, 'jobs.dlq.retry.dry_run', 200, {
       id: req.params.id,
       jobName: record.jobName,
       actor,
@@ -4313,7 +3580,7 @@ app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Reque
   }
 
   const outcome = await retryDeadLetter(req.params.id);
-  void recordAdminAuditLog(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.retry', outcome.success ? 200 : 500, {
     id: req.params.id,
     jobName: record.jobName,
     success: outcome.success,
@@ -4359,7 +3626,7 @@ app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ para
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.resolve', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.resolve', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -4405,7 +3672,7 @@ app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: R
     return;
   }
 
-  void recordAdminAuditLog(req, 'jobs.dlq.discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.discard', 200, {
     id: req.params.id,
     jobName: record.jobName,
     actor,
@@ -4451,7 +3718,7 @@ app.post('/admin/jobs/dead-letters/bulk-retry', validateApiKey, validate({ body:
 
   const summary = await bulkRetryDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_retry', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_retry', 200, {
     requestedCount: ids.length,
     retried: summary.retried,
     failed: summary.failed,
@@ -4500,7 +3767,7 @@ app.post('/admin/jobs/dead-letters/bulk-discard', validateApiKey, validate({ bod
 
   const summary = bulkDiscardDeadLetters(ids);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.bulk_discard', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.bulk_discard', 200, {
     requestedCount: ids.length,
     discardedCount: summary.discarded,
     actor,
@@ -4537,7 +3804,7 @@ app.post('/admin/jobs/dead-letters/process', validateApiKey, validate({ body: De
 
   const summary = await processDeadLetterQueue(batchSize);
 
-  void recordAdminAuditLog(req, 'jobs.dlq.process', 200, {
+  recordAdminAuditLogInBackground(req, 'jobs.dlq.process', 200, {
     batchSize,
     processed: summary.processed,
     succeeded: summary.succeeded,
@@ -4747,7 +4014,7 @@ app.delete('/admin/webhooks/deduplication/:eventId', validateApiKey, (req: Reque
     return;
   }
 
-  void recordAdminAuditLog(req, 'webhook.dedup.entry.removed', 200, { eventId });
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.entry.removed', 200, { eventId });
 
   res.status(200).json({
     message: `Deduplication entry '${eventId}' removed`,
@@ -4786,7 +4053,7 @@ app.delete('/admin/webhooks/deduplication', validateApiKey, (req: Request, res: 
 
   webhookDeduplicationStore.flush();
 
-  void recordAdminAuditLog(req, 'webhook.dedup.store.flushed', 200, {
+  recordAdminAuditLogInBackground(req, 'webhook.dedup.store.flushed', 200, {
     flushedCount: metrics.activeFingerprints,
   });
 
@@ -5063,15 +4330,6 @@ async function getPrismaHealth(): Promise<'up' | 'down'> {
   }
 }
 
-function getPrismaConfig() {
-  const config = getPrismaRuntimeConfig();
-  return {
-    prismaPoolSize: config.poolMax,
-    prismaQueryTimeoutMs: config.queryTimeoutMs,
-    prismaPoolTimeoutMs: config.poolTimeoutMs,
-  };
-}
-
 /**
  * Check Stellar RPC health
  * In production, this would make actual RPC calls
@@ -5274,7 +4532,7 @@ app.post('/admin/scoped-tokens', validateApiKey, validate({ body: ScopedTokenCre
       expiresInSeconds: typeof expiresInSeconds === 'number' && expiresInSeconds > 0 ? expiresInSeconds : undefined,
       createdBy: actor,
     });
-    void recordAdminAuditLog(req, 'scoped-token.created', 201, { keyId: token.keyId, label: token.label, permissions: token.permissions, actor });
+    recordAdminAuditLogInBackground(req, 'scoped-token.created', 201, { keyId: token.keyId, label: token.label, permissions: token.permissions, actor });
     res.status(201).json({ message: 'Scoped admin token created', keyId: token.keyId, secret, label: token.label, permissions: token.permissions, expiresAt: token.expiresAt, createdAt: token.createdAt });
   } catch (error) {
     res.status(400).json({ error: 'Bad Request', status: 400, message: error instanceof Error ? error.message : 'Failed to create scoped token' });
@@ -5339,7 +4597,7 @@ app.post('/admin/scoped-tokens/:keyId/rotate', validateApiKey, async (req: Reque
     res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
     return;
   }
-  void recordAdminAuditLog(req, 'scoped-token.rotated', 200, { keyId: result.keyId, rotatedAt: result.rotatedAt, actor });
+  recordAdminAuditLogInBackground(req, 'scoped-token.rotated', 200, { keyId: result.keyId, rotatedAt: result.rotatedAt, actor });
   res.status(200).json({ message: 'Scoped token rotated', keyId: result.keyId, newSecret: result.newSecret, rotatedAt: result.rotatedAt });
 });
 
@@ -5359,7 +4617,7 @@ app.post('/admin/scoped-tokens/:keyId/revoke', validateApiKey, async (req: Reque
     res.status(404).json({ error: 'Not Found', status: 404, message: 'Scoped token not found or already revoked' });
     return;
   }
-  void recordAdminAuditLog(req, 'scoped-token.revoked', 200, { keyId: req.params.keyId, actor });
+  recordAdminAuditLogInBackground(req, 'scoped-token.revoked', 200, { keyId: req.params.keyId, actor });
   res.status(200).json({ message: 'Scoped token revoked', keyId: req.params.keyId, timestamp: new Date().toISOString() });
 });
 
@@ -5459,7 +4717,7 @@ app.post(
       return;
     }
 
-    void recordAdminAuditLog(req, 'withdrawal-recovery.resumed', 200, {
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resumed', 200, {
       sagaId: outcome.saga.id,
       withdrawalId: outcome.saga.withdrawalId,
       status: outcome.status,
@@ -5522,7 +4780,7 @@ app.post(
       return;
     }
 
-    void recordAdminAuditLog(req, 'withdrawal-recovery.resolved', 200, {
+    recordAdminAuditLogInBackground(req, 'withdrawal-recovery.resolved', 200, {
       sagaId: saga.id,
       withdrawalId: saga.withdrawalId,
       outcome: saga.status,
@@ -5539,7 +4797,7 @@ app.post(
  */
 app.post('/admin/withdrawals/recovery/sweep', validateApiKey, async (req: Request, res: Response) => {
   const result = await withdrawalRecoveryCoordinator.sweep();
-  void recordAdminAuditLog(req, 'withdrawal-recovery.swept', 200, {
+  recordAdminAuditLogInBackground(req, 'withdrawal-recovery.swept', 200, {
     resumed: result.resumed.length,
     stale: result.stale.length,
     actor: resolveActingAdminAddress(req),
@@ -5592,7 +4850,7 @@ app.post(
       data: { name, symbol, tenantId },
     });
 
-    void recordAdminAuditLog(req, 'vault.created', 201, {
+    recordAdminAuditLogInBackground(req, 'vault.created', 201, {
       vaultId: vault.id,
       name: vault.name,
       symbol: vault.symbol,

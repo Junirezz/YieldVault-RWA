@@ -13,6 +13,13 @@ export interface WalletAliasMapping {
   sources: string[];
 }
 
+export class WalletAliasConflictError extends Error {
+  constructor() {
+    super('The aliases are already linked to different canonical identities');
+    this.name = 'WalletAliasConflictError';
+  }
+}
+
 type PrismaTransaction = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 type PrismaExecutor = PrismaClient | PrismaTransaction;
 
@@ -181,8 +188,95 @@ export class WalletAliasMappingService {
     linkedAlias: string,
     linkedSource: string,
   ): Promise<WalletAliasMapping> {
-    const primary = await this.registerAlias(primaryAlias, primarySource);
-    return this.registerAlias(linkedAlias, linkedSource, primary.canonicalId);
+    const normalizedPrimarySource = this.normalizeSource(primarySource);
+    const normalizedLinkedSource = this.normalizeSource(linkedSource);
+    const normalizedPrimaryAlias = this.normalizeAlias(primaryAlias, normalizedPrimarySource);
+    const normalizedLinkedAlias = this.normalizeAlias(linkedAlias, normalizedLinkedSource);
+
+    if (!normalizedPrimaryAlias || !normalizedLinkedAlias) {
+      throw new Error('Alias value is required');
+    }
+    if (!normalizedPrimarySource || !normalizedLinkedSource) {
+      throw new Error('Source value is required');
+    }
+
+    await this.loadFromDatabase();
+
+    const result = await this.prismaProvider().$transaction(
+      async (tx) => {
+        const primaryAliasKey = this.buildAliasKey(normalizedPrimaryAlias, normalizedPrimarySource);
+        const linkedAliasKey = this.buildAliasKey(normalizedLinkedAlias, normalizedLinkedSource);
+
+        for (const source of new Set([normalizedPrimarySource, normalizedLinkedSource])) {
+          await tx.walletAliasSource.upsert({
+            where: { source },
+            create: { source },
+            update: {},
+          });
+        }
+
+        const [existingPrimary, existingLinked] = await Promise.all([
+          tx.walletAlias.findUnique({ where: { aliasKey: primaryAliasKey } }),
+          tx.walletAlias.findUnique({ where: { aliasKey: linkedAliasKey } }),
+        ]);
+
+        if (
+          existingPrimary &&
+          existingLinked &&
+          existingPrimary.canonicalId !== existingLinked.canonicalId
+        ) {
+          throw new WalletAliasConflictError();
+        }
+
+        const canonicalId =
+          existingPrimary?.canonicalId ??
+          existingLinked?.canonicalId ??
+          (await this.createCanonicalId(tx));
+
+        await tx.walletCanonicalIdentity.upsert({
+          where: { id: canonicalId },
+          create: { id: canonicalId },
+          update: {},
+        });
+
+        for (const entry of [
+          {
+            alias: normalizedPrimaryAlias,
+            source: normalizedPrimarySource,
+            aliasKey: primaryAliasKey,
+          },
+          {
+            alias: normalizedLinkedAlias,
+            source: normalizedLinkedSource,
+            aliasKey: linkedAliasKey,
+          },
+        ]) {
+          await tx.walletAlias.upsert({
+            where: { aliasKey: entry.aliasKey },
+            create: {
+              canonicalId,
+              alias: entry.alias,
+              source: entry.source,
+              aliasKey: entry.aliasKey,
+            },
+            update: {
+              canonicalId,
+              alias: entry.alias,
+              source: entry.source,
+            },
+          });
+        }
+
+        return this.getIdentityLinksFromDatabase(canonicalId, tx);
+      },
+      { isolationLevel: 'Serializable' },
+    );
+
+    await this.loadFromDatabase(true);
+    if (!result) {
+      throw new Error('Failed to link wallet aliases');
+    }
+    return result;
   }
 
   /**

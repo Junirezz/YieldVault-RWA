@@ -358,4 +358,76 @@ mod tests {
         let result = RoundingPolicy::calculate_basis_points_amount(1_000_000, 10_001);
         assert!(result.is_err());
     }
+
+    // ── Exact error per validation path (issue #1526) ──────────────────────
+
+    #[test]
+    fn test_floor_division_validated_error_paths() {
+        assert_eq!(
+            RoundingPolicy::floor_division_validated(10, 0, 100),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            RoundingPolicy::floor_division_validated(10, 3, -1),
+            Err(VaultError::InvalidAmount)
+        );
+        // 1_999 / 1_000 leaves 999 (~4997 bps) of the numerator behind.
+        assert_eq!(
+            RoundingPolicy::floor_division_validated(1_999, 1_000, 100),
+            Err(VaultError::SlippageExceeded)
+        );
+        assert_eq!(
+            RoundingPolicy::floor_division_validated(i128::MIN, -1, 100),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            RoundingPolicy::floor_division_validated(10_001, 10_000, 100),
+            Ok(1)
+        );
+    }
+
+    #[test]
+    fn test_convert_decimals_overflow_paths() {
+        // 10^39 does not fit in i128.
+        assert_eq!(
+            RoundingPolicy::convert_decimals(1, 0, 39),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            RoundingPolicy::convert_decimals(1, 39, 0),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            RoundingPolicy::convert_decimals(i128::MAX, 6, 18),
+            Err(VaultError::MathOverflow)
+        );
+    }
+
+    #[test]
+    fn test_validate_rounding_loss_error_paths() {
+        assert_eq!(
+            RoundingPolicy::validate_rounding_loss(1, 10_000, -1),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            RoundingPolicy::validate_rounding_loss(200, 10_000, 100),
+            Err(VaultError::SlippageExceeded)
+        );
+    }
+
+    #[test]
+    fn test_calculate_basis_points_amount_error_paths() {
+        assert_eq!(
+            RoundingPolicy::calculate_basis_points_amount(-1, 500),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            RoundingPolicy::calculate_basis_points_amount(1_000, 10_001),
+            Err(VaultError::InvalidFeeBps)
+        );
+        assert_eq!(
+            RoundingPolicy::calculate_basis_points_amount(1_000, -1),
+            Err(VaultError::InvalidFeeBps)
+        );
+    }
 }

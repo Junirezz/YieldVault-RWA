@@ -1,10 +1,10 @@
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
 use crate::oracle::{
     price_data_new, price_data_scaled_price, validate_conversion_rate,
-    validate_price_for_calculation, OracleValidator, DEFAULT_HEARTBEAT_SECONDS,
+    validate_price_for_calculation, OracleValidator, PriceData, DEFAULT_HEARTBEAT_SECONDS,
     MAX_ORACLE_HEARTBEAT, MAX_PRICE_DEVIATION_BPS,
 };
-use crate::{VaultError, YieldVault, YieldVaultClient};
+use crate::{DataKey, DataKeyExt, RiskExtKey, VaultError, YieldVault, YieldVaultClient};
 use mock_strategy::mock_oracle::{MockPriceOracle, MockPriceOracleClient};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
@@ -407,4 +407,141 @@ fn test_invest_reverts_on_stale_oracle_data() {
 
     let result = vault.try_invest(&100);
     assert_eq!(result, Err(Ok(VaultError::OracleValidationFailed)));
+}
+
+// ─── Canonical last-price key (issues #1525 / #1538) ───────────────────────
+
+fn stored_prices(env: &Env, vault: &Address) -> (Option<PriceData>, Option<PriceData>) {
+    env.as_contract(vault, || {
+        let storage = env.storage().instance();
+        (
+            storage.get(&DataKeyExt::LastOraclePrice),
+            storage.get(&DataKeyExt::Risk(RiskExtKey::LastPx)),
+        )
+    })
+}
+
+#[test]
+fn test_total_assets_writes_only_canonical_last_price() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 100_000);
+    let (vault, _usdc, _benji_admin, _oracle_id) = setup_vault_with_oracle(&env);
+
+    assert_eq!(stored_prices(&env, &vault.address), (None, None));
+    assert!(vault.try_total_assets().is_ok());
+
+    let (canonical, legacy) = stored_prices(&env, &vault.address);
+    assert_eq!(
+        canonical,
+        Some(price_data_new(1_000_000_000i128, 100_000, 18))
+    );
+    assert_eq!(legacy, None);
+}
+
+#[test]
+fn test_legacy_last_price_is_migrated_to_canonical_key() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 100_000);
+    let (vault, _usdc, _benji_admin, oracle_id) = setup_vault_with_oracle(&env);
+    let now = env.ledger().timestamp();
+    MockPriceOracleClient::new(&env, &oracle_id).set_price(&1_100_000_000i128, &now, &18u32);
+
+    // Simulate a deployment that only ever wrote the legacy slot.
+    let legacy_price = price_data_new(1_000_000_000i128, now, 18);
+    env.as_contract(&vault.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKeyExt::Risk(RiskExtKey::LastPx), &legacy_price);
+    });
+
+    assert!(vault.try_total_assets().is_ok());
+
+    let (canonical, legacy) = stored_prices(&env, &vault.address);
+    assert_eq!(canonical, Some(price_data_new(1_100_000_000i128, now, 18)));
+    assert_eq!(legacy, None);
+}
+
+#[test]
+fn test_legacy_last_price_still_guards_deviation_before_migration() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 100_000);
+    let (vault, _usdc, _benji_admin, _oracle_id) = setup_vault_with_oracle(&env);
+    let now = env.ledger().timestamp();
+
+    // Legacy reference 10x the live price: the breaker must still trip.
+    env.as_contract(&vault.address, || {
+        env.storage().instance().set(
+            &DataKeyExt::Risk(RiskExtKey::LastPx),
+            &price_data_new(10_000_000_000i128, now, 18),
+        );
+    });
+
+    assert_eq!(
+        vault.try_total_assets(),
+        Err(Ok(VaultError::OracleValidationFailed))
+    );
+}
+
+#[test]
+fn test_oracle_change_clears_both_last_price_keys() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 100_000);
+    let (vault, _usdc, _benji_admin, oracle_id) = setup_vault_with_oracle(&env);
+    assert!(vault.try_total_assets().is_ok());
+    env.as_contract(&vault.address, || {
+        env.storage().instance().set(
+            &DataKeyExt::Risk(RiskExtKey::LastPx),
+            &price_data_new(1, 0, 18),
+        );
+    });
+
+    vault.queue_price_oracle_change(&oracle_id);
+    vault.execute_price_oracle_change();
+
+    assert_eq!(stored_prices(&env, &vault.address), (None, None));
+}
+
+/// Footprint comparison: the single canonical read/write per `total_assets`
+/// call must cost less than the previous dual-key pattern (read both keys,
+/// read `TokenAsset` twice, write both keys).
+#[test]
+fn test_total_assets_price_cache_cheaper_than_dual_key_pattern() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 100_000);
+    let (vault, _usdc, _benji_admin, _oracle_id) = setup_vault_with_oracle(&env);
+    assert!(vault.try_total_assets().is_ok());
+    let price = price_data_new(1_000_000_000i128, 100_000, 18);
+
+    let measure = |work: &dyn Fn()| -> (u64, u64) {
+        env.as_contract(&vault.address, || {
+            let mut budget = env.cost_estimate().budget();
+            budget.reset_unlimited();
+            work();
+            (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
+        })
+    };
+
+    let legacy = measure(&|| {
+        let storage = env.storage().instance();
+        let _: Option<PriceData> = storage.get(&DataKeyExt::Risk(RiskExtKey::LastPx));
+        let _: Option<PriceData> = storage.get(&DataKeyExt::LastOraclePrice);
+        let _: Address = storage.get(&DataKey::TokenAsset).unwrap();
+        let _: Address = storage.get(&DataKey::TokenAsset).unwrap();
+        storage.set(&DataKeyExt::LastOraclePrice, &price);
+        storage.set(&DataKeyExt::Risk(RiskExtKey::LastPx), &price);
+    });
+    env.as_contract(&vault.address, || {
+        env.storage()
+            .instance()
+            .remove(&DataKeyExt::Risk(RiskExtKey::LastPx));
+    });
+    let cached = measure(&|| {
+        let storage = env.storage().instance();
+        let _: Option<PriceData> = storage.get(&DataKeyExt::LastOraclePrice);
+        let _: Address = storage.get(&DataKey::TokenAsset).unwrap();
+        storage.set(&DataKeyExt::LastOraclePrice, &price);
+    });
+
+    assert!(cached.0 < legacy.0, "cpu {} !< {}", cached.0, legacy.0);
+    assert!(cached.1 < legacy.1, "mem {} !< {}", cached.1, legacy.1);
 }
