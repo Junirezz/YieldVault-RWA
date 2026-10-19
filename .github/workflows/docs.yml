@@ -25,3 +25,32 @@ jobs:
           cargo doc -p share-price-math --no-deps
           cargo doc -p mock-strategy --no-deps
         continue-on-error: false
+
+  spell-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install cspell
+        run: npm install -g cspell
+
+      - name: Run spell check
+        run: cspell "**/*.md" --config cspell.json
+
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --verbose --no-progress --accept 200,403,429 --timeout 30 --max-retries 3 '**/*.md'
+          fail: true

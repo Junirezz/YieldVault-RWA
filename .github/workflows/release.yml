@@ -53,7 +53,47 @@ jobs:
           branch: "chore/changelog-${{ github.ref_name }}"
           base: "main"
 
-      # Create the GitHub Release with the generated notes
+      # Build Rust workspace
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust workspace
+        run: cargo build --release --workspace
+
+      # Build frontend
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: pnpm build
+
+      # Generate SBOM for Rust workspace
+      - name: Install cargo-sbom
+        run: cargo install cargo-sbom
+
+      - name: Generate Rust SBOM
+        run: cargo sbom --output-format spdx_json_2_3 > rust-sbom.spdx.json
+
+      # Generate SBOM for frontend
+      - name: Generate Frontend SBOM
+        working-directory: ./frontend
+        run: |
+          npm install -g @cyclonedx/cyclonedx-npm
+          cyclonedx-npm --output-file ../frontend-sbom.json
+
+      # Create the GitHub Release with the generated notes and SBOMs
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -62,3 +102,6 @@ jobs:
           body_path: /tmp/release-notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            rust-sbom.spdx.json
+            frontend-sbom.json
