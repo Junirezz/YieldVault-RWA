@@ -133,10 +133,12 @@ export function useForm<T extends object>(
     const valuesToValidate = overrideValues ?? valuesRef.current;
     const nextErrors = runSchemaValidation(schemaRef.current, valuesToValidate);
 
-    let touchedAll: Partial<Record<keyof T, boolean>> = {};
-    if ("shape" in schemaRef.current && typeof (schemaRef.current as any).shape === "object") {
-      const shape = (schemaRef.current as any).shape;
-      Object.keys(shape).forEach((key) => {
+    const schemaShape = (
+      schemaRef.current as unknown as { shape?: Record<string, unknown> }
+    ).shape;
+    const touchedAll: Partial<Record<keyof T, boolean>> = {};
+    if (schemaShape && typeof schemaShape === "object") {
+      Object.keys(schemaShape).forEach((key) => {
         touchedAll[key as keyof T] = true;
       });
     } else {

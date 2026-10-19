@@ -115,7 +115,14 @@ function runEslint(files) {
       continue;
     }
 
-    const result = spawnSync(process.execPath, [launcher, '--fix', ...groups[pkg]], {
+    // lint-staged hands over repo-relative paths, but ESLint runs with the
+    // package directory as its cwd — strip the `<pkg>/` prefix so the pattern
+    // resolves (otherwise ESLint reports "No files matching the pattern").
+    const packageFiles = groups[pkg].map((file) =>
+      file.startsWith(`${pkg}/`) ? file.slice(pkg.length + 1) : file,
+    );
+
+    const result = spawnSync(process.execPath, [launcher, '--fix', ...packageFiles], {
       cwd: path.join(ROOT, pkg),
       stdio: 'inherit',
       timeout: ESLINT_TIMEOUT_MS,
