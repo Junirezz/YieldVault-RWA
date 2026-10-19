@@ -1,6 +1,7 @@
 import React from "react";
 import { X } from "./icons";
 import { useTranslation } from "../i18n";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface WithdrawalConfirmationModalProps {
   isOpen: boolean;
@@ -20,6 +21,11 @@ const WithdrawalConfirmationModal: React.FC<WithdrawalConfirmationModalProps> = 
   isProcessing = false,
 }) => {
   const { t } = useTranslation();
+  const panelRef = useFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: onCancel,
+    closeOnEscape: !isProcessing,
+  });
 
   if (!isOpen) return null;
 
@@ -27,6 +33,9 @@ const WithdrawalConfirmationModal: React.FC<WithdrawalConfirmationModalProps> = 
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="withdrawal-modal-title"
       style={{
         position: "fixed",
         inset: 0,
@@ -38,9 +47,12 @@ const WithdrawalConfirmationModal: React.FC<WithdrawalConfirmationModalProps> = 
         zIndex: 1000,
         padding: "16px",
       }}
-      onClick={onCancel}
+      onClick={() => {
+        if (!isProcessing) onCancel();
+      }}
     >
       <div
+        ref={panelRef}
         className="glass-panel"
         style={{
           padding: "32px",
@@ -54,6 +66,7 @@ const WithdrawalConfirmationModal: React.FC<WithdrawalConfirmationModalProps> = 
         <button
           onClick={onCancel}
           disabled={isProcessing}
+          aria-label={t("withdrawal.cancel")}
           style={{
             position: "absolute",
             top: "16px",
@@ -85,6 +98,7 @@ const WithdrawalConfirmationModal: React.FC<WithdrawalConfirmationModalProps> = 
 
         {/* Header */}
         <h2
+          id="withdrawal-modal-title"
           style={{
             fontSize: "1.5rem",
             marginBottom: "8px",

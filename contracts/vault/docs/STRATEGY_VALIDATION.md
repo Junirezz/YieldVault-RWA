@@ -219,11 +219,14 @@ fn deposit_to_strategy(
 
 ## Error Codes
 
+`VaultError` is capped at 50 variants by the Soroban spec, so validation
+reuses existing codes rather than defining dedicated ones:
+
 | Error | Cause | Recovery |
 |-------|-------|----------|
-| `InvalidStrategyResponse` | Response violates validation rules | Retry or pause vault |
-| `StrategyValueOverflow` | Value exceeds safe bounds | Manual intervention |
-| `DecimalConversionOverflow` | Precision conversion would overflow | Change decimal handling |
+| `InvalidAmount` (3) | Response violates validation rules (negative value, bad deposit/withdrawal delta, zero price, decimals > 30, zero strategy address) | Retry or pause vault |
+| `MathOverflow` (14) | Value exceeds `MAX_STRATEGY_VALUE`, or a decimal conversion would overflow | Manual intervention |
+| `SlippageExceeded` (15) | Rounding loss above the allowed basis points | Change decimal handling |
 
 ## Testing Strategy
 

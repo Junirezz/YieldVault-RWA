@@ -913,6 +913,7 @@ router.post(
     const actingWallet = String(req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'admin');
 
     await recordStrategySwitchTime(actingWallet, strategyId, previousStrategyId);
+    process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
 
     void eventOutboxService
       .writeEvent({
@@ -939,7 +940,7 @@ router.post(
         });
       });
 
-    res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
+    return res.status(200).json({ message: 'Strategy selection endpoint (v2 preview)' });
   }
 );
 

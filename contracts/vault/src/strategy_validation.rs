@@ -4,11 +4,14 @@
 //! cannot break vault logic through adversarial or corrupted payloads.
 
 use crate::VaultError;
-use soroban_sdk::{xdr::ScAddress, Address, Env, TryFromVal};
+use soroban_sdk::{Address, Env};
 
 /// Maximum allowed strategy total value to prevent overflow and unreasonable responses.
 /// Set conservatively to catch malicious responses while allowing legitimate vaults.
 pub const MAX_STRATEGY_VALUE: i128 = i128::MAX / 2;
+
+/// Strkey of the all-zero contract address (`ScAddress::Contract([0; 32])`).
+pub const ZERO_CONTRACT_STRKEY: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 
 /// Strategy response validator providing comprehensive payload validation.
 pub struct StrategyValidator;
@@ -154,13 +157,9 @@ impl StrategyValidator {
         // - Does it have the strategy interface?
         // For now, basic non-zero check.
         //
-        // The previous `Address::from_string(&String::new(_env))` could not
-        // build the SDK `String` type at all. Building the all-zero contract
-        // address from its `ScAddress` avoids strkey decoding, which rejects
-        // an empty string outright.
-        let zero =
-            Address::try_from_val(env, &ScAddress::Contract(soroban_sdk::xdr::Hash([0u8; 32])))
-                .map_err(|_| VaultError::InvalidAmount)?;
+        // `Address: TryFromVal<Env, ScAddress>` is host-only (not available on
+        // wasm), so the all-zero contract address is parsed from its strkey.
+        let zero = Address::from_str(env, ZERO_CONTRACT_STRKEY);
         if strategy == &zero {
             return Err(VaultError::InvalidAmount);
         }
@@ -266,5 +265,73 @@ mod tests {
     fn test_validate_price_response_negative_price() {
         let result = StrategyValidator::validate_price_response(-1_000_000, 6);
         assert!(result.is_err());
+    }
+
+    // ── Exact error per validation path (issue #1526) ──────────────────────
+
+    #[test]
+    fn test_validation_error_paths_return_expected_variants() {
+        assert_eq!(
+            StrategyValidator::validate_total_value(-1),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_total_value(MAX_STRATEGY_VALUE + 1),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            StrategyValidator::validate_deposit_result(0, 10, 10),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_deposit_result(1, 10, 9),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_withdrawal_result(0, 10, 9),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_withdrawal_result(1, 10, 11),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_decimals(31),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(0, 6),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(MAX_STRATEGY_VALUE + 1, 6),
+            Err(VaultError::MathOverflow)
+        );
+        assert_eq!(
+            StrategyValidator::validate_price_response(1, 31),
+            Err(VaultError::InvalidAmount)
+        );
+    }
+
+    #[test]
+    fn test_validate_strategy_address_rejects_zero_contract() {
+        use soroban_sdk::testutils::Address as _;
+        use soroban_sdk::{xdr::ScAddress, TryFromVal};
+
+        let env = Env::default();
+        let zero = Address::try_from_val(
+            &env,
+            &ScAddress::Contract(soroban_sdk::xdr::Hash([0u8; 32])),
+        )
+        .unwrap();
+        assert_eq!(Address::from_str(&env, ZERO_CONTRACT_STRKEY), zero);
+        assert_eq!(
+            StrategyValidator::validate_strategy_address(&env, &zero),
+            Err(VaultError::InvalidAmount)
+        );
+        assert_eq!(
+            StrategyValidator::validate_strategy_address(&env, &Address::generate(&env)),
+            Ok(())
+        );
     }
 }

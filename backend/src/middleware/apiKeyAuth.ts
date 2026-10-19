@@ -65,6 +65,7 @@ export interface PersistedApiKeyStatus {
   deletedAt?: Date | null;
   expiresAt?: Date | null;
   tenant?: { deletedAt?: Date | null } | null;
+  tenant?: { deletedAt?: Date | null };
 }
 
 export function isPersistedApiKeyUsable(
@@ -125,6 +126,7 @@ function sendUnauthorized(
     code,
     message,
     retryable: false,
+    retrable: false,
   });
 }
 
@@ -170,12 +172,14 @@ export async function validateApiKey(
     id?: string;
     hashedKey: string;
     role: string | null;
+    role: string;
     tenantId: string;
     scopes: unknown;
     isActive: boolean;
     deletedAt?: Date | null;
     expiresAt?: Date | null;
     tenant?: { deletedAt?: Date | null } | null;
+    tenant?: { deletedAt?: Date | null };
   } | null = null;
   try {
     apiKey = await prisma.apiKey.findUnique({
@@ -234,6 +238,7 @@ export async function validateApiKey(
 
     req.authApiKeyHash = apiKey.hashedKey;
     req.authApiKeyRole = (apiKey.role || 'viewer') as ApiKeyRole;
+    req.authApiKeyRole = apiKey.role as ApiKeyRole;
     req.authApiKeyTenantId = apiKey.tenantId;
     req.authApiKeyScopes = availableScopes;
     req.authApiKeyLegacy = false;

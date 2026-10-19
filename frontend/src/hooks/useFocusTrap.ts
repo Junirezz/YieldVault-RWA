@@ -19,6 +19,14 @@ export interface UseFocusTrapOptions {
   active: boolean;
   onEscape?: () => void;
   closeOnEscape?: boolean;
+  /**
+   * Trap Tab focus inside the container. Non-modal surfaces (for example a
+   * notification popover) set this to `false` so keyboard users can still Tab
+   * back out to the page behind.
+   */
+  trapTab?: boolean;
+  /** Lock page scroll behind the surface while active. */
+  lockScroll?: boolean;
 }
 
 /**
@@ -29,6 +37,8 @@ export function useFocusTrap<T extends HTMLElement = HTMLDivElement>({
   active,
   onEscape,
   closeOnEscape = true,
+  trapTab = true,
+  lockScroll = true,
 }: UseFocusTrapOptions) {
   const containerRef = useRef<T>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -42,7 +52,7 @@ export function useFocusTrap<T extends HTMLElement = HTMLDivElement>({
         return;
       }
 
-      if (event.key !== "Tab" || !containerRef.current) return;
+      if (event.key !== "Tab" || !containerRef.current || !trapTab) return;
 
       const focusable = getFocusable(containerRef.current);
       if (focusable.length === 0) {
@@ -64,7 +74,7 @@ export function useFocusTrap<T extends HTMLElement = HTMLDivElement>({
         event.preventDefault();
       }
     },
-    [active, closeOnEscape, onEscape],
+    [active, closeOnEscape, onEscape, trapTab],
   );
 
   useEffect(() => {
@@ -72,7 +82,7 @@ export function useFocusTrap<T extends HTMLElement = HTMLDivElement>({
 
     previousFocusRef.current = document.activeElement as HTMLElement;
     document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
+    if (lockScroll) document.body.style.overflow = "hidden";
 
     const frame = requestAnimationFrame(() => {
       const container = containerRef.current;
@@ -88,10 +98,10 @@ export function useFocusTrap<T extends HTMLElement = HTMLDivElement>({
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      if (lockScroll) document.body.style.overflow = "";
       previousFocusRef.current?.focus();
     };
-  }, [active, handleKeyDown]);
+  }, [active, handleKeyDown, lockScroll]);
 
   return containerRef;
 }

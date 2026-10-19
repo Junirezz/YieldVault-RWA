@@ -1,0 +1,29 @@
+{
+  "$comment": "Dev (Prisma/SQLite) <-> prod (migrations/*.sql, PostgreSQL) type mapping. Checked by scripts/check-type-mapping.js; see docs/DB_TYPE_MAPPING.md.",
+  "typeMap": {
+    "NUMERIC(38,18)": "String",
+    "NUMERIC(12,6)": "String",
+    "JSONB": "String",
+    "TIMESTAMPTZ": "DateTime",
+    "DATE": "DateTime"
+  },
+  "columns": {
+    "transactions.amount": "Transaction.amount",
+    "transactions.metadata": null,
+    "transactions.created_at": "Transaction.timestamp",
+    "transactions.updated_at": null,
+    "idempotency_keys.response_body": "IdempotencyKey.responseBody",
+    "idempotency_keys.locked_until": null,
+    "idempotency_keys.expires_at": "IdempotencyKey.expiresAt",
+    "idempotency_keys.created_at": "IdempotencyKey.createdAt",
+    "idempotency_keys.updated_at": null,
+    "vault_metrics_snapshots.total_assets": "SharePriceSnapshot.totalAssets",
+    "vault_metrics_snapshots.total_shares": "SharePriceSnapshot.totalShares",
+    "vault_metrics_snapshots.share_price": "SharePriceSnapshot.sharePrice",
+    "vault_metrics_snapshots.apy": null,
+    "vault_metrics_snapshots.recorded_at": "SharePriceSnapshot.recordedAt",
+    "apy_snapshots.date": null,
+    "apy_snapshots.apy": null,
+    "apy_snapshots.created_at": null
+  }
+}

@@ -1,5 +1,5 @@
 import { getPrismaClient, disconnectPrismaClient } from '../prismaClient';
-import { WalletAliasMappingService } from '../walletAliasService';
+import { WalletAliasConflictError, WalletAliasMappingService } from '../walletAliasService';
 import { VALID_TEST_WALLET, SECOND_TEST_WALLET } from './setup';
 
 describe('WalletAliasMappingService', () => {
@@ -68,6 +68,20 @@ describe('WalletAliasMappingService', () => {
         'walletconnect',
       ),
     ).toBe(true);
+  });
+
+  it('does not merge aliases already owned by different canonical identities', async () => {
+    await service.registerAlias(VALID_TEST_WALLET, 'stellar');
+    await service.registerAlias('wallet-connect-alias', 'walletconnect');
+
+    await expect(
+      service.linkProviderIdentity(
+        VALID_TEST_WALLET,
+        'stellar',
+        'wallet-connect-alias',
+        'walletconnect',
+      ),
+    ).rejects.toBeInstanceOf(WalletAliasConflictError);
   });
 
   it('hydrates persisted aliases into a fresh service instance', async () => {

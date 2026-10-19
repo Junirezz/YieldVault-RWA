@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Bell, X } from "lucide-react";
 import type { ToastItem } from "../context/ToastContext";
 import { useToast } from "../context/ToastContext";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import { useTranslation } from "../i18n";
 
 function groupToasts(toasts: ToastItem[]): (ToastItem & { count: number })[] {
   const groups = new Map<string, { toast: ToastItem; count: number }>();
@@ -18,8 +20,16 @@ function groupToasts(toasts: ToastItem[]): (ToastItem & { count: number })[] {
 }
 
 const ToastCenter: React.FC = () => {
+  const { t } = useTranslation();
   const { toasts, dismissToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
+  const panelRef = useFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: () => setIsOpen(false),
+    closeOnEscape: true,
+    trapTab: false,
+    lockScroll: false,
+  });
   const grouped = groupToasts(toasts);
 
   return (
@@ -28,7 +38,7 @@ const ToastCenter: React.FC = () => {
         type="button"
         className="toast-center-toggle"
         onClick={() => setIsOpen((o) => !o)}
-        aria-label={`Notifications (${toasts.length})`}
+        aria-label={t("toastCenter.toggleLabel", { count: toasts.length })}
         style={{
           position: "fixed",
           bottom: "20px",
@@ -73,9 +83,10 @@ const ToastCenter: React.FC = () => {
 
       {isOpen && (
         <div
+          ref={panelRef}
           className="toast-center-panel"
           role="dialog"
-          aria-label="Notification center"
+          aria-label={t("toastCenter.panelLabel")}
           style={{
             position: "fixed",
             bottom: "76px",
@@ -100,12 +111,12 @@ const ToastCenter: React.FC = () => {
             }}
           >
             <strong style={{ fontSize: "0.95rem", color: "var(--text-primary)" }}>
-              Notifications
+              {t("toastCenter.heading")}
             </strong>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              aria-label="Close notification center"
+              aria-label={t("toastCenter.closeLabel")}
               style={{
                 background: "none",
                 border: "none",
@@ -120,7 +131,7 @@ const ToastCenter: React.FC = () => {
 
           {grouped.length === 0 ? (
             <p style={{ color: "var(--text-tertiary)", fontSize: "0.875rem", textAlign: "center", padding: "20px 0" }}>
-              No notifications
+              {t("toastCenter.empty")}
             </p>
           ) : (
             grouped.map((g) => (
@@ -174,7 +185,7 @@ const ToastCenter: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => dismissToast(g.id)}
-                  aria-label={`Dismiss ${g.title}`}
+                  aria-label={t("toastCenter.dismissLabel", { title: g.title })}
                   style={{
                     background: "none",
                     border: "none",
