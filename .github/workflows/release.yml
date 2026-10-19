@@ -3,10 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -41,17 +42,16 @@ jobs:
           OUTPUT: /tmp/release-notes.md
           GITHUB_REPO: ${{ github.repository }}
 
-      # Commit the updated CHANGELOG.md back to the default branch
-      - name: Commit CHANGELOG.md
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          # Only commit if there are changes
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(release): update CHANGELOG.md for ${{ github.ref_name }}"
-            git push origin HEAD:refs/heads/main
-          fi
+      # Open a PR for CHANGELOG.md updates to comply with branch protection
+      - name: Create Pull Request for CHANGELOG.md
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(release): update CHANGELOG.md for ${{ github.ref_name }}"
+          title: "chore(release): update CHANGELOG.md for ${{ github.ref_name }}"
+          body: "Automated changelog update for release ${{ github.ref_name }}."
+          branch: "chore/changelog-${{ github.ref_name }}"
+          base: "main"
 
       # Create the GitHub Release with the generated notes
       - name: Create GitHub Release

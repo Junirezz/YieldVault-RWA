@@ -15,7 +15,7 @@ import { normalizeWalletAddress } from './walletUtils';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-export type WalletAction = 'login' | 'deposit' | 'withdrawal';
+export type WalletAction = 'login' | 'deposit' | 'withdrawal' | 'strategy';
 
 const DEFAULT_NONCE_TTL_SECONDS = parseInt(process.env.WALLET_NONCE_TTL_SECONDS || '300', 10);
 const MAX_ACTIVE_NONCES_PER_WALLET = parseInt(

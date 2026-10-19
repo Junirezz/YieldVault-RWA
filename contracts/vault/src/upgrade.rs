@@ -17,6 +17,21 @@ pub enum ProxyDataKey {
     PendingAdmin = 3,
     /// Monotonic storage schema version used by migration hooks.
     StorageVersion = 4,
+    /// Queued WASM upgrade awaiting its timelock ([`PendingUpgrade`]).
+    PendingUpgrade = 5,
+}
+
+/// Minimum delay between `propose_upgrade` and `execute_upgrade`. The
+/// sensitive-parameter timelock applies instead when it is configured longer.
+pub const MIN_UPGRADE_DELAY_SECS: u64 = 86_400;
+
+/// A queued WASM upgrade.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingUpgrade {
+    pub wasm_hash: BytesN<32>,
+    /// Ledger timestamp at/after which the upgrade may be executed.
+    pub eta: u64,
 }
 
 /// Constant for the implementation slot using a non-overlapping hash.
@@ -55,14 +70,40 @@ pub fn set_pending_admin(env: &Env, admin: &Option<Address>) {
     }
 }
 
+/// Current implementation WASM hash, read from the EIP-1967 style
+/// [`IMPLEMENTATION_SLOT`].
 pub fn get_implementation(env: &Env) -> Option<BytesN<32>> {
-    env.storage().instance().get(&ProxyDataKey::Implementation)
+    env.storage()
+        .instance()
+        .get(&BytesN::from_array(env, &IMPLEMENTATION_SLOT))
 }
 
+/// Writes `wasm_hash` to [`IMPLEMENTATION_SLOT`] and reads it back, panicking
+/// if the slot does not hold the expected hash afterwards.
 pub fn set_implementation(env: &Env, wasm_hash: &BytesN<32>) {
     env.storage()
         .instance()
-        .set(&ProxyDataKey::Implementation, wasm_hash);
+        .set(&BytesN::from_array(env, &IMPLEMENTATION_SLOT), wasm_hash);
+    assert!(
+        get_implementation(env).as_ref() == Some(wasm_hash),
+        "implementation slot verification failed"
+    );
+}
+
+pub fn get_pending_upgrade(env: &Env) -> Option<PendingUpgrade> {
+    env.storage().instance().get(&ProxyDataKey::PendingUpgrade)
+}
+
+pub fn set_pending_upgrade(env: &Env, pending: &Option<PendingUpgrade>) {
+    if let Some(pending) = pending {
+        env.storage()
+            .instance()
+            .set(&ProxyDataKey::PendingUpgrade, pending);
+    } else {
+        env.storage()
+            .instance()
+            .remove(&ProxyDataKey::PendingUpgrade);
+    }
 }
 
 pub fn is_initialized(env: &Env) -> bool {

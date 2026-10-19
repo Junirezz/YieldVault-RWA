@@ -12,9 +12,25 @@
  *
  * This guarantees that events are NEVER lost when the publishing process
  * crashes between persisting business state and dispatching the event.
+ *
+ * Lease & fencing (issue #1557)
+ * -----------------------------
+ * `lockedAt`/`lockedBy` form a *lease*, not a permanent claim. A relay worker
+ * claims rows by writing `lockedAt = now` and `lockedBy = instanceId`; the
+ * lease expires `OUTBOX_LOCK_TIMEOUT_MS` (default 60s) later. A crashed worker
+ * therefore cannot strand a row forever:
+ *
+ *   - `reapStuckRelays()` clears leases older than the timeout (and runs at the
+ *     start of every relay cycle as well as on its own timer).
+ *   - Completion writes are conditional on the exact `(lockedBy, lockedAt)`
+ *     pair observed when the row was claimed. If another worker re-claimed the
+ *     row in the meantime, the update matches zero rows and the stale worker
+ *     skips the write. The claim timestamp is the fencing token: it changes on
+ *     every re-claim, so a stale worker cannot overwrite a newer attempt.
  */
 
 import crypto from 'crypto';
+import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 import {
   emitTransactionEvent,
@@ -25,16 +41,11 @@ import {
 // ─── Prisma Access ───────────────────────────────────────────────────────────
 
 /**
- * Lazily resolves the Prisma client and its `eventOutbox` delegate.
- *
- * Importing `prisma` at module load time is fragile: depending on the runtime
- * path (e.g. test harnesses, hot-reload, or a partially initialized client),
- * the imported binding can be undefined or lack the `eventOutbox` delegate,
- * causing `prisma.eventOutbox.create` to throw
- * "Cannot read properties of undefined (reading 'create')".
- *
- * Resolving the delegate at call time (with a clear error if unavailable)
- * makes the failure mode explicit and robust across runtime paths.
+ * Lazily resolves the Prisma client. Importing `prisma` at module load time is
+ * fragile: depending on the runtime path (tests, hot-reload, partially
+ * initialized client) the binding can be undefined, causing confusing
+ * `Cannot read properties of undefined` errors deep inside fire-and-forget
+ * writes. Resolving at call time makes the failure mode explicit.
  */
 function getPrismaClient() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -45,6 +56,23 @@ function getPrismaClient() {
 function getEventOutboxDelegate() {
   const prisma = getPrismaClient();
   const delegate = prisma?.eventOutbox;
+function getPrisma() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prisma } = require('./prisma') as typeof import('./prisma');
+  if (!prisma) {
+    throw new Error(
+      'Prisma client is not initialized. Ensure `prisma generate` has run and the client is instantiated before use.',
+    );
+  }
+  return prisma;
+}
+
+/**
+ * Resolves the `eventOutbox` delegate and fails with a clear message when the
+ * generated client is stale or a mocked client is missing the model.
+ */
+function getEventOutboxDelegate() {
+  const delegate = getPrisma()?.eventOutbox;
   if (!delegate) {
     throw new Error(
       'Prisma client is not initialized or missing the `eventOutbox` delegate. ' +
@@ -67,12 +95,19 @@ export interface EventOutboxRecord {
   status: OutboxEventStatus;
   aggregateType: OutboxAggregateType;
   aggregateId: string;
+  vaultId: string | null;
   sequence: number;
   attemptCount: number;
   maxAttempts: number;
   lastError: string | null;
   lockedAt: string | null;
   lockedBy: string | null;
+  /**
+   * Fencing token for the current lease (`${lockedBy}:${lockedAt epoch ms}`).
+   * `null` when the row is not leased. Changes on every re-claim, so consumers
+   * can detect a stale worker attempting to finish an old lease.
+   */
+  leaseToken: string | null;
   createdAt: string;
   updatedAt: string;
   relayedAt: string | null;
@@ -101,6 +136,7 @@ export interface OutboxMetrics {
   deadLettered: number;
   locked: number;
   total: number;
+  oldestPendingAgeSeconds: number;
 }
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -115,9 +151,18 @@ function getBatchSize(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
 }
 
-function getLockTimeoutMs(): number {
+/**
+ * Lease duration for a claimed row. Exposed so operators/tests can shorten it
+ * and so the reaper and claim logic always agree on the boundary.
+ */
+export function getOutboxLeaseMs(): number {
   const parsed = parseInt(process.env.OUTBOX_LOCK_TIMEOUT_MS || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60000;
+}
+
+/** Backwards-compatible alias for the lease duration. */
+function getLockTimeoutMs(): number {
+  return getOutboxLeaseMs();
 }
 
 function getMaxAttempts(): number {
@@ -130,9 +175,30 @@ function getRetentionMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 7 * 24 * 60 * 60 * 1000; // 7 days
 }
 
+function getReaperIntervalMs(): number {
+  const parsed = parseInt(process.env.OUTBOX_REAPER_INTERVAL_MS || '', 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  // Reap at least twice per lease window so stuck rows recover promptly.
+  return Math.max(1000, Math.floor(getOutboxLeaseMs() / 2));
+}
+
 /** Unique instance identifier for distributed locking. */
 function getInstanceId(): string {
   return process.env.OUTBOX_INSTANCE_ID || `instance-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Builds the fencing token for a lease. The claim timestamp (millisecond
+ * precision) is included so every re-claim produces a different token.
+ */
+export function buildOutboxLeaseToken(
+  lockedBy: string | null | undefined,
+  lockedAt: Date | string | null | undefined,
+): string | null {
+  if (!lockedBy || !lockedAt) return null;
+  const millis = lockedAt instanceof Date ? lockedAt.getTime() : Date.parse(String(lockedAt));
+  if (!Number.isFinite(millis)) return null;
+  return `${lockedBy}:${millis}`;
 }
 
 /**
@@ -144,6 +210,13 @@ function getInstanceId(): string {
 export function assertEventOutboxModelAvailable(client?: unknown): void {
   const target = (client ?? getPrismaClient()) as { eventOutbox?: { create?: unknown } } | null | undefined;
   const delegate = target?.eventOutbox;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prisma } = require('./prisma') as typeof import('./prisma');
+  const c = client ?? prisma;
+  const delegate = (c as { eventOutbox?: { create?: unknown } } | null | undefined)?.eventOutbox;
+  const resolved = client ?? getPrisma();
+  const delegate = (resolved as { eventOutbox?: { create?: unknown } } | null | undefined)
+    ?.eventOutbox;
   if (!delegate || typeof delegate.create !== 'function') {
     throw new Error(
       'Prisma client is missing the eventOutbox model. Run `prisma generate` and ensure the EventOutbox migration is applied.',
@@ -157,6 +230,7 @@ class EventOutboxService {
   private isRunning = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
+  private reaperTimer: NodeJS.Timeout | null = null;
   private instanceId: string;
   private inFlight: Promise<unknown> | null = null;
   private abortCleanup: (() => void) | null = null;
@@ -166,14 +240,17 @@ class EventOutboxService {
     this.instanceId = getInstanceId();
   }
 
+  /** Instance identifier used as the lease owner. */
+  getInstanceId(): string {
+    return this.instanceId;
+  }
+
   // ─── Public API ────────────────────────────────────────────────────────────
 
   /**
    * Writes an event to the outbox table.
    * This should be called within the same transaction boundary as the business
    * operation (e.g., inside a Prisma $transaction) to ensure atomic persistence.
-   *
-   * Returns the created outbox record.
    */
   async writeEvent(input: OutboxWriteInput): Promise<EventOutboxRecord> {
     assertEventOutboxModelAvailable();
@@ -187,7 +264,6 @@ class EventOutboxService {
         status: 'pending',
         aggregateType: input.aggregateType,
         aggregateId: input.aggregateId,
-        vaultId,
         sequence: await this.nextSequenceForVault(vaultId),
         attemptCount: 0,
         maxAttempts: input.maxAttempts ?? getMaxAttempts(),
@@ -201,8 +277,11 @@ class EventOutboxService {
 
   /**
    * Processes pending events from the outbox table.
-   * Uses instance-level locking to prevent duplicate processing in multi-pod deployments.
-   * Can be called on a schedule or manually.
+   *
+   * The cycle first reaps expired leases, then claims eligible rows with a
+   * conditional update. Completion writes are fenced on the claim timestamp so
+   * a worker whose lease expired mid-delivery cannot overwrite the state of the
+   * worker that re-claimed the row.
    */
   async processOutbox(batchSize?: number, signal?: AbortSignal): Promise<OutboxRelayResult> {
     const limit = batchSize ?? getBatchSize();
@@ -217,6 +296,17 @@ class EventOutboxService {
     };
 
     try {
+      // 0. Return crashed workers' leases to the pool before selecting work.
+      await this.reapStuckRelays(now).catch((err) => {
+        logger.log('warn', 'Outbox lease reaper failed during relay cycle', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      // 1. Find eligible entries: pending or failed entries whose lock is
+      //    expired. Order by (vaultId, sequence, createdAt) so per-vault
+      //    ordering is preserved and events for different vaults do not block
+      //    each other.
       // 1. Find eligible entries: pending or failed entries whose lock is expired.
       //    Order by (vaultId, sequence, createdAt) so per-vault ordering is
       //    preserved and events for different vaults do not block each other.
@@ -227,16 +317,14 @@ class EventOutboxService {
       const candidates = await getEventOutboxDelegate().findMany({
         where: {
           status: { in: ['pending', 'failed'] },
-          OR: [
-            { lockedAt: null },
-            { lockedAt: { lt: lockExpiry } },
-          ],
+          OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiry } }],
         },
         orderBy: [
-          { vaultId: 'asc' },
+          { aggregateId: 'asc' },
           { sequence: 'asc' },
           { createdAt: 'asc' },
         ],
+        orderBy: [{ vaultId: 'asc' }, { sequence: 'asc' }, { createdAt: 'asc' }],
         take: limit,
       });
 
@@ -248,30 +336,33 @@ class EventOutboxService {
       //     process the lowest-sequence eligible event. This guarantees a
       //     consumer tracking vault.version never observes sequence N+1
       //     before sequence N for the same vault.
-      const headOfLine = new Map<string, typeof candidates[number]>();
+      const headOfLine = new Map<string, (typeof candidates)[number]>();
       for (const c of candidates) {
-        const key = c.vaultId ?? c.aggregateId;
+        const key = c.aggregateId;
+      for (const candidate of candidates) {
+        const key = candidate.vaultId ?? candidate.aggregateId;
         const existing = headOfLine.get(key);
-        if (!existing || c.sequence < existing.sequence) {
-          headOfLine.set(key, c);
+        if (!existing || candidate.sequence < existing.sequence) {
+          headOfLine.set(key, candidate);
         }
       }
       const orderedCandidates = Array.from(headOfLine.values()).sort((a, b) => {
-        const va = a.vaultId ?? a.aggregateId;
-        const vb = b.vaultId ?? b.aggregateId;
+        const va = a.aggregateId;
+        const vb = b.aggregateId;
         if (va !== vb) return va < vb ? -1 : 1;
         return a.sequence - b.sequence;
       });
 
+      // 2. Claim the selected entries. The guard re-checks that nobody else
+      //    claimed them between the read and the write.
+      const candidateIds = orderedCandidates.map((entry) => entry.id);
       // 2. Lock the claimed entries by updating lockedAt/lockedBy in bulk
       const candidateIds = orderedCandidates.map((e) => e.id);
       await getEventOutboxDelegate().updateMany({
         where: {
           id: { in: candidateIds },
-          OR: [
-            { lockedAt: null },
-            { lockedAt: { lt: lockExpiry } },
-          ],
+          status: { in: ['pending', 'failed'] },
+          OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiry } }],
         },
         data: {
           lockedAt: now,
@@ -279,8 +370,8 @@ class EventOutboxService {
         },
       });
 
-      // 3. Re-fetch the entries we successfully locked (some may have been
-      //    concurrently claimed by another instance)
+      // 3. Re-fetch only the rows this instance actually claimed. `lockedAt`
+      //    is the fencing token: a row claimed by another instance is skipped.
       const entries = await getEventOutboxDelegate().findMany({
         where: {
           id: { in: candidateIds },
@@ -288,29 +379,26 @@ class EventOutboxService {
           lockedAt: now,
         },
         orderBy: [
-          { vaultId: 'asc' },
+          { aggregateId: 'asc' },
           { sequence: 'asc' },
           { createdAt: 'asc' },
         ],
+        orderBy: [{ vaultId: 'asc' }, { sequence: 'asc' }, { createdAt: 'asc' }],
       });
 
       if (entries.length === 0) {
         return result;
       }
 
-      // 4. Relay each entry
+      // 4. Relay each entry.
       for (const entry of entries) {
-        // Stop claiming work once shutdown begins; unprocessed entries stay
-        // locked until the lock timeout expires and are picked up on restart.
         if (signal?.aborted) break;
+        const claimToken = this.leaseTokenFor(entry.lockedBy, entry.lockedAt);
         try {
           const payload = JSON.parse(entry.payload) as TransactionEventPayload;
           // emitTransactionEvent schedules webhook deliveries asynchronously.
-          // We await it here so relayed/retry decisions happen after the event
-          // is queued for delivery, not before. Note that actual HTTP delivery
-          // happens in the background via setTimeout — if the process crashes
-          // after marking relayed but before delivery completes, the webhook
-          // delivery's own retry mechanism still applies.
+          // Awaiting it ensures relayed/retry decisions happen after the event
+          // is queued for delivery, not before.
           const deliveredCount = await emitTransactionEvent(
             entry.eventType as TransactionEventType,
             payload,
@@ -320,6 +408,13 @@ class EventOutboxService {
           // re-relayed after restart (at-least-once delivery).
           if (signal?.aborted) break;
 
+          const fenced = await this.fencedUpdate(entry.id, claimToken, {
+            status: 'relayed',
+            attemptCount: { increment: 1 },
+            relayedAt: new Date(),
+            lockedAt: null,
+            lockedBy: null,
+            lastError: null,
           await getEventOutboxDelegate().update({
             where: { id: entry.id },
             data: {
@@ -332,6 +427,15 @@ class EventOutboxService {
             },
           });
 
+          if (!fenced) {
+            logger.log('warn', 'Outbox relay result discarded: lease was re-claimed (fencing)', {
+              outboxId: entry.id,
+              eventType: entry.eventType,
+              staleLeaseToken: claimToken,
+            });
+            continue;
+          }
+
           result.relayed++;
           logger.log('info', 'Outbox event relayed', {
             outboxId: entry.id,
@@ -340,6 +444,7 @@ class EventOutboxService {
             aggregateId: entry.aggregateId,
             sequence: entry.sequence,
             deliveredCount,
+            leaseToken: claimToken,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -348,17 +453,16 @@ class EventOutboxService {
           if (signal?.aborted) break;
 
           if (nextAttempt >= entry.maxAttempts) {
-            // Exhausted retries — move to dead_letter
-            await getEventOutboxDelegate().update({
-              where: { id: entry.id },
-              data: {
-                status: 'dead_letter',
-                attemptCount: nextAttempt,
-                lastError: errorMessage,
-                lockedAt: null,
-                lockedBy: null,
-              },
+            const fenced = await this.fencedUpdate(entry.id, claimToken, {
+              status: 'dead_letter',
+              attemptCount: nextAttempt,
+              lastError: errorMessage,
+              lockedAt: null,
+              lockedBy: null,
             });
+
+            if (!fenced) continue;
+
             result.deadLettered++;
             result.errors.push(`[${entry.id}] Dead-letter: ${errorMessage}`);
 
@@ -371,19 +475,20 @@ class EventOutboxService {
             });
             void this.sendDeadLetterAlert(entry.id, entry.eventType, nextAttempt, errorMessage);
           } else {
-            // Mark as failed for retry
-            await getEventOutboxDelegate().update({
-              where: { id: entry.id },
-              data: {
-                status: 'failed',
-                attemptCount: nextAttempt,
-                lastError: errorMessage,
-                lockedAt: null,
-                lockedBy: null,
-              },
+            const fenced = await this.fencedUpdate(entry.id, claimToken, {
+              status: 'failed',
+              attemptCount: nextAttempt,
+              lastError: errorMessage,
+              lockedAt: null,
+              lockedBy: null,
             });
+
+            if (!fenced) continue;
+
             result.failed++;
-            result.errors.push(`[${entry.id}] Failed (${nextAttempt}/${entry.maxAttempts}): ${errorMessage}`);
+            result.errors.push(
+              `[${entry.id}] Failed (${nextAttempt}/${entry.maxAttempts}): ${errorMessage}`,
+            );
 
             logger.log('warn', 'Outbox event relay failed, will retry', {
               outboxId: entry.id,
@@ -407,7 +512,93 @@ class EventOutboxService {
     }
   }
 
-  private async sendDeadLetterAlert(outboxId: string, eventType: string, attempts: number, error: string): Promise<void> {
+  /**
+   * Releases leases held past their expiry, returning stranded rows to the
+   * pending/failed pool. Safe to run concurrently: the `lockedAt < cutoff`
+   * guard means only genuinely expired leases are touched.
+   *
+   * @returns number of rows whose lease was released.
+   */
+  async reapStuckRelays(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - getOutboxLeaseMs());
+
+    const stuck = await getEventOutboxDelegate().findMany({
+      where: {
+        status: { in: ['pending', 'failed'] },
+        lockedAt: { lt: cutoff },
+      },
+      select: { id: true, eventType: true, lockedBy: true, lockedAt: true },
+    });
+
+    if (stuck.length === 0) return 0;
+
+    const result = await getEventOutboxDelegate().updateMany({
+      where: {
+        id: { in: stuck.map((row) => row.id) },
+        status: { in: ['pending', 'failed'] },
+        lockedAt: { lt: cutoff },
+      },
+      data: {
+        lockedAt: null,
+        lockedBy: null,
+      },
+    });
+
+    if (result.count > 0) {
+      logger.log('warn', 'Reaped stuck outbox relay leases', {
+        action: 'outbox_lease_reaper',
+        reclaimed: result.count,
+        candidates: stuck.length,
+        leaseMs: getOutboxLeaseMs(),
+        releasedLeases: stuck.map((row) => ({
+          outboxId: row.id,
+          eventType: row.eventType,
+          lockedBy: row.lockedBy,
+          leaseToken: this.leaseTokenFor(row.lockedBy, row.lockedAt),
+        })),
+      });
+    }
+
+    return result.count;
+  }
+
+  /**
+   * Applies an update only if this worker still owns the exact lease it
+   * claimed. Returns `false` when the lease was stolen/reclaimed (fencing).
+   */
+  private async fencedUpdate(
+    id: string,
+    claimToken: string | null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any,
+  ): Promise<boolean> {
+    if (!claimToken) return false;
+
+    // Encode both halves of the token in the guard. Extract the timestamp from
+    // the token so Prisma can compare the DateTime column.
+    const separator = claimToken.lastIndexOf(':');
+    const lockedBy = claimToken.slice(0, separator);
+    const lockedAtMs = Number(claimToken.slice(separator + 1));
+    if (!lockedBy || !Number.isFinite(lockedAtMs)) return false;
+
+    const result = await getEventOutboxDelegate().updateMany({
+      where: {
+        id,
+        lockedBy,
+        lockedAt: new Date(lockedAtMs),
+      },
+      data,
+    });
+
+    return result.count === 1;
+  }
+
+  private async sendDeadLetterAlert(
+    outboxId: string,
+    eventType: string,
+    attempts: number,
+    error: string,
+  ): Promise<void> {
     const webhookUrl = process.env.SLACK_WEBHOOK_URL || process.env.ALERT_WEBHOOK_URL;
     if (!webhookUrl) return;
 
@@ -416,14 +607,14 @@ class EventOutboxService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: `:rotating_light: *YieldVault Outbox Dead-Lettered*\nEvent \`${eventType}\` (ID: ${outboxId}) failed after ${attempts} attempts.\nLatest error: \`${error}\``
-        })
+          text: `:rotating_light: *YieldVault Outbox Dead-Lettered*\nEvent \`${eventType}\` (ID: ${outboxId}) failed after ${attempts} attempts.\nLatest error: \`${error}\``,
+        }),
       });
     } catch (err) {
       logger.log('error', 'Failed to send outbox dead-letter alert', {
         error: err instanceof Error ? err.message : String(err),
         outboxId,
-        eventType
+        eventType,
       });
     }
   }
@@ -481,7 +672,7 @@ class EventOutboxService {
 
   /**
    * Replays pending events from the outbox on startup.
-   * Used to recover any events that were written but not relayed before a crash.
+   * Used to recover events that were written but not relayed before a crash.
    */
   async replayOnStartup(): Promise<OutboxRelayResult> {
     assertEventOutboxModelAvailable();
@@ -504,8 +695,7 @@ class EventOutboxService {
   // ─── Background Processing ─────────────────────────────────────────────────
 
   /**
-   * Starts the background outbox processor.
-   * Polls for pending events on a configured interval and relays them.
+   * Starts the background outbox processor and its lease reaper.
    */
   start(options: { signal?: AbortSignal } = {}): void {
     if (this.isRunning) {
@@ -529,6 +719,7 @@ class EventOutboxService {
     logger.log('info', 'Starting outbox processor', {
       pollIntervalMs: intervalMs,
       batchSize: getBatchSize(),
+      leaseMs: getOutboxLeaseMs(),
       instanceId: this.instanceId,
     });
 
@@ -552,13 +743,13 @@ class EventOutboxService {
       this.pollTimer.unref();
     }
 
-    // Start periodic cleanup of old processed entries (every hour)
     this.startCleanupTimer();
+    this.startReaperTimer();
   }
 
   /**
-   * Stops the background outbox processor: clears timers and resolves once
-   * any in-flight polling cycle has finished.
+   * Stops the background processor: clears timers and resolves once any
+   * in-flight polling cycle has finished.
    */
   async stop(): Promise<void> {
     if (this.isRunning) {
@@ -570,6 +761,10 @@ class EventOutboxService {
       if (this.cleanupTimer) {
         clearInterval(this.cleanupTimer);
         this.cleanupTimer = null;
+      }
+      if (this.reaperTimer) {
+        clearInterval(this.reaperTimer);
+        this.reaperTimer = null;
       }
       this.abortCleanup?.();
       this.abortCleanup = null;
@@ -583,9 +778,7 @@ class EventOutboxService {
     }
   }
 
-  /**
-   * Runs one polling cycle unless stopped/aborted or a cycle is already running.
-   */
+  /** Runs one polling cycle unless stopped/aborted or a cycle is already running. */
   private runCycle(label: string): void {
     if (!this.isRunning || this.signal?.aborted || this.inFlight) return;
 
@@ -601,20 +794,16 @@ class EventOutboxService {
     this.inFlight = cycle;
   }
 
-  /**
-   * Returns whether the processor is currently running.
-   */
+  /** Returns whether the processor is currently running. */
   get isActive(): boolean {
     return this.isRunning;
   }
 
   // ─── Metrics & Health ──────────────────────────────────────────────────────
 
-  /**
-   * Returns a snapshot of outbox metrics for monitoring/administration.
-   */
+  /** Returns a snapshot of outbox metrics for monitoring/administration. */
   async getMetrics(): Promise<OutboxMetrics> {
-    const [pending, relayed, failed, deadLettered, locked, total] = await Promise.all([
+    const [pending, relayed, failed, deadLettered, locked, total, oldestPending] = await Promise.all([
       getEventOutboxDelegate().count({ where: { status: 'pending' } }),
       getEventOutboxDelegate().count({ where: { status: 'relayed' } }),
       getEventOutboxDelegate().count({ where: { status: 'failed' } }),
@@ -626,33 +815,50 @@ class EventOutboxService {
         },
       }),
       getEventOutboxDelegate().count(),
+      getEventOutboxDelegate().findFirst({
+        where: { status: { in: ['pending', 'failed'] } },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true },
+      }),
     ]);
 
-    return { pending, relayed, failed, deadLettered, locked, total };
+    return {
+      pending,
+      relayed,
+      failed,
+      deadLettered,
+      locked,
+      total,
+      oldestPendingAgeSeconds: oldestPending
+        ? Math.max(0, (Date.now() - new Date(oldestPending.createdAt).getTime()) / 1000)
+        : 0,
+    };
   }
 
-  /**
-   * Lists outbox entries with optional filters.
-   */
-  async listEntries(filters: {
-    status?: OutboxEventStatus | OutboxEventStatus[];
-    aggregateType?: OutboxAggregateType;
-    aggregateId?: string;
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<EventOutboxRecord[]> {
+  /** Lists outbox entries with optional filters. */
+  async listEntries(
+    filters: {
+      status?: OutboxEventStatus | OutboxEventStatus[];
+      aggregateType?: OutboxAggregateType;
+      aggregateId?: string;
+      vaultId?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<EventOutboxRecord[]> {
     const where: Record<string, unknown> = {};
 
     if (filters.status) {
-      where.status = Array.isArray(filters.status)
-        ? { in: filters.status }
-        : filters.status;
+      where.status = Array.isArray(filters.status) ? { in: filters.status } : filters.status;
     }
     if (filters.aggregateType) {
       where.aggregateType = filters.aggregateType;
     }
     if (filters.aggregateId) {
       where.aggregateId = filters.aggregateId;
+    }
+    if (filters.vaultId) {
+      where.vaultId = filters.vaultId;
     }
 
     const rows = await getEventOutboxDelegate().findMany({
@@ -666,6 +872,13 @@ class EventOutboxService {
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
+
+  private leaseTokenFor(
+    lockedBy: string | null | undefined,
+    lockedAt: Date | string | null | undefined,
+  ): string | null {
+    return buildOutboxLeaseToken(lockedBy, lockedAt);
+  }
 
   /**
    * Starts a periodic cleanup timer to remove old processed entries.
@@ -685,9 +898,27 @@ class EventOutboxService {
       });
     }, cleanupIntervalMs);
 
-    // Unref so the timer doesn't keep the process alive
     if (this.cleanupTimer && typeof this.cleanupTimer === 'object' && 'unref' in this.cleanupTimer) {
       this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Starts the standalone stuck-lease reaper. Runs every
+   * `OUTBOX_REAPER_INTERVAL_MS` (default half the lease duration).
+   */
+  private startReaperTimer(): void {
+    this.reaperTimer = setInterval(() => {
+      if (this.signal?.aborted) return;
+      this.reapStuckRelays().catch((err) => {
+        logger.log('error', 'Outbox lease reaper cycle failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, getReaperIntervalMs());
+
+    if (this.reaperTimer && typeof this.reaperTimer === 'object' && 'unref' in this.reaperTimer) {
+      this.reaperTimer.unref();
     }
   }
 
@@ -698,6 +929,7 @@ class EventOutboxService {
     status: string;
     aggregateType: string;
     aggregateId: string;
+    vaultId?: string | null;
     sequence: number;
     attemptCount: number;
     maxAttempts: number;
@@ -715,12 +947,14 @@ class EventOutboxService {
       status: row.status as OutboxEventStatus,
       aggregateType: row.aggregateType as OutboxAggregateType,
       aggregateId: row.aggregateId,
+      vaultId: row.vaultId ?? null,
       sequence: row.sequence,
       attemptCount: row.attemptCount,
       maxAttempts: row.maxAttempts,
       lastError: row.lastError,
       lockedAt: row.lockedAt?.toISOString() ?? null,
       lockedBy: row.lockedBy,
+      leaseToken: this.leaseTokenFor(row.lockedBy, row.lockedAt),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       relayedAt: row.relayedAt?.toISOString() ?? null,
@@ -729,12 +963,15 @@ class EventOutboxService {
 
   /**
    * Computes the next monotonic sequence number for a given vault.
-   * Sequences are per-vault and increment by exactly 1. Uses a transaction
-   * with a row-level lock on the vault's outbox rows to avoid races between
-   * concurrent writers.
+   * Sequences are per-vault and increment by exactly 1.
    */
   private async nextSequenceForVault(vaultId: string): Promise<number> {
     const result = await getPrismaClient().$transaction(async (tx) => {
+    const latest = await getEventOutboxDelegate().findFirst({
+      where: { aggregateId: vaultId },
+      orderBy: { sequence: 'desc' },
+      select: { sequence: true },
+    const result = await getPrisma().$transaction(async (tx) => {
       const latest = await tx.eventOutbox.findFirst({
         where: { vaultId },
         orderBy: { sequence: 'desc' },
@@ -742,7 +979,7 @@ class EventOutboxService {
       });
       return (latest?.sequence ?? 0) + 1;
     });
-    return result;
+    return (latest?.sequence ?? 0) + 1;
   }
 }
 

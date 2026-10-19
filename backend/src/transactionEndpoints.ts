@@ -25,6 +25,7 @@ import { tenantGuard } from './middleware/tenantGuard';
 import { Permission } from './middleware/rbac';
 import { createTimeoutFor } from './middleware/timeoutMiddleware';
 import { validate, TransactionListQuerySchema } from './middleware/validate';
+import { sendApiError } from './middleware/apiError';
 
 const router = Router();
 const CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || '30000', 10);
@@ -73,7 +74,7 @@ router.get('/',
         // Validate type filter if provided
         const { error: typeError } = parseTypeFilter(typeof type === 'string' ? type : undefined);
         if (typeError) {
-          res.status(400).json({ error: 'Bad Request', status: 400, message: typeError });
+          sendApiError(req, res, { status: 400, code: 'INVALID_TYPE_FILTER', message: typeError });
           return;
         }
 
@@ -82,7 +83,7 @@ router.get('/',
           typeof status === 'string' ? status : undefined,
         );
         if (statusError) {
-          res.status(400).json({ error: 'Bad Request', status: 400, message: statusError });
+          sendApiError(req, res, { status: 400, code: 'INVALID_STATUS_FILTER', message: statusError });
           return;
         }
 
@@ -97,9 +98,9 @@ router.get('/',
           res.status(200).json(response);
         } catch (err) {
           if (err instanceof DateRangeParseError) {
-            res.status(400).json({
-              error: 'Bad Request',
+            sendApiError(req, res, {
               status: 400,
+              code: 'INVALID_DATE_RANGE',
               message: err.message,
             });
             return;
@@ -115,7 +116,7 @@ router.get('/',
         typeof type === 'string' ? type : undefined,
       );
       if (typeError) {
-        res.status(400).json({ error: 'Bad Request', status: 400, message: typeError });
+        sendApiError(req, res, { status: 400, code: 'INVALID_TYPE_FILTER', message: typeError });
         return;
       }
 
@@ -124,7 +125,7 @@ router.get('/',
         typeof status === 'string' ? status : undefined,
       );
       if (statusError) {
-        res.status(400).json({ error: 'Bad Request', status: 400, message: statusError });
+        sendApiError(req, res, { status: 400, code: 'INVALID_STATUS_FILTER', message: statusError });
         return;
       }
 
@@ -132,9 +133,9 @@ router.get('/',
       // Resolve and validate the requested sort field against the allowlist.
       const sort = resolveTransactionSort(paginationQuery.sortBy, paginationQuery.sortOrder);
       if (!sort.valid) {
-        res.status(400).json({
-          error: 'Bad Request',
+        sendApiError(req, res, {
           status: 400,
+          code: 'INVALID_SORT_BY',
           message: `Invalid sortBy value '${sort.requested}'. Allowed values: timestamp, type, status`,
         });
         return;
@@ -148,9 +149,9 @@ router.get('/',
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Invalid date range';
-        res.status(400).json({
-          error: 'Bad Request',
+        sendApiError(req, res, {
           status: 400,
+          code: 'INVALID_DATE_RANGE',
           message: errorMsg,
         });
         return;
@@ -210,9 +211,9 @@ router.get('/',
           });
 
           if (!cursorTx) {
-            res.status(400).json({
-              error: 'Bad Request',
+            sendApiError(req, res, {
               status: 400,
+              code: 'INVALID_CURSOR',
               message: 'Invalid cursor value',
             });
             return;
@@ -230,9 +231,9 @@ router.get('/',
             error: err instanceof Error ? err.message : String(err),
             traceId,
           });
-          res.status(400).json({
-            error: 'Bad Request',
+          sendApiError(req, res, {
             status: 400,
+            code: 'INVALID_CURSOR',
             message: 'Invalid cursor value',
           });
           return;
@@ -282,9 +283,9 @@ router.get('/',
         traceId,
       });
 
-      res.status(500).json({
-        error: 'Internal Server Error',
+      sendApiError(req, res, {
         status: 500,
+        code: 'TRANSACTION_HISTORY_FAILED',
         message: 'Failed to retrieve transaction history',
       });
     }

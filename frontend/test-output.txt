@@ -1,5 +1,0 @@
-
-> frontend@0.0.0 test:run
-> vitest --run
-
-sh: 1: vitest: not found

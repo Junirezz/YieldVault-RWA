@@ -91,6 +91,15 @@ export const RefreshSchema = z
   })
   .strict();
 
+export const TransferResolveParamsSchema = z.object({
+  key: z.string().regex(/^transfer:[a-f0-9]{16}:[A-Za-z0-9._:~-]{8,255}$/),
+}).strict();
+
+export const TransferResolveBodySchema = z.union([
+  z.object({ transactionHash: z.string().min(1).max(256) }).strict(),
+  z.object({ discard: z.literal(true) }).strict(),
+]);
+
 // ─── Webhook schemas ──────────────────────────────────────────────────────────
 
 /**
@@ -253,8 +262,6 @@ export function validate(schemas: ValidateTargets) {
           code: 'VALIDATION_ERROR',
           summary: 'Request validation failed',
           message: formatZodError(issues),
-          summary: 'Request validation failed',
-          errors: details,
           details,
           errors: details,
           retryable: false,

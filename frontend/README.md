@@ -38,6 +38,10 @@ npm run test:run
 npm run test:e2e
 ```
 
+## Generated Reports
+
+Lint, test and bundle reports are **generated locally and must not be committed**. Write them to the git-ignored `test-results/` directory, or delete them before committing. The common artifacts (`lint-output*.txt`, `lint.txt`, `test-results.txt`, `test-output.txt`, `test_output.json`, `vitest-results*.json`, `bundle-stats.html`) are covered by `.gitignore`.
+
 ## Related Docs
 
 - API docs output: [`docs/api/frontend`](/Users/macbook/stellar/YieldVault-RWA/docs/api/frontend)

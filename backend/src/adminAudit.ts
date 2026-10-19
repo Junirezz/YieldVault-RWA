@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import { prisma } from './prisma';
 import { resetAuditLogs } from './auditLog';
 import { redactSensitiveLogAttributes } from './auditRedaction';
+import { logger } from './middleware/structuredLogging';
 import crypto from 'crypto';
 
 type AuditStorageMode = 'memory' | 'prisma' | 'hybrid';
@@ -105,6 +106,20 @@ export async function recordAdminAuditLog(
 
     addInMemory(entry);
   }
+}
+
+export function recordAdminAuditLogInBackground(
+  req: Request,
+  action: string,
+  statusCode: number,
+  metadata: Record<string, unknown> = {},
+): void {
+  void recordAdminAuditLog(req, action, statusCode, metadata).catch((error: unknown) => {
+    logger.error('Failed to persist background admin audit log', {
+      action,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }
 
 export async function listAdminAuditLogs(filters: AuditLogFilters): Promise<AdminAuditLogRecord[]> {

@@ -139,5 +139,19 @@ export async function ensurePaginationFixtureTransactions(
         timestamp: new Date(now - i * 3600000),
       },
     });
+
+    const validWalletTxId = `tx-valid-${prefix}-${i + 1}`;
+    await prisma.transaction.upsert({
+      where: { id: validWalletTxId },
+      update: {},
+      create: {
+        id: validWalletTxId,
+        user: VALID_TEST_WALLET,
+        amount: ((i + 1) * 15).toFixed(2),
+        type: i % 2 === 0 ? 'deposit' : 'withdrawal',
+        status: 'completed',
+        timestamp: new Date(now - i * 3600000),
+      },
+    });
   }
 }

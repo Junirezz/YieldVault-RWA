@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { useState } from "react";
 import { Drawer } from "./Drawer";
 
 describe("Drawer", () => {
@@ -94,5 +95,62 @@ describe("Drawer", () => {
     fireEvent.keyDown(document, { key: "Tab" });
 
     expect(document.activeElement).toBe(focusableElements[0]);
+  });
+
+  it("restores focus to the trigger after closing", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button data-testid="drawer-trigger" onClick={() => setOpen(true)}>
+            open drawer
+          </button>
+          <Drawer isOpen={open} onClose={() => setOpen(false)} title="Drawer Title">
+            <button type="button">Inside button</button>
+          </Drawer>
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const trigger = screen.getByTestId("drawer-trigger");
+    trigger.focus();
+    fireEvent.click(trigger);
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("restores focus when the drawer unmounts", async () => {
+    function Harness() {
+      const [mounted, setMounted] = useState(false);
+      return (
+        <>
+          <button data-testid="mount" onClick={() => setMounted(true)}>
+            mount
+          </button>
+          <button data-testid="unmount" onClick={() => setMounted(false)}>
+            unmount
+          </button>
+          {mounted && (
+            <Drawer isOpen onClose={() => {}} title="Drawer Title">
+              <button type="button">Inside button</button>
+            </Drawer>
+          )}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const mount = screen.getByTestId("mount");
+    mount.focus();
+    fireEvent.click(mount);
+    await screen.findByRole("dialog");
+
+    fireEvent.click(screen.getByTestId("unmount"));
+
+    await waitFor(() => expect(mount).toHaveFocus());
   });
 });

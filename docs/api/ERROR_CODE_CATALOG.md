@@ -164,10 +164,10 @@ source of truth for contract failure behavior.
 |------|------|-------------|-------------|
 | 1 | `AlreadyInitialized` | `initialize` called twice | Contract already deployed; call operational methods only |
 | 2 | `InsufficientShares` | `withdraw` / `execute_withdrawal` with more shares than balance | Lower share amount; refresh user balance |
-| 3 | `InvalidAmount` | Zero/negative amount or shares rounded to zero on deposit | Increase deposit amount above minimum |
+| 3 | `InvalidAmount` | Zero/negative amount | Pass a positive amount |
 | 4 | `ContractPaused` | Any user op while paused | Wait for admin `unpause`; show maintenance UI |
 | 5 | `ExceedsUserCap` | Deposit would exceed per-user cap | Reduce deposit or request cap increase |
-| 6 | `MinDepositNotMet` | Deposit below configured minimum | Deposit at least `min_deposit` (read from contract) |
+| 6 | `MinDepositNotMet` | Deposit below configured minimum, or dust that would mint zero shares (emits `dep_dust`) | Deposit at least `min_deposit` and at least one share's worth of assets |
 | 7 | `TimelockNotExpired` | `execute_withdrawal` before 24h timelock; also `execute_fee_bps_change` / `execute_treasury_change` / `execute_price_oracle_change` before the configured sensitive-parameter timelock elapses (Issue #969) | Wait until `unlock_timestamp` / queued `eta`; poll pending state |
 | 8 | `NoPendingWithdrawal` | `execute_withdrawal` with no pending record; also reused for `accept_admin`/`cancel_admin_rotation` with an unknown proposal id, and `execute_*_change`/`cancel_*_change` (sensitive-parameter timelock) with nothing queued | Call `withdraw` first for large withdrawals; call the matching `queue_*_change` first for timelocked params |
 | 9 | `LiquidityBufferNotMet` | `invest` would breach minimum idle buffer | Reduce invest amount or wait for deposits |
