@@ -240,7 +240,7 @@ export async function restoreApiKey(
     if (!key.deletedAt) {
       return { entityType: 'api_key' as const, entityId: apiKeyId, status: 'not_deleted' as const };
     }
-    if (key.tenant.deletedAt) {
+    if (key.tenant?.deletedAt) {
       return {
         entityType: 'api_key' as const,
         entityId: apiKeyId,
@@ -273,7 +273,7 @@ export async function restoreApiKey(
       let status: CriticalEntityLifecycleStatus = 'not_deleted';
       if (!current) {
         status = 'not_found';
-      } else if (current.deletedAt && current.tenant.deletedAt) {
+      } else if (current.deletedAt && current.tenant?.deletedAt) {
         status = 'parent_deleted';
       }
       return {

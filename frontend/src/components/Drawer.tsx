@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useCallback } from "react";
+import React from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import { useTranslation } from "../i18n";
 
 export interface DrawerProps {
   isOpen: boolean;
@@ -16,9 +18,6 @@ export interface DrawerProps {
   "aria-describedby"?: string;
 }
 
-const FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
 export const Drawer: React.FC<DrawerProps> = ({
   isOpen,
   onClose,
@@ -32,75 +31,12 @@ export const Drawer: React.FC<DrawerProps> = ({
   "aria-labelledby": ariaLabelledBy,
   "aria-describedby": ariaDescribedBy,
 }) => {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (!isOpen) return;
-
-      if (e.key === "Escape" && closeOnEscape) {
-        onClose();
-        return;
-      }
-
-      if (e.key === "Tab" && panelRef.current) {
-        const focusableElements =
-          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-
-        if (focusableElements.length === 0) {
-          e.preventDefault();
-          return;
-        }
-
-        const firstElement = focusableElements[0];
-        const lastElement = focusableElements[focusableElements.length - 1];
-
-        if (e.shiftKey) {
-          if (
-            document.activeElement === firstElement ||
-            document.activeElement === panelRef.current
-          ) {
-            lastElement.focus();
-            e.preventDefault();
-          }
-        } else if (document.activeElement === lastElement) {
-          firstElement.focus();
-          e.preventDefault();
-        }
-      }
-    },
-    [isOpen, onClose, closeOnEscape],
-  );
-
-  useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement as HTMLElement;
-      document.addEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "hidden";
-
-      if (panelRef.current) {
-        const focusableElements =
-          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-        if (focusableElements.length > 0) {
-          focusableElements[0].focus();
-        } else {
-          panelRef.current.focus();
-        }
-      }
-    } else {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-      if (previousFocusRef.current) {
-        previousFocusRef.current.focus();
-      }
-    }
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, handleKeyDown]);
+  const { t } = useTranslation();
+  const panelRef = useFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: onClose,
+    closeOnEscape,
+  });
 
   if (!isOpen) return null;
 
@@ -146,7 +82,7 @@ export const Drawer: React.FC<DrawerProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                aria-label="Close drawer"
+                aria-label={t("drawer.closeLabel")}
                 className="drawer-close-btn"
               >
                 <X size={20} aria-hidden="true" />

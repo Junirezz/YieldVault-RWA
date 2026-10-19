@@ -45,7 +45,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -61,6 +61,9 @@ jobs:
 
       - name: Type-check backend
         run: npm run build
+
+      - name: Validate Prometheus alert rules
+        run: docker run --rm --entrypoint=/bin/promtool -v "${{ github.workspace }}:/workspace" prom/prometheus:v2.55.0 check rules /workspace/backend/monitoring/prometheus-alerts.yml
 
       - name: Validate Prisma schema and migration consistency
         run: npm run prisma:schema-check
@@ -78,16 +81,13 @@ jobs:
         run: npm run ci:governance
 
       - name: Verify OpenAPI documentation
-        run: |
-          npm run generate:openapi
-          if [ -n "$(git status --porcelain openapi.json)" ]; then
-            echo "❌ openapi.json is out of date. Run 'npm run generate:openapi' locally and commit the changes."
-            git diff openapi.json
-            exit 1
-          fi
+        run: npm run check:openapi
 
       - name: Check API contract schema snapshots
         run: npm run snapshots:check
 
       - name: Check for database schema drift
         run: npm run db:check-drift
+
+      - name: Check dev (SQLite) vs prod (PostgreSQL) column type mapping
+        run: npm run db:check-types

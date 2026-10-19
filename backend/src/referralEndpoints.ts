@@ -6,6 +6,12 @@ import { cacheMiddleware } from "./middleware/cache";
 import { buildApiErrorBody, type ApiErrorBody } from "./middleware/apiError";
 import { tenantGuard } from "./middleware/tenantGuard";
 import { Permission } from "./middleware/rbac";
+import { Router, Request, Response } from 'express';
+import { referralService } from './referralService';
+import { logger } from './middleware/structuredLogging';
+import { normalizeWalletAddress } from './walletUtils';
+import { cacheMiddleware } from './middleware/cache';
+import { buildApiErrorBody, type ApiErrorBody, sendApiError } from './middleware/apiError';
 
 const router = Router();
 const REFERRAL_CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || "30000", 10);
@@ -85,6 +91,10 @@ router.get(
     }
 
     const normalizedWallet = normalizeWalletAddress(wallet);
+  if (!wallet) {
+    sendApiError(req, res, { status: 400, code: 'BAD_REQUEST', message: WALLET_REQUIRED_MESSAGE });
+    return;
+  }
 
     try {
       const stats = await referralService.getReferralStats(normalizedWallet);
@@ -101,6 +111,19 @@ router.get(
       });
       return res.status(500).json(buildReferralStatsErrorBody());
     }
+    if (!stats) {
+      sendApiError(req, res, { status: 404, code: 'NOT_FOUND', message: REFERRAL_STATS_NOT_FOUND_MESSAGE });
+      return;
+    }
+
+    return res.status(200).json(stats);
+  } catch (error) {
+    logger.log('error', 'Error fetching referral stats', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    sendApiError(req, res, { status: 500, code: 'INTERNAL_SERVER_ERROR', message: REFERRAL_STATS_ERROR_MESSAGE });
+    return;
   }
 );
 
@@ -166,6 +189,9 @@ router.get(
       });
       return res.status(500).json(buildReferralCodeErrorBody());
     }
+  if (!wallet) {
+    sendApiError(req, res, { status: 400, code: 'BAD_REQUEST', message: WALLET_REQUIRED_MESSAGE });
+    return;
   }
 );
 
@@ -225,6 +251,18 @@ router.post(
       });
       return res.status(500).json(buildReferralCodeErrorBody());
     }
+  const normalizedWallet = normalizeWalletAddress(wallet);
+
+  try {
+    const code = await referralService.getOrCreateReferralCode(normalizedWallet);
+    return res.status(200).json({ code });
+  } catch (error) {
+    logger.log('error', 'Error getting referral code', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    sendApiError(req, res, { status: 500, code: 'INTERNAL_SERVER_ERROR', message: REFERRAL_CODE_ERROR_MESSAGE });
+    return;
   }
 );
 

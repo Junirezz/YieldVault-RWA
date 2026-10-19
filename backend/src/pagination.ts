@@ -48,6 +48,8 @@ export interface PaginationMeta {
   prevCursor: string | null;
   /** Current page number (for offset-based pagination). */
   currentPage: number | null;
+  /** Legacy alias for currentPage. */
+  page?: number;
   /** Total number of pages (if total is known). */
   totalPages: number | null;
   /** Whether there are more items after this page. */
@@ -209,15 +211,16 @@ export function parsePaginationQuery(
     query.cursor = req.query.cursor;
   }
 
-  // Parse page (1-based, clamped — never rejected)
+  // Parse page (1-based, clamped to 1..maxPage — never rejected, Issue #1430)
   if (req.query.page !== undefined) {
+    const page = clampPageNumber(parseInt(req.query.page as string, 10)) ?? 1;
+    query.page = Math.min(page, mergedConfig.maxPage);
     const parsedPage = parseInt(req.query.page as string, 10);
     if (!Number.isNaN(parsedPage) && parsedPage > 0) {
       query.page = Math.min(parsedPage, mergedConfig.maxPage);
     } else {
       query.page = 1;
     }
-  }
   }
 
   // Parse sortBy
@@ -452,6 +455,7 @@ export function createPaginationEnvelope(meta: {
     nextCursor: meta.nextCursor ?? null,
     prevCursor: meta.prevCursor ?? null,
     currentPage: meta.currentPage ?? null,
+    page: meta.currentPage ?? undefined,
     totalPages: meta.totalPages ?? null,
     hasNextPage: meta.hasNextPage,
     hasPrevPage: meta.hasPrevPage,

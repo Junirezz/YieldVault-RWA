@@ -114,6 +114,21 @@ await resolveInDoubtTransfer(storeKey, { discard: true });
 `listInDoubtTransfers()` and `getInDoubtTransfer(storeKey)` expose the queue.
 Neither leaks the internal fingerprint.
 
+The admin API exposes the same controls:
+
+```http
+GET /admin/transfers/in-doubt
+POST /admin/transfers/{storeKey}/resolve
+```
+
+Both routes require an admin API key. The resolve body must be exactly one of
+`{"transactionHash":"<on-chain-hash>"}` or `{"discard":true}`. Use the hash
+only after confirming the transfer landed; discard only after checking that no
+matching transaction landed, because it releases the idempotency key for a new
+submission. Each resolution attempt is recorded as the
+`transfers.in_doubt.confirm` or `transfers.in_doubt.discard` admin audit action.
+Unknown or already-resolved keys return `404`.
+
 ## Errors
 
 Every failure is a `TransferOrchestrationError` subclass carrying `code`,

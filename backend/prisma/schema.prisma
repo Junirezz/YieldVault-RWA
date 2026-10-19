@@ -143,23 +143,6 @@ model AdminAuditLog {
   @@index([actor])
 }
 
-model ApiKey {
-  id         String    @id @default(uuid())
-  tenantId   String
-  hashedKey  String    @unique
-  scopes     String    // JSON-serialised string[]
-  expiresAt  DateTime?
-  lastUsedAt DateTime?
-  revoked    Boolean   @default(false)
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  @@index([tenantId])
-  @@index([hashedKey])
-  @@index([expiresAt])
-}
-
 model ApiKeyAuditEvent {
   id             String   @id @default(uuid())
   actor          String
@@ -343,7 +326,7 @@ model EmailQueue {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([status])
+  @@index([status, nextRetryAt])
   @@index([createdAt])
 }
 
@@ -547,6 +530,7 @@ model ApiKey {
   scopes         String    @default("[]")
   createdAt      DateTime  @default(now())
   expiresAt      DateTime?
+  lastUsedAt     DateTime?
   isActive       Boolean   @default(true)
   deletedAt      DateTime?
   deletedBy      String?

@@ -297,6 +297,23 @@ mod tests {
     }
 
     #[test]
+    fn dust_deposit_below_one_share_rounds_to_zero() {
+        // Issue #1536: at 1_000 assets per share every deposit below 1_000
+        // mints zero shares; the vault rejects these instead of keeping them.
+        let (total_shares, total_assets) = (1_000, 1_000_000);
+        for assets in 1..1_000i128 {
+            assert_eq!(
+                assets_to_shares_rounded(assets, total_shares, total_assets, Op::Deposit),
+                Ok(0)
+            );
+        }
+        assert_eq!(
+            assets_to_shares_rounded(1_000, total_shares, total_assets, Op::Deposit),
+            Ok(1)
+        );
+    }
+
+    #[test]
     fn policy_directions_are_stable() {
         assert_eq!(Op::Deposit.rounding(), Rounding::Down);
         assert_eq!(Op::Redeem.rounding(), Rounding::Down);

@@ -43,6 +43,7 @@ import { createTimeoutFor } from './middleware/timeoutMiddleware';
 import { validate, PaginationQuerySchema, TransactionListQuerySchema } from './middleware/validate';
 import { logger } from './middleware/structuredLogging';
 import { getPrismaClient } from './prismaClient';
+import { sendApiError } from './middleware/apiError';
 
 const router = Router();
 const CACHE_TTL_MS = parseInt(process.env.CACHE_LIST_ENDPOINTS_TTL_MS || '30000', 10);
@@ -167,18 +168,6 @@ export interface TransactionExportArtifact {
 // a real, checksum-valid Ed25519 public key (not just regex-shaped) since
 // some endpoints validate wallet addresses via StrKey.isValidEd25519PublicKey.
 const MOCK_WALLET_ADDRESS = 'GBF2VOZSQLF2BZRW6NIDETV2L3I6GHXZUEFSIESELEAGATV2FYTOHOHI';
-
-const MOCK_TRANSACTIONS: Transaction[] = Array.from({ length: 100 }, (_, i) => ({
-  id: `tx-${i + 1}`,
-  type: i % 2 === 0 ? 'deposit' : 'withdrawal',
-  status: i % 11 === 0 ? 'failed' : i % 3 === 0 ? 'pending' : 'completed',
-  amount: (Math.random() * 1000).toFixed(2),
-  asset: ['XLM', 'USDC', 'yUSDC', 'RWA'][i % 4],
-  timestamp: new Date(Date.now() - i * 3600000).toISOString(),
-  transactionHash: `hash-${i + 1}-${Math.random().toString(36).substring(7)}`,
-  walletAddress: MOCK_WALLET_ADDRESS,
-}));
-
 const MOCK_PORTFOLIO_HOLDINGS: PortfolioHolding[] = Array.from({ length: 50 }, (_, i) => ({
   id: `holding-${i + 1}`,
   asset: ['XLM', 'USDC', 'yUSDC', 'RWA'][i % 4],
@@ -297,28 +286,7 @@ function isTransactionInDateRange(
   return true;
 }
 
-function filterTransactionsForExport(
-  query: WalletStateQuery & { startDate?: string; endDate?: string; walletAddress?: string }
-): Transaction[] {
-  const sortBy = query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy;
-  const sortOrder = query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc';
-  const from = query.startDate ?? query.from;
-  const to = query.endDate ?? query.to;
 
-  let filtered = filterTransactions(MOCK_TRANSACTIONS, {
-    type: query.type,
-    status: query.status,
-    from,
-    to,
-    walletAddress: query.walletAddress,
-  });
-
-  if (sortBy) {
-    filtered = sortItems(filtered, sortBy, sortOrder);
-  }
-
-  return filtered;
-}
 
 function escapeCsv(value: unknown): string {
   const serialized = String(value ?? '');
@@ -353,11 +321,11 @@ function authenticateTransactionExport(req: ExportRequest, res: Response, next: 
   if (authHeader.startsWith('ApiKey ')) {
     validateApiKey(req, res, () => {
       if (!hasPermission(req, Permission.EXPORTS_WRITE)) {
-        res.status(403).json({
-          error: 'Forbidden',
+        sendApiError(req, res, {
           status: 403,
+          code: 'FORBIDDEN',
           message: 'Operator role or higher is required for admin transaction export',
-          requiredPermission: Permission.EXPORTS_WRITE,
+          details: { requiredPermission: Permission.EXPORTS_WRITE },
         });
         return;
       }
@@ -535,33 +503,53 @@ export async function buildTransactionsResponse(
   });
 }
 
-export function getTransactionsForExport(query: TransactionExportQuery): Transaction[] {
-  const filters = {
-    type: query.type,
-    status: query.status,
-    from: query.startDate ?? query.from,
-    to: query.endDate ?? query.to,
-    walletAddress: query.walletAddress,
-  };
+export async function getTransactionsForExport(query: TransactionExportQuery): Promise<Transaction[]> {
+  const prisma = getPrismaClient();
+  const from = query.startDate ?? query.from;
+  const to = query.endDate ?? query.to;
+  const normalizedDateRange = parseDateRangeOrThrow({ from, to });
+
   const sortBy = validateSortBy(
-    query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy,
+    query.sortBy ?? TRANSACTION_PAGINATION_CONFIG.defaultSortBy ?? 'timestamp',
     TRANSACTION_PAGINATION_CONFIG,
   );
   const sortOrder = query.sortOrder ?? TRANSACTION_PAGINATION_CONFIG.defaultSortOrder ?? 'desc';
+  const orderByField =
+    sortBy === 'type' ? 'type' :
+    sortBy === 'status' ? 'status' :
+    sortBy === 'amount' ? 'amount' :
+    sortBy === 'asset' ? 'asset' :
+    sortBy === 'walletAddress' ? 'user' :
+    sortBy === 'id' ? 'id' :
+    'timestamp';
 
-  let filtered = filterTransactions(MOCK_TRANSACTIONS, filters);
-  if (sortBy) {
-    filtered = sortItems(filtered, sortBy, sortOrder);
-  }
+  const where = {
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.walletAddress ? { user: normalizeWalletAddress(query.walletAddress) } : {}),
+    ...((normalizedDateRange.normalizedStart || normalizedDateRange.normalizedEnd)
+      ? {
+          timestamp: {
+            ...(normalizedDateRange.normalizedStart ? { gte: new Date(normalizedDateRange.normalizedStart) } : {}),
+            ...(normalizedDateRange.normalizedEnd ? { lte: new Date(normalizedDateRange.normalizedEnd) } : {}),
+          },
+        }
+      : {}),
+  };
 
-  return filtered;
+  const rows = await prisma.transaction.findMany({
+    where: where as any,
+    orderBy: { [orderByField]: sortOrder },
+  });
+
+  return rows.map(dbRowToTransaction);
 }
 
-export function buildTransactionExportArtifact(
+export async function buildTransactionExportArtifact(
   format: ExportFormat,
   query: TransactionExportQuery,
-): TransactionExportArtifact {
-  const transactions = getTransactionsForExport(query);
+): Promise<TransactionExportArtifact> {
+  const transactions = await getTransactionsForExport(query);
   const body =
     format === 'csv'
       ? buildTransactionsCsvExportBody(transactions)
@@ -578,9 +566,8 @@ export function buildTransactionExportArtifact(
 }
 
 export function createTransactionsJsonExportStream(query: TransactionExportQuery): Readable {
-  const transactions = getTransactionsForExport(query);
-
   async function* generate(): AsyncGenerator<string> {
+    const transactions = await getTransactionsForExport(query);
     yield '{"data":[';
     for (let index = 0; index < transactions.length; index += 1) {
       if (index > 0) {
@@ -595,7 +582,6 @@ export function createTransactionsJsonExportStream(query: TransactionExportQuery
 }
 
 export function createTransactionsCsvExportStream(query: TransactionExportQuery): Readable {
-  const transactions = getTransactionsForExport(query);
   const columns: Array<keyof Transaction> = [
     'id',
     'type',
@@ -608,6 +594,7 @@ export function createTransactionsCsvExportStream(query: TransactionExportQuery)
   ];
 
   async function* generate(): AsyncGenerator<string> {
+    const transactions = await getTransactionsForExport(query);
     yield `${columns.join(',')}\r\n`;
     for (const transaction of transactions) {
       const row = columns
@@ -791,9 +778,9 @@ router.get('/transactions',
     res.status(200).json(response);
   } catch (error) {
     if (error instanceof DateRangeParseError) {
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'BAD_REQUEST',
         message: error.message,
       });
       return;
@@ -804,9 +791,9 @@ router.get('/transactions',
         allowedSortBy: TRANSACTION_PAGINATION_CONFIG.allowedSortBy,
         error: error.message,
       });
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'BAD_REQUEST',
         message: error.message,
       });
       return;
@@ -815,102 +802,14 @@ router.get('/transactions',
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    res.status(500).json({
-      error: 'Internal Server Error',
+    sendApiError(req, res, {
       status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to fetch transactions',
     });
   }
 });
 
-router.get('/vault/transactions/export', 
-  authenticateTransactionExport, 
-  createTimeoutFor.export(), 
-  async (req: Request, res: Response) => {
-  const exportReq = req as ExportRequest;
-  const format = resolveExportFormat(req.query.format);
-  if (!format) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'format query parameter must be either csv or json',
-    });
-    return;
-  }
-
-  const requestedWallet = typeof req.query.walletAddress === 'string' ? req.query.walletAddress : undefined;
-  const walletAddress = exportReq.exportAsAdmin
-    ? requestedWallet
-    : exportReq.jwtPayload?.sub;
-
-  if (!exportReq.exportAsAdmin && requestedWallet && requestedWallet !== exportReq.jwtPayload?.sub) {
-    res.status(403).json({
-      error: 'Forbidden',
-      status: 403,
-      message: 'Users can only export their own wallet transaction history',
-    });
-    return;
-  }
-
-  if (!walletAddress) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'walletAddress is required for admin exports',
-    });
-    return;
-  }
-
-  const stamp = new Date().toISOString().slice(0, 10);
-  const fileBase = `transaction-history-${walletAddress.slice(0, 8)}-${stamp}`;
-  const fileName = `${fileBase}.${format}`;
-
-  try {
-    const artifact = buildTransactionExportArtifact(format, {
-      type: typeof req.query.type === 'string' ? req.query.type : undefined,
-      status: typeof req.query.status === 'string' ? req.query.status : undefined,
-      sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
-      sortOrder: req.query.sortOrder === 'asc' ? 'asc' : 'desc',
-      startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
-      endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
-      walletAddress,
-    });
-
-    const job = await recordExportJob({
-      format,
-      fileName,
-      contentType: artifact.contentType,
-      checksum: artifact.checksum,
-      checksumAlgorithm: artifact.checksumAlgorithm,
-      generatedBy: resolveExportGeneratedBy(req),
-      walletAddress,
-      rowCount: artifact.rowCount,
-      filters: {
-        type: typeof req.query.type === 'string' ? req.query.type : null,
-        status: typeof req.query.status === 'string' ? req.query.status : null,
-        sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : null,
-        sortOrder: req.query.sortOrder === 'asc' ? 'asc' : 'desc',
-        startDate: typeof req.query.startDate === 'string' ? req.query.startDate : null,
-        endDate: typeof req.query.endDate === 'string' ? req.query.endDate : null,
-        walletAddress,
-      },
-    });
-
-    res.setHeader('Content-Type', artifact.contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('X-Export-Job-Id', job.id);
-    res.setHeader('X-Export-Checksum', artifact.checksum);
-    res.setHeader('X-Export-Checksum-Algorithm', artifact.checksumAlgorithm);
-    res.setHeader('X-Export-Metadata', buildExportMetadataHeaderValue(job));
-    res.status(200).send(artifact.body);
-  } catch (error) {
-    res.status(500).json({
-      error: 'Internal Server Error',
-      status: 500,
-      message: error instanceof Error ? error.message : 'Failed to generate transaction export',
-    });
-  }
-});
 
 /**
  * @openapi
@@ -959,9 +858,9 @@ router.get('/portfolio/holdings',
         allowedSortBy: PORTFOLIO_PAGINATION_CONFIG.allowedSortBy,
         error: error.message,
       });
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'BAD_REQUEST',
         message: error.message,
       });
       return;
@@ -970,9 +869,9 @@ router.get('/portfolio/holdings',
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    res.status(500).json({
-      error: 'Internal Server Error',
+    sendApiError(req, res, {
       status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to fetch portfolio holdings',
     });
   }
@@ -1015,9 +914,9 @@ router.get('/vault/history',
     res.status(200).json(response);
   } catch (error) {
     if (error instanceof DateRangeParseError) {
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'BAD_REQUEST',
         message: error.message,
       });
       return;
@@ -1028,9 +927,9 @@ router.get('/vault/history',
         allowedSortBy: VAULT_HISTORY_PAGINATION_CONFIG.allowedSortBy,
         error: error.message,
       });
-      res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'BAD_REQUEST',
         message: error.message,
       });
       return;
@@ -1039,9 +938,9 @@ router.get('/vault/history',
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    res.status(500).json({
-      error: 'Internal Server Error',
+    sendApiError(req, res, {
       status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to fetch vault history',
     });
   }
@@ -1101,9 +1000,9 @@ router.get('/vault/apy/history',
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
-    res.status(500).json({
-      error: 'Internal Server Error',
+    sendApiError(req, res, {
       status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to fetch APY history',
     });
   }

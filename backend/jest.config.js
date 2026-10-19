@@ -10,7 +10,7 @@ module.exports = {
   // cross-process race entirely.
   maxWorkers: 1,
   roots: ['<rootDir>/src'],
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/src/tests/**/*.test.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   collectCoverageFrom: [
     'src/**/*.ts',
@@ -38,10 +38,10 @@ module.exports = {
   },
   // Preload script to block problematic modules
   setupFiles: ['<rootDir>/src/__tests__/preload.js'],
-  // Override module resolution to prevent @prisma/instrumentation from loading
+  moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
   moduleNameMapper: {
-    '^@yieldvault/api-schemas$': '<rootDir>/../packages/api-schemas/src/index.ts',
-    '^@yieldvault/api-schemas/(.*)$': '<rootDir>/../packages/api-schemas/src/$1',
+    '^@yieldvault/api-schemas$': '<rootDir>/../packages/api-schemas/dist/index.js',
+    '^@yieldvault/api-schemas/(.*)$': '<rootDir>/../packages/api-schemas/dist/$1',
     '^@prisma/instrumentation$': '<rootDir>/src/__tests__/mocks/prismainstrumentation.js',
     '^@opentelemetry/(.*)$': '<rootDir>/src/__tests__/mocks/opentelemetry.js',
     // Redirect the sorobanClient module that vaultEndpoints imports (./sorobanClient)

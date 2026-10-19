@@ -30,8 +30,11 @@ use super::*;
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
 use crate::strategy::{StrategyClient, StrategyTrait};
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Vec};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::xdr::{ContractEventBody, ScSymbol, ScVal};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, Env, IntoVal, TryFromVal, Vec,
+};
 
 #[contract]
 struct MaliciousStrategy;
@@ -341,10 +344,97 @@ fn test_deposit_tiny_amount_after_large_yield_mints_zero_shares() {
                                     // Depositing 1 asset: 1 * 1 / 1_000_001 = 0 shares — should fail.
     let deposit_result = vault.try_deposit(&user, &1_000_000);
     // Deposit should now fail to prevent silent loss of funds
-    assert!(
-        deposit_result.is_err(),
-        "deposit should fail when shares would round to 0"
+    assert_eq!(deposit_result, Err(Ok(VaultError::MinDepositNotMet)));
+}
+
+/// Issue #1536: fixture `deposit-dust-rounds-to-zero` (1 asset into a vault
+/// holding 1_000 shares / 1_000_000 assets) must be rejected with a typed
+/// error, emit `dep_dust`, and leave balances and accounting untouched.
+#[test]
+fn test_dust_deposit_rejected_with_typed_error_and_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let seed = Address::generate(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&seed, &1_000);
+    usdc_sa.mint(&admin, &999_000);
+    usdc_sa.mint(&user, &1_000);
+    vault.deposit(&seed, &1_000);
+    vault.accrue_yield(&999_000);
+    assert_eq!(vault.total_shares(), 1_000);
+    assert_eq!(vault.total_assets(), 1_000_000);
+
+    assert_eq!(
+        vault.try_deposit(&user, &1),
+        Err(Ok(VaultError::MinDepositNotMet))
     );
+
+    // The rejection event is published before the call reverts; Soroban keeps
+    // it in the (diagnostic) event buffer flagged as part of a failed call.
+    let dust_symbol = ScVal::Symbol(ScSymbol("dep_dust".try_into().unwrap()));
+    let dust_events: std::vec::Vec<_> = env
+        .host()
+        .get_events()
+        .unwrap()
+        .0
+        .into_iter()
+        .filter(|e| {
+            matches!(&e.event.body, ContractEventBody::V0(body)
+                if body.topics.first() == Some(&dust_symbol))
+        })
+        .collect();
+    assert_eq!(dust_events.len(), 1);
+    assert!(dust_events[0].failed_call);
+
+    assert_eq!(usdc.balance(&user), 1_000);
+    assert_eq!(vault.balance(&user), 0);
+    assert_eq!(vault.total_shares(), 1_000);
+    assert_eq!(vault.total_assets(), 1_000_000);
+
+    // One share's worth (1_000 assets) is the smallest accepted deposit.
+    assert_eq!(
+        vault.try_deposit(&user, &999),
+        Err(Ok(VaultError::MinDepositNotMet))
+    );
+    assert_eq!(vault.deposit(&user, &1_000), 1);
+}
+
+/// Issue #1536: a dust entry in a batch fails with the typed error and the
+/// `dep_dust` event persists because the batch itself succeeds.
+#[test]
+fn test_batch_dust_entry_rejected_with_typed_error_and_event() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let seed = Address::generate(&env);
+    let dust_user = Address::generate(&env);
+    let (vault, _usdc, usdc_sa, admin, relayer) =
+        setup_vault_with_relayer(&env, &[(seed.clone(), 1_000), (dust_user.clone(), 10)]);
+    usdc_sa.mint(&admin, &999_000);
+    vault.deposit(&seed, &1_000);
+    vault.accrue_yield(&999_000);
+
+    let mut entries = Vec::new(&env);
+    entries.push_back(DepositEntry {
+        user: dust_user.clone(),
+        amount: 1,
+    });
+    let result = vault.batch_deposit(&relayer, &entries);
+    let dust_events = env.events().all();
+
+    assert_eq!(result.success_count, 0);
+    assert_eq!(result.failure_count, 1);
+    let r0 = result.results.get(0).unwrap();
+    assert_eq!(r0.error_code, VaultError::MinDepositNotMet as u32);
+    assert_eq!(r0.shares_minted, 0);
+    assert!(dust_events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("dep_dust"), dust_user.clone()).into_val(&env)
+            && <(i128, i128, i128)>::try_from_val(&env, &data) == Ok((1, 1_000, 1_000_000))
+    }));
+    assert_eq!(vault.balance(&dust_user), 0);
 }
 
 // ─── 3. withdraw ─────────────────────────────────────────────────────────────
@@ -651,6 +741,77 @@ fn test_strategy_response_rejects_negative_total_value() {
 
     let result = YieldVault::validate_strategy_response(&env, &strategy_id, &usdc.address);
     assert_eq!(result, Err(VaultError::InvalidAmount));
+}
+
+/// Registers a `MaliciousStrategy` reporting `value` in `asset`.
+fn seeded_strategy(env: &Env, vault_id: &Address, asset: &Address, value: i128) -> Address {
+    let strategy_id = env.register(MaliciousStrategy, ());
+    env.as_contract(&strategy_id, || {
+        let storage = env.storage().instance();
+        storage.set(&StrategyTestKey::Vault, vault_id);
+        storage.set(&StrategyTestKey::Asset, asset);
+        storage.set(&StrategyTestKey::Value, &value);
+    });
+    strategy_id
+}
+
+/// Issue #1530: strategy reads enforce the full `StrategyValidator` bounds.
+#[test]
+fn test_strategy_response_value_bounds() {
+    use crate::strategy_validation::MAX_STRATEGY_VALUE;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
+    for (value, expected) in [
+        (0, Ok(0)),
+        (MAX_STRATEGY_VALUE, Ok(MAX_STRATEGY_VALUE)),
+        (MAX_STRATEGY_VALUE + 1, Err(VaultError::MathOverflow)),
+        (i128::MAX, Err(VaultError::MathOverflow)),
+        (-1, Err(VaultError::InvalidAmount)),
+    ] {
+        let strategy = seeded_strategy(&env, &vault_id, &usdc.address, value);
+        assert_eq!(
+            YieldVault::validate_strategy_response(&env, &strategy, &usdc.address),
+            expected,
+            "value {value}"
+        );
+    }
+}
+
+#[test]
+fn test_strategy_response_rejects_zero_strategy_address() {
+    use crate::strategy_validation::ZERO_CONTRACT_STRKEY;
+
+    let env = Env::default();
+    let usdc = create_token(&env, &Address::generate(&env));
+    let zero = Address::from_str(&env, ZERO_CONTRACT_STRKEY);
+    assert_eq!(
+        YieldVault::validate_strategy_response(&env, &zero, &usdc.address),
+        Err(VaultError::InvalidAmount)
+    );
+}
+
+#[test]
+fn test_total_assets_rejects_strategy_value_above_max() {
+    use crate::strategy_validation::MAX_STRATEGY_VALUE;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+    let usdc = create_token(&env, &Address::generate(&env));
+    vault.initialize(&Address::generate(&env), &usdc.address);
+
+    let strategy = seeded_strategy(&env, &vault_id, &usdc.address, MAX_STRATEGY_VALUE + 1);
+    vault.whitelist_strategy(&strategy, &true);
+    vault.set_strategy(&strategy);
+
+    assert!(vault.try_total_assets().is_err());
 }
 
 #[test]
@@ -2191,9 +2352,56 @@ fn test_whitelist_consistency_with_set_strategy() {
     // Verify it was set
     assert_eq!(vault.strategy().unwrap(), benji_strategy);
 
-    // Remove from whitelist and verify
-    vault.whitelist_strategy(&benji_strategy, &false);
-    assert!(!vault.is_strategy_whitelisted(&benji_strategy));
+    // Removal of the active vault strategy is rejected (#1637)
+    assert!(vault.try_whitelist_strategy(&benji_strategy, &false).is_err());
+    assert!(vault.is_strategy_whitelisted(&benji_strategy));
+}
+
+#[test]
+fn test_whitelist_removal_rejects_active_strategy() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.register_strategy(&strategy);
+    vault.activate_strategy_registration(&strategy);
+
+    assert!(vault.try_whitelist_strategy(&strategy, &false).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_ACTIVE)
+    );
+}
+
+#[test]
+fn test_retired_strategy_cannot_return_to_pending_via_whitelist() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.whitelist_strategy(&strategy, &true);
+    vault.retire_strategy(&strategy);
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+
+    // Removal must be rejected, leaving the Retired record intact...
+    assert!(vault.try_whitelist_strategy(&strategy, &false).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+
+    // ...so re-adding cannot revive it to Pending.
+    assert!(vault.try_whitelist_strategy(&strategy, &true).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+    assert!(!vault.is_strategy_whitelisted(&strategy));
 }
 
 // ─── Strategy heartbeat ───────────────────────────────────────────────────────
@@ -2767,4 +2975,20 @@ fn test_overflow_protection_near_limits() {
 
     let res_assets = vault.try_calculate_assets(&i128::MAX);
     assert_eq!(res_assets, Err(Ok(crate::errors::VaultError::MathOverflow)));
+}
+
+#[test]
+fn test_map_registration_error_variants() {
+    use crate::strategy_registration::StrategyRegistrationError as E;
+    let cases = [
+        (E::NotRegistered, VaultError::StrategyNotWhitelisted),
+        (E::InvalidTransition, VaultError::InvalidMigrationTarget),
+        (E::StrategyNotActive, VaultError::InvalidMigrationTarget),
+        (E::ActiveStrategyInUse, VaultError::WhitelistOperationFailed),
+        (E::AlreadyRegistered, VaultError::WhitelistOperationFailed),
+        (E::Unauthorized, VaultError::UnauthorizedStrategy),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(YieldVault::map_registration_error(input), expected);
+    }
 }

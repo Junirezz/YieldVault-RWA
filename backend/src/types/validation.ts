@@ -34,7 +34,6 @@ export const PaginationQuerySchema = z
   .object({
     limit: z.string().optional(),
     cursor: z.string().optional(),
-    page: z.string().optional(),
     // Signed so an out-of-range page (`page=-1`, `page=1000000`) reaches
     // `parsePaginationQuery`, which clamps it into `1..maxPage`, instead of
     // being rejected outright (Issue #1430).
@@ -282,6 +281,8 @@ export const VaultStrategyBodySchema = z
     previousStrategyId: z.string().optional(),
     walletAddress: z.string().optional(),
     weights: _weightsRawSchema.optional(),
+    nonce: z.string().optional(),
+    signature: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.weights === undefined) return;

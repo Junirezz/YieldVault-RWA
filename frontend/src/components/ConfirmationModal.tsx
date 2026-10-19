@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useCallback } from "react";
+import React from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, X } from "./icons";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import { useTranslation } from "../i18n";
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -25,65 +27,25 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   estimatedFee,
   isProcessing = false,
 }) => {
-  const modalRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const { t } = useTranslation();
+  const modalRef = useFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: onClose,
+    closeOnEscape: !isProcessing,
+  });
 
   const isLargeAmount = amount >= LARGE_AMOUNT_THRESHOLD;
 
-  useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement as HTMLElement;
-      requestAnimationFrame(() => {
-        const firstInteractive = modalRef.current?.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        firstInteractive?.focus();
-      });
-    }
-    return () => {
-      if (isOpen) {
-        previousFocusRef.current?.focus();
-      }
-    };
-  }, [isOpen]);
-
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Escape" && !isProcessing) {
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || !modalRef.current) return;
-
-      const focusable = modalRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        return;
-      }
-      const firstElement = focusable[0];
-      const lastElement = focusable[focusable.length - 1];
-      const activeElement = document.activeElement as HTMLElement | null;
-
-      if (event.shiftKey && activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    },
-    [isProcessing, onClose]
-  );
-
   if (!isOpen) return null;
 
-  const title = actionType === "deposit" ? "Confirm Deposit" : "Confirm Withdrawal";
+  const isDeposit = actionType === "deposit";
+  const title = t(isDeposit ? "confirmationModal.depositTitle" : "confirmationModal.withdrawTitle");
   const subtitle = isLargeAmount
-    ? "This is a large transaction. Please review carefully before proceeding."
-    : "Please review your transaction details before confirming.";
-  const outputLabel = actionType === "deposit" ? "Shares to Receive" : "USDC to Receive";
+    ? t("confirmationModal.largeAmountSubtitle")
+    : t("confirmationModal.defaultSubtitle");
+  const outputLabel = t(
+    isDeposit ? "confirmationModal.sharesToReceive" : "confirmationModal.usdcToReceive",
+  );
 
   const modalContent = (
     <div
@@ -102,8 +64,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         zIndex: 1000,
         padding: "16px",
       }}
-      onClick={onClose}
-      onKeyDown={handleKeyDown}
+      onClick={() => {
+        if (!isProcessing) onClose();
+      }}
     >
       <div
         ref={modalRef}
@@ -119,7 +82,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         <button
           onClick={onClose}
           disabled={isProcessing}
-          aria-label="Close confirmation dialog"
+          aria-label={t("confirmationModal.closeLabel")}
           style={{
             position: "absolute",
             top: "16px",
@@ -161,7 +124,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           >
             <AlertTriangle size={18} style={{ color: "var(--text-error)", flexShrink: 0 }} />
             <span style={{ color: "var(--text-error)", fontSize: "0.85rem", fontWeight: 600 }}>
-              Large transaction amount detected
+              {t("confirmationModal.largeAmountAlert")}
             </span>
           </div>
         )}
@@ -207,7 +170,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             }}
           >
             <span style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-              {actionType === "deposit" ? "Deposit Amount" : "Withdraw Amount"}
+              {t(isDeposit ? "confirmationModal.depositAmount" : "confirmationModal.withdrawAmount")}
             </span>
             <span
               style={{
@@ -238,7 +201,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 fontFamily: "var(--font-display)",
               }}
             >
-              {expectedOutput.toFixed(6)} {actionType === "deposit" ? "Shares" : "USDC"}
+              {expectedOutput.toFixed(6)} {isDeposit ? "Shares" : "USDC"}
             </span>
           </div>
 
@@ -251,7 +214,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             }}
           >
             <span style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-              Estimated Fee
+              {t("confirmationModal.estimatedFee")}
             </span>
             <span
               style={{
@@ -280,7 +243,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             }}
           >
             <span style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-              Total Cost
+              {t("confirmationModal.totalCost")}
             </span>
             <span
               style={{
@@ -305,10 +268,10 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           }}
         >
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: "1.5" }}>
-            <strong style={{ color: "var(--text-primary)" }}>Note: </strong>
-            {actionType === "deposit"
-              ? "Depositing USDC will mint vault shares. This action cannot be undone once confirmed on the Stellar network."
-              : "Withdrawing USDC will burn your vault shares. Make sure you have sufficient shares to cover this withdrawal."}
+            <strong style={{ color: "var(--text-primary)" }}>{t("confirmationModal.noteLabel")} </strong>
+            {t(
+              isDeposit ? "confirmationModal.depositNote" : "confirmationModal.withdrawNote",
+            )}
           </p>
         </div>
 
@@ -316,7 +279,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           <button
             onClick={onClose}
             disabled={isProcessing}
-            aria-label="Cancel transaction"
+            aria-label={t("confirmationModal.cancelLabel")}
             style={{
               padding: "12px 24px",
               borderRadius: "var(--radius-md)",
@@ -336,12 +299,12 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               (e.currentTarget as HTMLButtonElement).style.background = "transparent";
             }}
           >
-            Cancel
+            {t("confirmationModal.cancel")}
           </button>
           <button
             onClick={onConfirm}
             disabled={isProcessing}
-            aria-label={`Confirm ${actionType}`}
+            aria-label={t("confirmationModal.confirmLabel", { action: actionType })}
             style={{
               padding: "12px 24px",
               borderRadius: "var(--radius-md)",
@@ -361,7 +324,13 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               (e.currentTarget as HTMLButtonElement).style.opacity = "1";
             }}
           >
-            {isProcessing ? "Processing..." : `Confirm ${actionType === "deposit" ? "Deposit" : "Withdrawal"}`}
+            {isProcessing
+              ? t("confirmationModal.processing")
+              : t(
+                  isDeposit
+                    ? "confirmationModal.confirmDeposit"
+                    : "confirmationModal.confirmWithdrawal",
+                )}
           </button>
         </div>
       </div>

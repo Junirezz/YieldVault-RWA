@@ -1,6 +1,10 @@
 use super::*;
 use crate::upgrade::{get_admin, is_initialized};
-use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString};
+use crate::upgrade::{PendingUpgrade, IMPLEMENTATION_SLOT, MIN_UPGRADE_DELAY_SECS};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::{
+    symbol_short, Address, BytesN, Env, IntoVal, String as SorobanString, TryFromVal,
+};
 
 #[test]
 fn test_proxy_initialization_guard() {
@@ -43,7 +47,9 @@ fn test_proxy_upgrade_authorization() {
     let wasm_bytes = soroban_sdk::Bytes::new(&env);
     let new_wasm_hash = env.deployer().upload_contract_wasm(wasm_bytes);
 
-    vault.upgrade(&new_wasm_hash);
+    let eta = vault.propose_upgrade(&new_wasm_hash);
+    env.ledger().set_timestamp(eta);
+    vault.execute_upgrade();
 }
 
 #[test]
@@ -230,8 +236,10 @@ fn test_upgrade_storage_version_checkpoint() {
     let wasm_bytes = soroban_sdk::Bytes::new(&env);
     let new_wasm_hash = env.deployer().upload_contract_wasm(wasm_bytes);
 
-    // upgrade() must preserve the storage version checkpoint.
-    vault.upgrade(&new_wasm_hash);
+    // execute_upgrade() must preserve the storage version checkpoint.
+    let eta = vault.propose_upgrade(&new_wasm_hash);
+    env.ledger().set_timestamp(eta);
+    vault.execute_upgrade();
     assert_eq!(vault.storage_version(), 3);
 }
 
@@ -266,8 +274,8 @@ fn test_migrate_storage_version_checkpoint() {
 
     let pre = vault.storage_version();
     // Idempotent migration to current version must pass the checkpoint.
-    vault.migrate_storage(&2);
-    assert_eq!(vault.storage_version(), 2);
+    vault.migrate_storage(&STORAGE_VERSION);
+    assert_eq!(vault.storage_version(), STORAGE_VERSION);
     assert!(vault.storage_version() >= pre);
 }
 
@@ -290,6 +298,140 @@ fn test_migrate_storage_downgrade_rejected() {
     assert_eq!(vault.storage_version(), 3);
 }
 
+// ─── Timelocked upgrade + implementation slot (issue #1543) ────────────────
+
+fn setup_upgrade(env: &Env) -> (YieldVaultClient<'_>, Address, BytesN<32>) {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(env, &vault_id);
+    vault.initialize(&admin, &Address::generate(env));
+    let hash = env
+        .deployer()
+        .upload_contract_wasm(soroban_sdk::Bytes::new(env));
+    (vault, admin, hash)
+}
+
+#[test]
+fn test_upgrade_cannot_execute_before_timelock() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1_000);
+    let (vault, _admin, hash) = setup_upgrade(&env);
+
+    assert_eq!(
+        vault.try_execute_upgrade(),
+        Err(Ok(VaultError::NoPendingWithdrawal))
+    );
+
+    let eta = vault.propose_upgrade(&hash);
+    assert_eq!(eta, 1_000 + MIN_UPGRADE_DELAY_SECS);
+    assert_eq!(
+        vault.pending_upgrade(),
+        Some(PendingUpgrade {
+            wasm_hash: hash.clone(),
+            eta
+        })
+    );
+
+    env.ledger().set_timestamp(eta - 1);
+    assert_eq!(
+        vault.try_execute_upgrade(),
+        Err(Ok(VaultError::TimelockNotExpired))
+    );
+    assert_eq!(vault.implementation(), None);
+}
+
+#[test]
+fn test_upgrade_delay_follows_longer_sensitive_timelock() {
+    let env = Env::default();
+    let (vault, _admin, hash) = setup_upgrade(&env);
+    let longer = MIN_UPGRADE_DELAY_SECS * 2;
+    vault.set_sensitive_timelock_delay(&longer);
+
+    let eta = vault.propose_upgrade(&hash);
+    assert_eq!(eta, env.ledger().timestamp() + longer);
+}
+
+#[test]
+fn test_execute_upgrade_writes_and_verifies_implementation_slot() {
+    let env = Env::default();
+    let (vault, admin, hash) = setup_upgrade(&env);
+
+    let eta = vault.propose_upgrade(&hash);
+    env.ledger().set_timestamp(eta);
+    vault.execute_upgrade();
+
+    let events = env.events().all();
+    assert!(events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upgraded"), admin.clone()).into_val(&env)
+            && <(Option<BytesN<32>>, BytesN<32>)>::try_from_val(&env, &data)
+                == Ok((None, hash.clone()))
+    }));
+    assert_eq!(vault.implementation(), Some(hash.clone()));
+    assert_eq!(vault.pending_upgrade(), None);
+    env.as_contract(&vault.address, || {
+        let slot: Option<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&BytesN::from_array(&env, &IMPLEMENTATION_SLOT));
+        assert_eq!(slot, Some(hash.clone()));
+    });
+
+    // The queued upgrade is consumed: it cannot be replayed.
+    assert_eq!(
+        vault.try_execute_upgrade(),
+        Err(Ok(VaultError::NoPendingWithdrawal))
+    );
+}
+
+#[test]
+fn test_propose_and_cancel_upgrade_emit_events() {
+    let env = Env::default();
+    let (vault, admin, hash) = setup_upgrade(&env);
+
+    let eta = vault.propose_upgrade(&hash);
+    let proposed = env.events().all();
+    assert!(proposed.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_prop"), admin.clone()).into_val(&env)
+            && <(BytesN<32>, u64)>::try_from_val(&env, &data) == Ok((hash.clone(), eta))
+    }));
+
+    vault.cancel_upgrade();
+    let cancelled = env.events().all();
+    assert!(cancelled.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_cncl"), admin.clone()).into_val(&env)
+            && BytesN::<32>::try_from_val(&env, &data) == Ok(hash.clone())
+    }));
+    assert_eq!(vault.pending_upgrade(), None);
+
+    env.ledger().set_timestamp(eta);
+    assert_eq!(
+        vault.try_execute_upgrade(),
+        Err(Ok(VaultError::NoPendingWithdrawal))
+    );
+    assert_eq!(
+        vault.try_cancel_upgrade(),
+        Err(Ok(VaultError::NoPendingWithdrawal))
+    );
+}
+
+#[test]
+fn test_upgrade_entrypoints_require_admin_auth() {
+    let env = Env::default();
+    let (vault, _admin, hash) = setup_upgrade(&env);
+    let eta = vault.propose_upgrade(&hash);
+    env.ledger().set_timestamp(eta);
+    env.set_auths(&[]);
+
+    assert!(vault.try_propose_upgrade(&hash).is_err());
+    assert!(vault.try_execute_upgrade().is_err());
+    assert!(vault.try_cancel_upgrade().is_err());
+    assert_eq!(vault.implementation(), None);
+}
+
 fn generate_storage_fingerprint(env: &Env) -> &str {
     // In a real script, this would iterate over storage or check specific critical keys
     // For the unit test, we just verify the ones we care about.
@@ -305,4 +447,58 @@ fn generate_storage_fingerprint(env: &Env) -> &str {
     // Return a simple list of present keys as a simulated fingerprint
     // (Rust Vec of strings is hard to return here, so we just use it for internal assertion)
     "Admin TokenAsset Initialized"
+}
+
+#[test]
+fn test_execute_upgrade_emits_checkpoint_event_with_versions() {
+    let env = Env::default();
+    let (vault, admin, hash) = setup_upgrade(&env);
+
+    let eta = vault.propose_upgrade(&hash);
+    env.ledger().set_timestamp(eta);
+    vault.execute_upgrade();
+
+    let events = env.events().all();
+    assert!(events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_chkpt"), admin.clone()).into_val(&env)
+            && <(Option<BytesN<32>>, BytesN<32>, u32, u32)>::try_from_val(&env, &data)
+                == Ok((None, hash.clone(), STORAGE_VERSION, STORAGE_VERSION))
+    }));
+}
+
+#[test]
+fn test_force_upgrade_runs_migration_checkpoint_and_emits_event() {
+    let env = Env::default();
+    let (vault, _admin, hash) = setup_upgrade(&env);
+    let primary = Address::generate(&env);
+    let secondary = Address::generate(&env);
+    vault.set_emergency_approvers(&primary, &secondary);
+
+    // Simulate a vault whose storage predates the current schema.
+    env.as_contract(&vault.address, || set_storage_version(&env, 1));
+    assert_eq!(vault.storage_version(), 1);
+
+    let id = vault.propose_emergency_action(
+        &primary,
+        &emergency::EmergencyActionKind::ForceUpgrade,
+        &0u32,
+        &None,
+        &Some(hash.clone()),
+    );
+    let window = vault.emergency_dispute_window();
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + window + 1);
+    vault.confirm_emergency_action(&secondary, &id);
+    let events = env.events().all();
+
+    assert_eq!(vault.storage_version(), STORAGE_VERSION);
+    assert_eq!(vault.implementation(), Some(hash.clone()));
+
+    assert!(events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_chkpt"), secondary.clone()).into_val(&env)
+            && <(Option<BytesN<32>>, BytesN<32>, u32, u32)>::try_from_val(&env, &data)
+                == Ok((None, hash.clone(), 1, STORAGE_VERSION))
+    }));
 }

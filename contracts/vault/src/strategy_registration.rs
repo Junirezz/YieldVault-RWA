@@ -143,6 +143,29 @@ pub fn require_active_registration(
     }
 }
 
+/// Guarded removal used by `whitelist_strategy(false)`. Mirrors the guards of
+/// `retire_strategy_internal`: the vault's current strategy and Active
+/// strategies cannot be removed, and Retired strategies are terminal so their
+/// record must survive (removing it would let them re-register as Pending).
+/// Only unregistered (no-op) and Pending strategies can be removed.
+pub(crate) fn remove_registration_guarded(
+    env: &Env,
+    strategy: &Address,
+    active_vault_strategy: Option<Address>,
+) -> Result<(), StrategyRegistrationError> {
+    if active_vault_strategy.as_ref() == Some(strategy) {
+        return Err(StrategyRegistrationError::ActiveStrategyInUse);
+    }
+    match read_registration_state(env, strategy) {
+        Some(STATE_ACTIVE) => Err(StrategyRegistrationError::ActiveStrategyInUse),
+        Some(STATE_RETIRED) => Err(StrategyRegistrationError::InvalidTransition),
+        _ => {
+            remove_registration_state(env, strategy);
+            Ok(())
+        }
+    }
+}
+
 pub fn remove_registration(env: &Env, strategy: &Address) {
     remove_registration_state(env, strategy);
 }
@@ -152,7 +175,7 @@ mod tests {
     use super::*;
     use crate::upgrade::set_admin;
     use crate::DataKey;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
 
     #[test]
     fn test_allowed_transitions() {
