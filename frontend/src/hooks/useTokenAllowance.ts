@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { submitUsdcApproval } from "../lib/approvalApi";
 
 export type ApprovalStatus = "idle" | "pending" | "confirmed" | "error";
 
@@ -18,26 +19,58 @@ export function useTokenAllowance(walletAddress: string | null) {
   const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus>(
     e2ePreApproved ? "confirmed" : "idle",
   );
+  // Last approval failure, surfaced to callers instead of being swallowed
+  // (issue #1624).
+  const [error, setError] = useState<Error | null>(null);
 
-  const needsApproval = (depositAmount: number) =>
-    walletAddress !== null && allowance < depositAmount && depositAmount > 0;
+  const needsApproval = useCallback(
+    (depositAmount: number) =>
+      walletAddress !== null && allowance < depositAmount && depositAmount > 0,
+    [walletAddress, allowance],
+  );
 
-  const approve = async (amount: number): Promise<void> => {
-    setApprovalStatus("pending");
-    try {
-      // Simulate on-chain approval tx (~1.5 s)
-      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-      setAllowance(amount);
-      setApprovalStatus("confirmed");
-    } catch {
-      setApprovalStatus("error");
-      throw new Error("Approval transaction failed.");
-    }
-  };
+  const approve = useCallback(
+    async (amount: number): Promise<void> => {
+      if (!walletAddress) {
+        const walletError = new Error(
+          "A connected wallet is required to approve USDC.",
+        );
+        setError(walletError);
+        setApprovalStatus("error");
+        throw walletError;
+      }
 
-  const resetApproval = () => {
+      setError(null);
+      setApprovalStatus("pending");
+      try {
+        await submitUsdcApproval(walletAddress, amount);
+        setAllowance(amount);
+        setApprovalStatus("confirmed");
+      } catch (cause) {
+        const approvalError =
+          cause instanceof Error
+            ? cause
+            : new Error("Approval transaction failed.");
+        setError(approvalError);
+        setApprovalStatus("error");
+        throw approvalError;
+      }
+    },
+    [walletAddress],
+  );
+
+  const resetApproval = useCallback(() => {
+    setError(null);
     setApprovalStatus("idle");
-  };
+  }, []);
 
-  return { allowance, approvalStatus, needsApproval, approve, resetApproval };
+  return {
+    allowance,
+    approvalStatus,
+    needsApproval,
+    approve,
+    resetApproval,
+    error,
+    isError: error !== null,
+  };
 }

@@ -37,9 +37,7 @@ pub fn try_assets_to_shares(
     let product = assets
         .checked_mul(total_shares)
         .ok_or(MathError::Overflow)?;
-    product
-        .checked_div(total_assets)
-        .ok_or(MathError::Overflow)
+    product.checked_div(total_assets).ok_or(MathError::Overflow)
 }
 
 /// Checked shares-to-assets conversion using round-down arithmetic.
@@ -56,9 +54,7 @@ pub fn try_shares_to_assets(
     let product = shares
         .checked_mul(total_assets)
         .ok_or(MathError::Overflow)?;
-    product
-        .checked_div(total_shares)
-        .ok_or(MathError::Overflow)
+    product.checked_div(total_shares).ok_or(MathError::Overflow)
 }
 
 /// Converts assets to shares using the current vault state (round-down).

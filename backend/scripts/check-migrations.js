@@ -31,9 +31,14 @@ function checkApiKeyMigration(content, file) {
     return results;
   }
 
+  // Only a migration that creates the table owns the full column set. A
+  // baseline `CREATE TABLE IF NOT EXISTS` is a no-op on existing databases and
+  // an ALTER-only migration adds individual columns.
+  const isBaselineOnly = !/create\s+table\s+(?!if\s+not\s+exists)["`]?apikey["`]?/i.test(content);
+
   // The migration must declare the per-tenant credential columns.
   const missing = API_KEY_REQUIRED_COLUMNS.filter((col) => !lowered.includes(col));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !isBaselineOnly) {
     results.push({
       file,
       severity: 'error',
@@ -103,6 +108,9 @@ function checkFile(file) {
   const allowsWebhookSecretDrop =
     lowered.includes('migration-safety: allow-webhook-secret-drop') &&
     /alter\s+table\s+["`]?webhookendpoint["`]?\s+drop\s+column\s+["`]?secret["`]?/i.test(content);
+  const allowsIndexDrop =
+    lowered.includes('migration-safety: allow-index-drop') &&
+    !/\bdrop\s+(table|column)\b/i.test(content);
   const isCanarySafeOptIn = lowered.includes(
     'migration-safety: canary-safe'
   );
@@ -118,6 +126,8 @@ function checkFile(file) {
 
   for (const rule of highRiskPatterns) {
     if (allowsWebhookSecretDrop && rule.label === 'blocking alter/drop change') continue;
+    if (allowsWebhookSecretDrop && rule.label === 'irreversible drop operation') continue;
+    if (allowsIndexDrop && rule.label === 'irreversible drop operation') continue;
     if (rule.pattern.test(content)) {
       results.push({ file, severity: 'error', message: rule.label });
     }

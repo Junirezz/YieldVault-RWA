@@ -14,8 +14,12 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   flaky-detector:
+    timeout-minutes: 30
     name: Detect Flaky Tests (10x Loop)
     runs-on: ubuntu-latest
     services:
@@ -46,7 +50,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 

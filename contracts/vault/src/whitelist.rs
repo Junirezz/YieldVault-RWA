@@ -6,6 +6,7 @@ use soroban_sdk::{Address, Env};
 
 use crate::strategy_registration::{self, STATE_RETIRED};
 use crate::upgrade::get_admin;
+use crate::DataKey;
 
 /// Errors that can occur during whitelist operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +31,8 @@ impl SecureWhitelist {
 
         match strategy_registration::read_registration_state(env, strategy) {
             None => {
-                let _ = strategy_registration::register_strategy_internal(env, strategy);
+                strategy_registration::register_strategy_internal(env, strategy)
+                    .map_err(|_| WhitelistError::OperationFailed)?;
             }
             Some(STATE_RETIRED) => {
                 return Err(WhitelistError::OperationFailed);
@@ -51,8 +53,10 @@ impl SecureWhitelist {
             return Err(WhitelistError::Unauthorized);
         }
 
-        strategy_registration::remove_registration(env, strategy);
-        Ok(())
+        let active_vault_strategy: Option<Address> =
+            env.storage().instance().get(&DataKey::Strategy);
+        strategy_registration::remove_registration_guarded(env, strategy, active_vault_strategy)
+            .map_err(|_| WhitelistError::OperationFailed)
     }
 
     pub fn is_strategy_whitelisted(env: &Env, strategy: &Address) -> bool {
@@ -86,7 +90,10 @@ mod tests {
     };
     use crate::upgrade::set_admin;
     use crate::DataKey;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Address, Env,
+    };
 
     #[test]
     fn test_whitelist_documentation_exists() {}
@@ -109,7 +116,10 @@ mod tests {
             let res = SecureWhitelist::add_strategy(&env, &admin, &strategy);
             assert_eq!(res, Ok(()));
 
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
             assert!(SecureWhitelist::get_whitelist_status(&env, &strategy));
         });
@@ -127,19 +137,37 @@ mod tests {
             set_admin(&env, &admin);
 
             // Add first time -> pending
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Adding again while pending is a no-op success
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Advance to active
-            assert_eq!(activate_strategy_internal(&env, &strategy), Ok(STATE_ACTIVE));
+            assert_eq!(
+                activate_strategy_internal(&env, &strategy),
+                Ok(STATE_ACTIVE)
+            );
             assert_eq!(read_registration_state(&env, &strategy), Some(STATE_ACTIVE));
 
             // Adding while active preserves active state and succeeds
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
             assert_eq!(read_registration_state(&env, &strategy), Some(STATE_ACTIVE));
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
         });
@@ -157,15 +185,27 @@ mod tests {
             set_admin(&env, &admin);
 
             // Add and retire
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
-            assert_eq!(retire_strategy_internal(&env, &strategy, None), Ok(STATE_RETIRED));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
+            assert_eq!(
+                retire_strategy_internal(&env, &strategy, None),
+                Ok(STATE_RETIRED)
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
             assert!(!SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
 
             // Attempting to re-add a retired strategy must fail
             let res = SecureWhitelist::add_strategy(&env, &admin, &strategy);
             assert_eq!(res, Err(WhitelistError::OperationFailed));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
             assert!(!SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
         });
     }
@@ -181,18 +221,75 @@ mod tests {
             let strategy = Address::generate(&env);
             set_admin(&env, &admin);
 
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
 
             // Admin removes strategy
-            assert_eq!(SecureWhitelist::remove_strategy(&env, &admin, &strategy), Ok(()));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
             assert_eq!(read_registration_state(&env, &strategy), None);
             assert!(!SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
             assert!(!SecureWhitelist::get_whitelist_status(&env, &strategy));
 
             // Removing already removed strategy is safe/idempotent
-            assert_eq!(SecureWhitelist::remove_strategy(&env, &admin, &strategy), Ok(()));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
             assert_eq!(read_registration_state(&env, &strategy), None);
+        });
+    }
+
+    #[test]
+    fn test_remove_strategy_rejects_active_and_retired() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::YieldVault, ());
+
+        env.as_contract(&contract_id, || {
+            let admin = Address::generate(&env);
+            let active = Address::generate(&env);
+            let retired = Address::generate(&env);
+            let in_use = Address::generate(&env);
+            set_admin(&env, &admin);
+
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &active), Ok(()));
+            assert_eq!(activate_strategy_internal(&env, &active), Ok(STATE_ACTIVE));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &active),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &active), Some(STATE_ACTIVE));
+
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &retired), Ok(()));
+            assert_eq!(retire_strategy_internal(&env, &retired, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &retired),
+                Ok(())
+            );
+            assert_eq!(
+                retire_strategy_internal(&env, &retired, None),
+                Ok(STATE_RETIRED)
+            );
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &retired),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &retired), Some(STATE_RETIRED));
+
+            // Pending strategy that is the vault's current strategy is protected too
+            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &in_use), Ok(()));
+            env.storage().instance().set(&DataKey::Strategy, &in_use);
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &in_use),
+                Err(WhitelistError::OperationFailed)
+            );
+            assert_eq!(read_registration_state(&env, &in_use), Some(STATE_PENDING));
         });
     }
 
@@ -213,7 +310,10 @@ mod tests {
                 Ok(())
             );
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Set approved = false -> removes from whitelist
             assert_eq!(
@@ -229,7 +329,10 @@ mod tests {
                 Ok(())
             );
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
         });
     }
 
@@ -248,7 +351,10 @@ mod tests {
                 SecureWhitelist::set_whitelist_status(&env, &admin, &strategy, true),
                 Ok(())
             );
-            assert_eq!(retire_strategy_internal(&env, &strategy, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                retire_strategy_internal(&env, &strategy, None),
+                Ok(STATE_RETIRED)
+            );
 
             // Setting approved = true on retired strategy must fail with OperationFailed
             let res = SecureWhitelist::set_whitelist_status(&env, &admin, &strategy, true);
@@ -276,14 +382,20 @@ mod tests {
             assert_eq!(read_registration_state(&env, &strategy), None);
 
             // Admin adds strategy
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy), Ok(()));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy),
+                Ok(())
+            );
 
             // Non-admin remove_strategy rejected
             assert_eq!(
                 SecureWhitelist::remove_strategy(&env, &non_admin, &strategy),
                 Err(WhitelistError::Unauthorized)
             );
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Non-admin set_whitelist_status rejected (both true and false)
             assert_eq!(
@@ -294,7 +406,10 @@ mod tests {
                 SecureWhitelist::set_whitelist_status(&env, &non_admin, &strategy, true),
                 Err(WhitelistError::Unauthorized)
             );
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
         });
     }
 
@@ -343,8 +458,12 @@ mod tests {
             // Configure strategy switch cooldown
             let cooldown_seconds = 3600u64;
             let last_switch_time = 10_000u64;
-            env.storage().instance().set(&DataKey::StrategySwitchCooldown, &cooldown_seconds);
-            env.storage().instance().set(&DataKey::LastStrategySwitchTime, &last_switch_time);
+            env.storage()
+                .instance()
+                .set(&DataKey::StrategySwitchCooldown, &cooldown_seconds);
+            env.storage()
+                .instance()
+                .set(&DataKey::LastStrategySwitchTime, &last_switch_time);
 
             // Set ledger timestamp inside the cooldown window (last_switch + 600 < last_switch + 3600)
             env.ledger().with_mut(|li| {
@@ -353,8 +472,14 @@ mod tests {
 
             // Whitelist management operations must succeed during active cooldown
             // allowing governance to prepare candidates in advance
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy_a), Ok(()));
-            assert_eq!(SecureWhitelist::add_strategy(&env, &admin, &strategy_b), Ok(()));
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy_a),
+                Ok(())
+            );
+            assert_eq!(
+                SecureWhitelist::add_strategy(&env, &admin, &strategy_b),
+                Ok(())
+            );
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy_a));
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy_b));
 
@@ -373,7 +498,10 @@ mod tests {
             assert_eq!(last_switch_val, last_switch_time);
 
             // Removing a strategy during cooldown also succeeds
-            assert_eq!(SecureWhitelist::remove_strategy(&env, &admin, &strategy_b), Ok(()));
+            assert_eq!(
+                SecureWhitelist::remove_strategy(&env, &admin, &strategy_b),
+                Ok(())
+            );
             assert!(!SecureWhitelist::is_strategy_whitelisted(&env, &strategy_b));
 
             // Advance ledger timestamp beyond the cooldown period
@@ -385,7 +513,10 @@ mod tests {
             assert!(SecureWhitelist::is_strategy_whitelisted(&env, &strategy_a));
 
             // Retire strategy A and verify terminal state even after cooldown
-            assert_eq!(retire_strategy_internal(&env, &strategy_a, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                retire_strategy_internal(&env, &strategy_a, None),
+                Ok(STATE_RETIRED)
+            );
             assert!(!SecureWhitelist::is_strategy_whitelisted(&env, &strategy_a));
             assert_eq!(
                 SecureWhitelist::add_strategy(&env, &admin, &strategy_a),

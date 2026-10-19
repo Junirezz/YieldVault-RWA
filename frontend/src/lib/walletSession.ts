@@ -14,6 +14,31 @@ export function clearWalletManualDisconnect(): void {
   sessionStorage.removeItem(WALLET_MANUAL_DISCONNECT_KEY);
 }
 
+/**
+ * Timestamp (epoch ms) at which the current wallet session started.
+ * Drives the session-expiry countdown in `AuthContext`.
+ */
+export const WALLET_SESSION_START_KEY = "wallet_session_start";
+
+/** Read the persisted session start, or `null` when there is no valid one. */
+export function getWalletSessionStart(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(WALLET_SESSION_START_KEY);
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Persist the start of a wallet session. All writes to
+ * `wallet_session_start` go through this helper so the storage key and its
+ * format stay in one place.
+ */
+export function startWalletSession(now: number = Date.now()): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(WALLET_SESSION_START_KEY, String(now));
+}
+
 /** Persisted last-used wallet provider across sessions. */
 export const WALLET_LAST_PROVIDER_KEY = "yieldvault_last_wallet_provider";
 

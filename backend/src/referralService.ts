@@ -265,6 +265,20 @@ export class ReferralService {
    * Get or create a referral code for a wallet address.
    * Generates a unique 8-character alphanumeric code if one doesn't exist.
    */
+  /**
+   * Get existing referral code for a wallet address without creating one (pure read).
+   */
+  async getReferralCode(ownerAddress: string): Promise<string | null> {
+    const prisma = getPrisma();
+    const normalizedOwner = normalizeWalletAddress(ownerAddress);
+
+    const existing = await prisma.referralCode.findFirst({
+      where: { ownerAddress: normalizedOwner },
+    });
+
+    return existing ? existing.code : null;
+  }
+
   async getOrCreateReferralCode(ownerAddress: string): Promise<string> {
     const prisma = getPrisma();
     const normalizedOwner = normalizeWalletAddress(ownerAddress);

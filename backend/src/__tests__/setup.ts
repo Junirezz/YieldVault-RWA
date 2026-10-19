@@ -83,7 +83,7 @@ class PatchedPrismaClient extends OriginalPrismaClient {
 PrismaClientModule.PrismaClient = PatchedPrismaClient;
 
 // Register default admin API keys for integration tests that use test-admin-key.
-const { registerApiKey } = require('../middleware/apiKeyAuth') as typeof import('../middleware/apiKeyAuth');
+const { registerApiKey } = require('../middleware/apiKeyAuth');
 const defaultAdminKey = process.env.ADMIN_API_KEY || 'test-admin-key';
 registerApiKey(defaultAdminKey);
 registerApiKey('super-admin-test-key', { role: 'super-admin' });
@@ -136,6 +136,20 @@ export async function ensurePaginationFixtureTransactions(
         amount: ((i + 1) * 10).toFixed(2),
         type: i % 2 === 0 ? 'deposit' : 'withdrawal',
         status: i % 5 === 0 ? 'pending' : 'completed',
+        timestamp: new Date(now - i * 3600000),
+      },
+    });
+
+    const validWalletTxId = `tx-valid-${prefix}-${i + 1}`;
+    await prisma.transaction.upsert({
+      where: { id: validWalletTxId },
+      update: {},
+      create: {
+        id: validWalletTxId,
+        user: VALID_TEST_WALLET,
+        amount: ((i + 1) * 15).toFixed(2),
+        type: i % 2 === 0 ? 'deposit' : 'withdrawal',
+        status: 'completed',
         timestamp: new Date(now - i * 3600000),
       },
     });

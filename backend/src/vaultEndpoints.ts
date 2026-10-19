@@ -28,6 +28,11 @@ import {
 import { withdrawalDailyLimitMiddleware } from './middleware/withdrawalDailyLimit';
 import { requireSignedWalletAction } from './middleware/walletSignedAction';
 import { createTimeoutFor } from './middleware/timeoutMiddleware';
+import { sendApiError } from './middleware/apiError';
+import { authenticateApiKeyValue, hashApiKey } from './middleware/apiKeyAuth';
+import { walletNonceService } from './walletNonce';
+import { verifyWalletActionSignature } from './walletSignature';
+import { redisCacheClient } from './redisCache';
 import crypto from 'crypto';
 // crypto is still used below for generateFingerprint and body.id generation.
 import { tryAcquireWalletLock } from './walletLock';
@@ -41,6 +46,7 @@ const EXPLORER_BASE_URL =
   process.env.STELLAR_EXPLORER_URL || 'https://stellar.expert/explorer/testnet/tx';
 
 const router = Router();
+const prisma = getPrismaClient();
 const ZERO = new Decimal(0);
 const DEFAULT_SHARE_PRICE = new Decimal(1);
 const STRATEGY_CACHE_TTL_MS = parseInt(process.env.CACHE_STRATEGY_TTL_MS || '30000', 10);
@@ -251,7 +257,7 @@ async function handleVaultOperation(
   req: Request,
   res: Response,
   type: 'deposit' | 'withdrawal'
-): Promise<Response> {
+): Promise<Response | void> {
   // Task 3: read Idempotency-Key header (spec-compliant name)
   const idempotencyKey =
     (req.headers['idempotency-key'] as string | undefined) ||
@@ -268,13 +274,13 @@ async function handleVaultOperation(
   const withdrawalId = idempotencyKey || `wd-${crypto.randomBytes(12).toString('hex')}`;
 
   if (!walletLock.acquired) {
-    return res.status(409).json({
-      error: 'Conflict',
+    sendApiError(req, res, {
       status: 409,
       code: 'WALLET_OPERATION_IN_PROGRESS',
       message: 'Another operation is already in progress for this wallet',
-      walletAddress: normalizedWallet,
+      details: { walletAddress: normalizedWallet },
     });
+    return;
   }
 
   // Audit: the vault operation has been accepted and is about to be attempted.
@@ -615,42 +621,44 @@ async function handleVaultOperation(
     });
 
     if (err instanceof IdempotencyConflictError) {
-      return res.status(409).json({
-        error: 'Conflict',
+      sendApiError(req, res, {
         status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
         message: err.message,
       });
+      return;
     }
 
     if (err instanceof CircuitOpenError) {
       const retryAfterSec = Math.ceil(err.retryAfterMs / 1000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      return res.status(503).json({
-        error: 'Service Unavailable',
+      sendApiError(req, res, {
         status: 503,
+        code: 'CIRCUIT_OPEN',
         message: 'Soroban RPC is temporarily unavailable. Please retry later.',
-        retryAfterMs: err.retryAfterMs,
+        retryAfterSeconds: retryAfterSec,
       });
+      return;
     }
 
     if (err instanceof SorobanSimulationError) {
-      return res.status(err.statusCode).json({
-        error: err.statusCode === 422 ? 'Unprocessable Entity' : 'Bad Gateway',
+      sendApiError(req, res, {
         status: err.statusCode,
         code: err.code,
         message: err.message,
       });
+      return;
     }
 
     logger.log('error', `${type} operation failed`, {
       error: err instanceof Error ? err.message : String(err),
       traceId: getCurrentTraceId(),
     });
-    return res.status(500).json({
-      error: 'Internal Server Error',
+    sendApiError(req, res, {
       status: 500,
+      code: 'VAULT_OPERATION_FAILED',
       message: `Failed to process ${type}`,
     });
+    return;
   } finally {
     walletLock.release();
   }
@@ -724,9 +732,136 @@ router.get(
   }
 );
 
-router.get('/strategy/cooldown', cacheMiddleware({ ttl: 5000 }), (_req: Request, res: Response) => {
+async function getLastStrategySwitchTime(): Promise<string | null> {
+  if (redisCacheClient.isReady) {
+    try {
+      const cached = await redisCacheClient.get('vault:strategy:last_switch');
+      if (cached && typeof cached === 'string') return cached;
+    } catch {}
+  }
+  try {
+    const record = await prisma.adminConfigChange.findFirst({
+      where: { configType: 'vault.strategy', action: 'switch' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (record) {
+      return record.createdAt.toISOString();
+    }
+  } catch {}
+  return null;
+}
+
+async function recordStrategySwitchTime(
+  actor: string,
+  strategyId: string,
+  previousStrategyId?: string,
+): Promise<string> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  if (redisCacheClient.isReady) {
+    try {
+      await redisCacheClient.set('vault:strategy:last_switch', nowIso as any, 24 * 60 * 60 * 1000);
+    } catch {}
+  }
+  try {
+    await prisma.adminConfigChange.create({
+      data: {
+        configType: 'vault.strategy',
+        action: 'switch',
+        actor: actor || 'unknown',
+        preChangeSnapshot: previousStrategyId || '',
+        postChangeSnapshot: strategyId,
+        metadata: JSON.stringify({ strategyId, previousStrategyId, timestamp: nowIso }),
+        createdAt: now,
+      },
+    });
+  } catch (err) {
+    logger.log('error', 'Failed to record strategy switch config change', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return nowIso;
+}
+
+async function requireStrategyAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.get('Authorization') || req.get('authorization') || '';
+  const apiKeyHeader = req.get('x-api-key');
+  let providedKey = apiKeyHeader;
+  const match = authHeader.match(/^ApiKey\s+(.+)$/i) || authHeader.match(/^Bearer\s+(.+)$/i);
+  if (match) {
+    providedKey = match[1];
+  }
+
+  if (providedKey) {
+    const inMem = authenticateApiKeyValue(providedKey);
+    if (inMem && (inMem.role === 'admin' || inMem.role === 'super-admin')) {
+      req.authApiKeyRole = inMem.role;
+      return next();
+    }
+    try {
+      const hashed = hashApiKey(providedKey);
+      const dbKey = await prisma.apiKey.findUnique({
+        where: { hashedKey: hashed },
+      });
+      if (
+        dbKey &&
+        dbKey.isActive &&
+        !dbKey.deletedAt &&
+        (dbKey.role === 'admin' || dbKey.role === 'super-admin')
+      ) {
+        req.authApiKeyRole = dbKey.role as any;
+        return next();
+      }
+    } catch {}
+    sendApiError(req, res, {
+      status: 401,
+      code: 'AUTH_REQUIRED',
+      message: 'Invalid admin API key for strategy switch',
+    });
+    return;
+  }
+
+  const body = req.body || {};
+  const { walletAddress, nonce, signature } = body;
+  if (walletAddress && nonce && signature) {
+    try {
+      const meta = await walletNonceService.validateForUse(walletAddress, 'strategy', nonce);
+      verifyWalletActionSignature({
+        walletAddress,
+        action: 'strategy',
+        nonce: meta.nonce,
+        issuedAt: meta.issuedAt,
+        expiresAt: meta.expiresAt,
+        signature,
+      });
+      await walletNonceService.consume(walletAddress, 'strategy', nonce);
+      req.body.walletAddress = normalizeWalletAddress(walletAddress);
+      return next();
+    } catch (err) {
+      sendApiError(req, res, {
+        status: 401,
+        code: 'AUTH_REQUIRED',
+        message: err instanceof Error ? err.message : 'Invalid wallet signature or nonce',
+      });
+      return;
+    }
+  }
+
+  sendApiError(req, res, {
+    status: 401,
+    code: 'AUTH_REQUIRED',
+    message: 'Strategy switch requires a signed wallet action or admin API key',
+  });
+}
+
+router.get('/strategy/cooldown', cacheMiddleware({ ttl: 5000 }), async (_req: Request, res: Response) => {
   const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
-  const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
+  const lastSwitchIso = await getLastStrategySwitchTime();
   const now = Date.now();
   const lastSwitchMs = lastSwitchIso ? new Date(lastSwitchIso).getTime() : 0;
   const elapsed = lastSwitchMs > 0 ? Math.floor((now - lastSwitchMs) / 1000) : cooldownSec;
@@ -745,10 +880,11 @@ router.post(
   '/strategy',
   depositsLimiter,
   requireFlag('strategy-selection'),
+  requireStrategyAuth,
   validate({ body: VaultStrategyBodySchema }),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const cooldownSec = parseInt(process.env.STRATEGY_SWITCH_COOLDOWN_SEC || '0', 10);
-    const lastSwitchIso = process.env.LAST_STRATEGY_SWITCH_TIME || null;
+    const lastSwitchIso = await getLastStrategySwitchTime();
     const now = Date.now();
     const lastSwitchMs = lastSwitchIso ? new Date(lastSwitchIso).getTime() : 0;
 
@@ -757,14 +893,16 @@ router.post(
       if (elapsed < cooldownSec) {
         const retryAfter = cooldownSec - elapsed;
         res.setHeader('Retry-After', String(retryAfter));
-        return res.status(429).json({
-          error: 'Too Many Requests',
+        sendApiError(req, res, {
           status: 429,
           code: 'STRATEGY_COOLDOWN_ACTIVE',
           message: `Strategy switch cooldown active. Retry in ${retryAfter}s.`,
-          cooldownRemaining: retryAfter,
-          cooldownTotal: cooldownSec,
+          details: {
+            cooldownRemaining: retryAfter,
+            cooldownTotal: cooldownSec,
+          },
         });
+        return;
       }
     }
 
@@ -772,6 +910,9 @@ router.post(
     const previousStrategyId =
       typeof req.body?.previousStrategyId === 'string' ? req.body.previousStrategyId : undefined;
 
+    const actingWallet = String(req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'admin');
+
+    await recordStrategySwitchTime(actingWallet, strategyId, previousStrategyId);
     process.env.LAST_STRATEGY_SWITCH_TIME = new Date().toISOString();
 
     void eventOutboxService
@@ -781,9 +922,7 @@ router.post(
           transactionId: `strategy-${crypto.randomBytes(4).toString('hex')}`,
           amount: '0',
           asset: 'RWA',
-          walletAddress: String(
-            req.body?.walletAddress ?? req.get('x-wallet-address') ?? 'unknown'
-          ),
+          walletAddress: actingWallet,
           transactionHash: 'strategy-change',
           status: 'accepted',
           timestamp: new Date().toISOString(),
@@ -828,21 +967,22 @@ router.post(
     const relayerAddress = req.get('x-relayer-address') || req.get('x-wallet-address');
 
     if (!relayerAddress) {
-      return res.status(400).json({
-        error: 'Bad Request',
+      sendApiError(req, res, {
         status: 400,
+        code: 'RELAYER_ADDRESS_REQUIRED',
         message: 'Relayer address is required (x-relayer-address header)',
       });
+      return;
     }
 
     const walletLock = tryAcquireWalletLock(normalizedWallet);
     if (!walletLock.acquired) {
-      return res.status(409).json({
-        error: 'Conflict',
+      sendApiError(req, res, {
         status: 409,
         code: 'WALLET_OPERATION_IN_PROGRESS',
         message: 'Another operation is already in progress for this wallet',
       });
+      return;
     }
 
     try {
@@ -912,11 +1052,12 @@ router.post(
         errorMessage: err instanceof Error ? err.message : String(err),
       });
 
-      return res.status(500).json({
-        error: 'Internal Server Error',
+      sendApiError(req, res, {
         status: 500,
+        code: 'GASLESS_DEPOSIT_ERROR',
         message: 'Failed to process gasless deposit',
       });
+      return;
     } finally {
       walletLock.release();
     }

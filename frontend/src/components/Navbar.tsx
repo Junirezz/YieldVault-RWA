@@ -19,7 +19,7 @@ interface NavbarProps {
   currentPath?: "/" | "/analytics" | "/portfolio";
   onNavigate?: (path: "/" | "/analytics" | "/portfolio") => void;
   walletAddress: string | null;
-  usdcBalance?: number;
+  usdcBalance?: number | null;
   onConnect: (address: string) => void;
   onDisconnect: (reason?: DisconnectReason) => void;
   role?: UserRole;
@@ -132,8 +132,15 @@ const Navbar: FC<NavbarProps> = ({
             <NavLink to="/portfolio" className="nav-link" {...getRoutePrefetchHandlers("/portfolio")}>
               {t("nav.portfolio")}
             </NavLink>
-            <NavLink to="/compare" className="nav-link">
+            <NavLink to="/compare" className="nav-link" {...getRoutePrefetchHandlers("/compare")}>
               {t("nav.compare")}
+            </NavLink>
+            <NavLink
+              to="/vault-health"
+              className="nav-link"
+              {...getRoutePrefetchHandlers("/vault-health")}
+            >
+              {t("nav.vaultHealth")}
             </NavLink>
             <NavLink to="/analytics" className="nav-link" {...getRoutePrefetchHandlers("/analytics")}>
               {t("nav.analytics")}
@@ -157,8 +164,11 @@ const Navbar: FC<NavbarProps> = ({
                 </Badge>
               )}
             </NavLink>
+            <NavLink to="/settings" className="nav-link" {...getRoutePrefetchHandlers("/settings")}>
+              {t("nav.settings")}
+            </NavLink>
             {role === "admin" && (
-              <NavLink to="/admin" className="nav-link">
+              <NavLink to="/admin" className="nav-link" {...getRoutePrefetchHandlers("/admin")}>
                 {t("nav.admin")}
               </NavLink>
             )}
@@ -245,8 +255,11 @@ const Navbar: FC<NavbarProps> = ({
         <NavLink to="/portfolio" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/portfolio")}>
           {t("nav.portfolio")}
         </NavLink>
-        <NavLink to="/compare" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)}>
+        <NavLink to="/compare" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/compare")}>
           {t("nav.compare")}
+        </NavLink>
+        <NavLink to="/vault-health" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/vault-health")}>
+          {t("nav.vaultHealth")}
         </NavLink>
         <NavLink to="/analytics" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/analytics")}>
           {t("nav.analytics")}
@@ -259,19 +272,18 @@ const Navbar: FC<NavbarProps> = ({
             </Badge>
           )}
         </NavLink>
+        <NavLink to="/settings" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/settings")}>
+          {t("nav.settings")}
+        </NavLink>
         {role === "admin" && (
-          <NavLink to="/admin" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)}>
+          <NavLink to="/admin" className="nav-mobile-link" onClick={() => setIsMobileMenuOpen(false)} {...getRoutePrefetchHandlers("/admin")}>
             {t("nav.admin")}
           </NavLink>
         )}
 
-          <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
-            <ThemeToggle />
-            <LanguageSwitcher compact />
-            {walletAddress && <span>{networkLabel}</span>}
-          </div>
         <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
           <ThemeToggle />
+          <LanguageSwitcher compact />
           {walletAddress && <span>{networkLabel}</span>}
         </div>
       </div>
@@ -285,8 +297,11 @@ const Navbar: FC<NavbarProps> = ({
           <NavLink to="/portfolio" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/portfolio")}>
             {t("nav.portfolio")}
           </NavLink>
-          <NavLink to="/compare" role="menuitem" onClick={() => setMenuOpen(false)}>
+          <NavLink to="/compare" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/compare")}>
             {t("nav.compare")}
+          </NavLink>
+          <NavLink to="/vault-health" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/vault-health")}>
+            {t("nav.vaultHealth")}
           </NavLink>
           <NavLink to="/analytics" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/analytics")}>
             {t("nav.analytics")}
@@ -299,8 +314,11 @@ const Navbar: FC<NavbarProps> = ({
               </Badge>
             )}
           </NavLink>
+          <NavLink to="/settings" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/settings")}>
+            {t("nav.settings")}
+          </NavLink>
           {role === "admin" && (
-            <NavLink to="/admin" role="menuitem" onClick={() => setMenuOpen(false)}>
+            <NavLink to="/admin" role="menuitem" onClick={() => setMenuOpen(false)} {...getRoutePrefetchHandlers("/admin")}>
               {t("nav.admin")}
             </NavLink>
           )}

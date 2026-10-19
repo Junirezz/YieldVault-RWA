@@ -274,8 +274,8 @@ fn test_migrate_storage_version_checkpoint() {
 
     let pre = vault.storage_version();
     // Idempotent migration to current version must pass the checkpoint.
-    vault.migrate_storage(&2);
-    assert_eq!(vault.storage_version(), 2);
+    vault.migrate_storage(&STORAGE_VERSION);
+    assert_eq!(vault.storage_version(), STORAGE_VERSION);
     assert!(vault.storage_version() >= pre);
 }
 
@@ -447,4 +447,58 @@ fn generate_storage_fingerprint(env: &Env) -> &str {
     // Return a simple list of present keys as a simulated fingerprint
     // (Rust Vec of strings is hard to return here, so we just use it for internal assertion)
     "Admin TokenAsset Initialized"
+}
+
+#[test]
+fn test_execute_upgrade_emits_checkpoint_event_with_versions() {
+    let env = Env::default();
+    let (vault, admin, hash) = setup_upgrade(&env);
+
+    let eta = vault.propose_upgrade(&hash);
+    env.ledger().set_timestamp(eta);
+    vault.execute_upgrade();
+
+    let events = env.events().all();
+    assert!(events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_chkpt"), admin.clone()).into_val(&env)
+            && <(Option<BytesN<32>>, BytesN<32>, u32, u32)>::try_from_val(&env, &data)
+                == Ok((None, hash.clone(), STORAGE_VERSION, STORAGE_VERSION))
+    }));
+}
+
+#[test]
+fn test_force_upgrade_runs_migration_checkpoint_and_emits_event() {
+    let env = Env::default();
+    let (vault, _admin, hash) = setup_upgrade(&env);
+    let primary = Address::generate(&env);
+    let secondary = Address::generate(&env);
+    vault.set_emergency_approvers(&primary, &secondary);
+
+    // Simulate a vault whose storage predates the current schema.
+    env.as_contract(&vault.address, || set_storage_version(&env, 1));
+    assert_eq!(vault.storage_version(), 1);
+
+    let id = vault.propose_emergency_action(
+        &primary,
+        &emergency::EmergencyActionKind::ForceUpgrade,
+        &0u32,
+        &None,
+        &Some(hash.clone()),
+    );
+    let window = vault.emergency_dispute_window();
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + window + 1);
+    vault.confirm_emergency_action(&secondary, &id);
+    let events = env.events().all();
+
+    assert_eq!(vault.storage_version(), STORAGE_VERSION);
+    assert_eq!(vault.implementation(), Some(hash.clone()));
+
+    assert!(events.iter().any(|(contract, topics, data)| {
+        contract == vault.address
+            && topics == (symbol_short!("upg_chkpt"), secondary.clone()).into_val(&env)
+            && <(Option<BytesN<32>>, BytesN<32>, u32, u32)>::try_from_val(&env, &data)
+                == Ok((None, hash.clone(), 1, STORAGE_VERSION))
+    }));
 }

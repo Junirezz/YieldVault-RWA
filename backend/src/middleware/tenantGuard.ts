@@ -56,6 +56,10 @@ export interface TenantGuardOptions {
    * Defaults to Permission.ADMIN_READ.
    */
   adminBypassPermission?: Permission;
+  /**
+   * Whether anonymous requests should be rejected with 401 Unauthorized.
+   */
+  requireAuth?: boolean;
 }
 
 /**
@@ -84,12 +88,21 @@ export function tenantGuard(options: TenantGuardOptions) {
     walletParamPath,
     allowAdminBypass = false,
     adminBypassPermission = Permission.ADMIN_READ,
+    requireAuth = false,
   } = options;
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // 1. Extract the requested wallet address from the request
     const rawRequestedWallet = extractFromRequest(req, walletParamPath);
     if (!rawRequestedWallet || typeof rawRequestedWallet !== 'string') {
+      if (requireAuth) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          status: 401,
+          message: 'Authentication required',
+        });
+        return;
+      }
       // If no wallet is requested, this might be a public endpoint or
       // a different kind of resource – let it pass through for now
       next();
@@ -97,10 +110,7 @@ export function tenantGuard(options: TenantGuardOptions) {
     }
     const requestedWallet = normalizeWalletAddress(rawRequestedWallet);
 
-    // 2. Get the authenticated wallet address
-    const authenticatedWallet = getAuthenticatedWalletAddress(req);
-
-    // 3. Check for admin bypass
+    // 2. Check for admin bypass
     const authHeader = req.headers.authorization || '';
     const isApiKey = authHeader.match(/^ApiKey\s+(.+)$/i);
     if (isApiKey && allowAdminBypass && hasPermission(req, adminBypassPermission)) {
@@ -109,10 +119,19 @@ export function tenantGuard(options: TenantGuardOptions) {
       return;
     }
 
+    // 3. Get the authenticated wallet address
+    const authenticatedWallet = getAuthenticatedWalletAddress(req);
+
     // 4. Check if authenticated wallet matches requested wallet.
-    // Anonymous requests should be allowed to view public wallet data
-    // (for example, transaction history or portfolio listings).
     if (!authenticatedWallet) {
+      if (requireAuth) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          status: 401,
+          message: 'Authentication required',
+        });
+        return;
+      }
       next();
       return;
     }

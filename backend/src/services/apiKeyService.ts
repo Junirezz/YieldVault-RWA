@@ -47,15 +47,15 @@ function toApiKeyRecord(r: {
   id: string;
   tenantId: string;
   hashedKey: string;
-  role: string;
+  role: string | null;
   scopes: unknown;
   createdAt: Date;
   expiresAt: Date | null;
   lastUsedAt?: Date | null;
   isActive: boolean;
   deletedAt: Date | null;
-  deletedBy: string | null;
-  deletionReason: string | null;
+  deletedBy?: string | null;
+  deletionReason?: string | null;
 }): ApiKeyRecord {
   return {
     id: r.id,
@@ -117,7 +117,7 @@ export async function getApiKeyByHashed(hashed: string): Promise<ApiKeyRecord | 
     include: { tenant: { select: { deletedAt: true } } },
   });
   if (!record) return null;
-  if (!record.isActive || record.deletedAt || record.tenant.deletedAt) return null;
+  if (!record.isActive || record.deletedAt || record.tenant?.deletedAt) return null;
   if (record.expiresAt && record.expiresAt < new Date()) return null;
   return toApiKeyRecord(record);
 }

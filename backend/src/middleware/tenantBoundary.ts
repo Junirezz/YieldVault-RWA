@@ -17,6 +17,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './structuredLogging';
 import { prisma } from '../prisma';
+import { formatWalletForLog } from '../walletUtils';
+import type { ApiKeyRole } from './apiKeyAuth';
 
 // ─── Extended Express Request Interface ──────────────────────────────────────
 
@@ -28,8 +30,9 @@ declare global {
       tenantScopes?: Set<string>;
       authApiKeyTenantId?: string;
       authApiKeyScopes?: string[];
-      authApiKeyRole?: string;
+      authApiKeyRole?: ApiKeyRole;
       authApiKeyHash?: string;
+      authApiKeyLegacy?: boolean;
     }
   }
 }
@@ -177,7 +180,7 @@ export function validateTenantOwnership(
     if (req.tenantId !== requestedTenantId) {
       logger.log('warn', 'Tenant boundary violation detected', {
         action: 'tenant_boundary_violation',
-        actor: req.authApiKeyHash || req.walletAddress,
+        actor: req.authApiKeyHash || (req.walletAddress ? formatWalletForLog(req.walletAddress) : undefined),
         tenantId: req.tenantId,
         requestedTenantId,
         resource: resourceName,
@@ -278,7 +281,7 @@ export function assertApiKeyUsable(req: Request, resourceName: string): void {
   // Legacy fallback: keys minted from the deprecated global API_KEY env var
   // have no scopes recorded. Treat them as having all tenant scopes so the
   // fallback path keeps working while operators migrate.
-  if (granted.length === 0 && req.authApiKeyRole === 'legacy') {
+  if (granted.length === 0 && (req.authApiKeyLegacy || (req.authApiKeyRole as unknown) === 'legacy')) {
     return;
   }
 

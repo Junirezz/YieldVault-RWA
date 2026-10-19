@@ -16,8 +16,16 @@ on:
       - 'frontend/src/types/**'
       - '.github/workflows/backend-governance.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-governance:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -45,7 +53,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -61,6 +69,9 @@ jobs:
 
       - name: Type-check backend
         run: npm run build
+
+      - name: Validate Prometheus alert rules
+        run: docker run --rm --entrypoint=/bin/promtool -v "${{ github.workspace }}:/workspace" prom/prometheus:v2.55.0 check rules /workspace/backend/monitoring/prometheus-alerts.yml
 
       - name: Validate Prisma schema and migration consistency
         run: npm run prisma:schema-check

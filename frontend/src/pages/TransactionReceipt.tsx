@@ -2,9 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import EmptyState from "../components/ui/EmptyState";
 import { usePageHeadingFocus } from "../hooks/usePageHeadingFocus";
-
-const HORIZON_BASE = "https://horizon-testnet.stellar.org";
-const EXPLORER_BASE = "https://stellar.expert/explorer/testnet/tx";
+import { getStellarExplorerUrl } from "../lib/security";
+import { networkConfig } from "../config/network";
 
 interface TxDetails {
   hash: string;
@@ -55,8 +54,8 @@ export default function TransactionReceipt() {
 
     try {
       const [txRes, opsRes] = await Promise.all([
-        fetch(`${HORIZON_BASE}/transactions/${txHash}`),
-        fetch(`${HORIZON_BASE}/transactions/${txHash}/operations`),
+        fetch(`${networkConfig.horizonUrl}/transactions/${txHash}`),
+        fetch(`${networkConfig.horizonUrl}/transactions/${txHash}/operations`),
       ]);
 
       if (!txRes.ok) {
@@ -93,8 +92,11 @@ export default function TransactionReceipt() {
         status: "completed",
         confirmations: txData.ledger ? Math.max(1, txData.ledger) : 1,
         ledger: txData.ledger,
-        explorerUrl: `${EXPLORER_BASE}/${txHash}`,
-        horizonUrl: `${HORIZON_BASE}/transactions/${txHash}`,
+        explorerUrl: getStellarExplorerUrl(
+          txHash,
+          networkConfig.isTestnet ? "testnet" : "mainnet",
+        ),
+        horizonUrl: `${networkConfig.horizonUrl}/transactions/${txHash}`,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transaction");
@@ -244,7 +246,7 @@ export default function TransactionReceipt() {
               <dt>Ledger</dt>
               <dd>
                 <a
-                  href={`${EXPLORER_BASE}/ledger/${tx.ledger}`}
+                  href={`${networkConfig.explorerUrl}/ledger/${tx.ledger}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="receipt-explorer-link"

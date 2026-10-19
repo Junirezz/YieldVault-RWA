@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { Prisma, EventOutbox } from '@prisma/client';
 
@@ -64,7 +65,7 @@ export function resolveVaultId(event: EventOutbox): string {
  * `sequence` order while different vaults progress independently.
  */
 export class OutboxPoller {
-  private readonly prsma: PrismaClient;
+  private readonly prisma: PrismaClient;
   private readonly batchSize: number;
   private readonly maxAttempts: number;
   private readonly lockTimeoutMs: number;
@@ -127,16 +128,21 @@ export class OutboxPoller {
 
     // Select the oldest pending event per vault. This ensures we always advance
     // each vault from its oldest undelivered event and never jump ahead.
-    const heads = await this.prisma.$QueryRaw<Array<{ vaultId: string; minCreatedAt: Date }>>(
+    const heads = await this.prisma.$queryRaw<Array<{ vaultId: string; minCreatedAt: Date }>>(
       Prisma.sql`
-        SELECT as "vaultId", MIN("createdAt") AS "minCreatedAt"
+        SELECT
+          CASE
+            WHEN "aggregateType" = 'VaultState' THEN "aggregateId"
+            ELSE COALESCE("aggregateId", ':', "id")
+          END AS "vaultId",
+          MIN("createdAt") AS "minCreatedAt"
         FROM "EventOutbox"
         WHERE "status" = 'pending'
           AND ("lockedAt" IS NULL OR "lockedAt" <= ${lockCutoff})
         GROUP BY
           CASE
             WHEN "aggregateType" = 'VaultState' THEN "aggregateId"
-            ELSE COALSCE("aggregateId", ':', "id")
+            ELSE COALESCE("aggregateId", ':', "id")
           END
       `,
     );
@@ -150,7 +156,7 @@ export class OutboxPoller {
       const vaultId = head.vaultId;
       const minCreatedAt = head.minCreatedAt;
 
-      const vaultEvents = await this.prisma.$QueryRaw<EventOutbox[]>(
+      const vaultEvents = await this.prisma.$queryRaw<EventOutbox[]>(
         Prisma.sql`
           SELECT * FROM "EventOutbox"
           WHERE "status" = 'pending'
@@ -187,7 +193,7 @@ export class OutboxPoller {
     const now = new Date();
     const lockCutoff = new Date(now.getTime() - this.lockTimeoutMs);
 
-    const claimed = await this.prisma.$QueryRaw<EventOutbox[]>(
+    const claimed = await this.prisma.$queryRaw<EventOutbox[]>(
       Prisma.sql`
         UPDATE "EventOutbox"
         SET "status" = 'processing',
@@ -270,7 +276,7 @@ export async function enqueueVaultEvent(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
-    const latest = await tx.$QueryRaw<Array<{ sequence: number | null }>>(
+    const latest = await tx.$queryRaw<Array<{ sequence: number | null }>>(
       Prisma.sql`
         SELECT MAX("sequence") AS "sequence"
         FROM "EventOutbox"
@@ -283,6 +289,7 @@ export async function enqueueVaultEvent(
 
     return tx.eventOutbox.create({
       data: {
+        id: `obx-${crypto.randomUUID()}`,
         eventType: input.eventType,
         payload: JSON.stringify(input.payload),
         aggregateType,

@@ -142,7 +142,7 @@ That document covers 39 service-area tables with every variable's default, requi
 | [Backend — Rate Limiting](./docs/ENV_VARIABLE_MATRIX.md#8-backend--rate-limiting) | 16 |
 | [Backend — Webhook Delivery](./docs/ENV_VARIABLE_MATRIX.md#16-backend--webhook-delivery) | 11 |
 | [Backend — Withdrawal Recovery](./docs/ENV_VARIABLE_MATRIX.md#30-backend--withdrawal-partial-failure-recovery) | 8 |
-| [Frontend — Stellar / Soroban](./docs/ENV_VARIABLE_MATRIX.md#33-frontend--stellar--soroban-vite-vite_-prefix) | 6 |
+| [Frontend — Stellar / Soroban](./docs/ENV_VARIABLE_MATRIX.md#33-frontend--stellar--soroban-vite-vite_-prefix) | 8 |
 | [Frontend — Sentry Monitoring](./docs/ENV_VARIABLE_MATRIX.md#36-frontend--sentry-error-monitoring) | 7 |
 | [Environment-by-Environment Summary](./docs/ENV_VARIABLE_MATRIX.md#environment-by-environment-summary) | 16 |
 | [Minimum Required Sets](./docs/ENV_VARIABLE_MATRIX.md#minimum-required-sets) | — |

@@ -23,12 +23,11 @@
 //! 11. invariant suite     – centralized helpers + deposit/withdraw/invest/divest/rebalance
 //!     scenarios (see `invariant_tests.rs`, Issue #735)
 
-#![cfg(test)]
 extern crate std;
 
 use super::*;
 use crate::benji_strategy::{BenjiStrategy, BenjiStrategyClient};
-use crate::strategy::{StrategyClient, StrategyTrait};
+use crate::strategy::StrategyTrait;
 use crate::strategy_registration::{STATE_ACTIVE, STATE_PENDING, STATE_RETIRED};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::xdr::{ContractEventBody, ScSymbol, ScVal};
@@ -2352,9 +2351,59 @@ fn test_whitelist_consistency_with_set_strategy() {
     // Verify it was set
     assert_eq!(vault.strategy().unwrap(), benji_strategy);
 
-    // Remove from whitelist and verify
-    vault.whitelist_strategy(&benji_strategy, &false);
-    assert!(!vault.is_strategy_whitelisted(&benji_strategy));
+    // Removal of the active vault strategy is rejected (#1637)
+    assert!(vault.try_whitelist_strategy(&benji_strategy, &false).is_err());
+    assert!(vault
+        .try_whitelist_strategy(&benji_strategy, &false)
+        .is_err());
+    assert!(vault.is_strategy_whitelisted(&benji_strategy));
+}
+
+#[test]
+fn test_whitelist_removal_rejects_active_strategy() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.register_strategy(&strategy);
+    vault.activate_strategy_registration(&strategy);
+
+    assert!(vault.try_whitelist_strategy(&strategy, &false).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_ACTIVE)
+    );
+}
+
+#[test]
+fn test_retired_strategy_cannot_return_to_pending_via_whitelist() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.whitelist_strategy(&strategy, &true);
+    vault.retire_strategy(&strategy);
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+
+    // Removal must be rejected, leaving the Retired record intact...
+    assert!(vault.try_whitelist_strategy(&strategy, &false).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+
+    // ...so re-adding cannot revive it to Pending.
+    assert!(vault.try_whitelist_strategy(&strategy, &true).is_err());
+    assert_eq!(
+        vault.strategy_registration_state(&strategy),
+        Some(STATE_RETIRED)
+    );
+    assert!(!vault.is_strategy_whitelisted(&strategy));
 }
 
 // ─── Strategy heartbeat ───────────────────────────────────────────────────────
@@ -2928,4 +2977,20 @@ fn test_overflow_protection_near_limits() {
 
     let res_assets = vault.try_calculate_assets(&i128::MAX);
     assert_eq!(res_assets, Err(Ok(crate::errors::VaultError::MathOverflow)));
+}
+
+#[test]
+fn test_map_registration_error_variants() {
+    use crate::strategy_registration::StrategyRegistrationError as E;
+    let cases = [
+        (E::NotRegistered, VaultError::StrategyNotWhitelisted),
+        (E::InvalidTransition, VaultError::InvalidMigrationTarget),
+        (E::StrategyNotActive, VaultError::InvalidMigrationTarget),
+        (E::ActiveStrategyInUse, VaultError::WhitelistOperationFailed),
+        (E::AlreadyRegistered, VaultError::WhitelistOperationFailed),
+        (E::Unauthorized, VaultError::UnauthorizedStrategy),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(YieldVault::map_registration_error(input), expected);
+    }
 }

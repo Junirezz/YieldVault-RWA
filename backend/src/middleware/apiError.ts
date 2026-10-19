@@ -13,6 +13,7 @@ export interface ApiErrorOptions {
   summary?: string;
   errors?: unknown[];
   path?: string;
+  limit?: string;
 }
 
 /**
@@ -38,6 +39,7 @@ export interface ApiErrorBody {
   summary?: string;
   errors?: unknown[];
   path?: string;
+  limit?: string;
 }
 
 export interface BuildApiErrorBodyOptions {
@@ -52,6 +54,7 @@ export interface BuildApiErrorBodyOptions {
   summary?: string;
   errors?: unknown[];
   path?: string;
+  limit?: string;
 }
 
 /**
@@ -76,6 +79,7 @@ export function buildApiErrorBody(options: BuildApiErrorBodyOptions): ApiErrorBo
     ...(options.summary !== undefined ? { summary: options.summary } : {}),
     ...(options.errors !== undefined ? { errors: options.errors } : {}),
     ...(options.path !== undefined ? { path: options.path } : {}),
+    ...(options.limit !== undefined ? { limit: options.limit } : {}),
     ...(options.correlationId ? { correlationId: options.correlationId } : {}),
     ...(options.traceId ? { traceId: options.traceId } : {}),
   };
@@ -104,23 +108,11 @@ export function sendApiError(
       summary: options.summary,
       errors: options.errors,
       path: options.path,
+      limit: options.limit,
       correlationId,
       ...(traceId ? { traceId } : {}),
     })
   );
-  res.status(options.status).json({
-    error: options.error ?? statusLabel(options.status),
-    status: options.status,
-    code: options.code,
-    message: options.message,
-    retryable: options.retryable ?? options.status >= 500,
-    ...(options.summary !== undefined ? { summary: options.summary } : {}),
-    ...(options.errors !== undefined ? { errors: options.errors } : {}),
-    ...(options.path !== undefined ? { path: options.path } : {}),
-    ...(options.details !== undefined ? { details: options.details } : {}),
-    ...(correlationId ? { correlationId } : {}),
-    ...(traceId ? { traceId } : {}),
-  });
 }
 
 export function apiErrorContractMiddleware(
@@ -166,6 +158,7 @@ function defaultErrorCode(status: number): string {
     case 403: return 'AUTH_FORBIDDEN';
     case 404: return 'ROUTE_NOT_FOUND';
     case 409: return 'REQUEST_CONFLICT';
+    case 413: return 'PAYLOAD_TOO_LARGE';
     case 422: return 'REQUEST_UNPROCESSABLE';
     case 429: return 'RATE_LIMITED';
     default: return status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR';
@@ -179,6 +172,7 @@ export function statusLabel(status: number): string {
     case 403: return 'Forbidden';
     case 404: return 'Not Found';
     case 409: return 'Conflict';
+    case 413: return 'Payload Too Large';
     case 422: return 'Unprocessable Entity';
     case 429: return 'Too Many Requests';
     case 500: return 'Internal Server Error';

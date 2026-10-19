@@ -20,6 +20,7 @@ import {
   writesLimiter,
   readsLimiter,
   adminLimiter,
+  webhookVerifyLimiter,
   identityRateLimiter,
   getRateLimitMonitorSnapshot,
   loadConfig as loadRateLimiterConfig,
@@ -61,6 +62,9 @@ import { corsMiddleware } from './middleware/cors';
 import { geofencingMiddleware } from './middleware/geofencing';
 import { registerInvalidationHook } from './middleware/cache';
 import { invalidateVaultCaches } from './vaultDataCache';
+import { getRedisCacheHealth, redisCacheClient } from './redisCache';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, CanonicalIdParamSchema, WalletParamSchema, ArtifactIdParamSchema, KeyParamSchema, CacheDeleteQuerySchema } from './middleware/validate';
+import { validate, LoginSchema, NonceRequestSchema, RefreshSchema, WebhookRegisterSchema, WebhookUpdateSchema, ApyBackfillBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, FeatureFlagOverrideSchema, CacheInvalidateSchema, EventReplayBodySchema, WithdrawalLimitOverrideSchema, AllowlistWalletBodySchema, ImpersonationSessionBodySchema, ApiKeyRegisterSchema, ApiKeyRotateSchema, ApiKeyRevokeSchema, WebhookVerifyBodySchema, BulkExportBodySchema, TransactionBackfillBodySchema, GovernanceSnapshotExportSchema, ReportExportBodySchema, ChecksumVerifyBodySchema, DeadLetterResolveSchema, DeadLetterIdsSchema, DeadLetterProcessSchema, ScopedTokenCreateSchema, PaginationQuerySchema, WebhookListQuerySchema, IdParamSchema, WindowIdParamSchema, CreateVaultBodySchema, TransferResolveBodySchema, TransferResolveParamsSchema } from './middleware/validate';
 import { redisCacheClient } from './redisCache';
 import {
   validate,
@@ -109,7 +113,6 @@ import { createVersionDiscoveryRouter } from './routes/apiVersions';
 import { GracefulShutdownHandler } from './gracefulShutdown';
 import { db } from './database';
 import vaultRouter from './vaultEndpoints';
-import vaultsListRouter from './routes/vaults';
 import walletAliasRouter from './walletAliasEndpoints';
 import { walletAliasMappingService } from './walletAliasService';
 import transactionRouter from './transactionEndpoints';
@@ -128,6 +131,12 @@ import {
   rateLimitEvents,
   httpErrorCount,
   httpClientErrorCount,
+  eventOutboxPendingCount,
+  eventOutboxOldestPendingAgeSeconds,
+  emailQueuePendingCount,
+  emailQueueOldestPendingAgeSeconds,
+  webhookDeliveryPendingCount,
+  webhookDeliveryFailedCount,
 } from './metrics';
 import { latencyMonitoringService } from './latencyMonitoring';
 import { listEndpointSlaRegistry } from './endpointSlaRegistry';
@@ -147,6 +156,20 @@ import {
 import { diagnosticsBundleHandler } from './diagnosticsBundle';
 import { errorBoundaryMiddleware } from './middleware/errorBoundary';
 import { apiErrorContractMiddleware, sendApiError } from './middleware/apiError';
+import {
+  exportGovernanceSnapshots,
+  listGovernanceSnapshots,
+} from './governanceSnapshotExport';
+import {
+  getIdempotencyRetentionMetrics,
+  pruneStaleIdempotencyRecords,
+  startIdempotencyRetentionScheduler,
+} from './idempotencyRetention';
+import { scopedAdminTokenStore } from './scopedAdminTokens';
+import {
+  listInDoubtTransfers,
+  resolveInDoubtTransfer,
+} from './transferOrchestrator';
 import { startIdempotencyRetentionScheduler } from './idempotencyRetention';
 import vaultRoutes from './routes/vault';
 import transactionRoutes from './routes/transactions';
@@ -195,6 +218,412 @@ void walletAliasMappingService.loadFromDatabase().catch((error) => {
     error: error instanceof Error ? error.message : String(error),
   });
 });
+
+// Health check cache to track dependency status
+const cache = new NodeCache({ stdTTL: 30 });
+
+type VaultHealthResponse = {
+  vaultId: string;
+  status: 'healthy' | 'degraded';
+  uptimeSeconds: number;
+  metrics: {
+    totalAssets: string;
+    totalShares: string;
+    sharePrice: string;
+    apy: number;
+  };
+  dependencies: Record<string, 'up' | 'down' | 'degraded'>;
+  cached: boolean;
+  timestamp: string;
+};
+
+/**
+ * Reads the vault summary from the VaultState table and the most recent
+ * SharePriceSnapshot for the share price. Falls back to zeroed values when
+ * the database is unavailable (e.g., during startup or in tests).
+ */
+async function buildVaultSummaryResponseFromDb(): Promise<{
+  totalAssets: string;
+  totalShares: string;
+  sharePrice: string;
+  apy: number;
+  timestamp: string;
+}> {
+  try {
+    const prismaClient = getPrismaClient();
+    const [vaultState, latestSnapshot] = await Promise.all([
+      prismaClient.vaultState.findUnique({ where: { id: 1 } }),
+      prismaClient.sharePriceSnapshot
+        .findFirst({ orderBy: { recordedAt: 'desc' } })
+        .catch(() => null),
+    ]);
+
+    const totalAssets = vaultState?.totalAssets ?? '0';
+    const totalShares = vaultState?.totalShares ?? '0';
+    const sharePrice = latestSnapshot?.sharePrice ?? '1.000000';
+
+    return {
+      totalAssets,
+      totalShares,
+      sharePrice,
+      apy: 0, // APY is computed by the nightly snapshot job; placeholder until first run
+      timestamp: new Date().toISOString(),
+    };
+  } catch {
+    // Fail-open: return safe zero values so the endpoint never 500s
+    return {
+      totalAssets: '0',
+      totalShares: '0',
+      sharePrice: '1.000000',
+      apy: 0,
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+
+async function buildVaultHealthResponse(vaultId: string): Promise<VaultHealthResponse> {
+  const cacheKey = `vault-health:${vaultId}`;
+  const cached = cache.get<Omit<VaultHealthResponse, 'cached'>>(cacheKey);
+  if (cached) {
+    return { ...cached, cached: true };
+  }
+
+  const [summary, probes] = await Promise.all([
+    buildVaultSummaryResponseFromDb(),
+    healthProbeService.checkAll().catch(
+      () => ({}) as Record<string, { status: 'up' | 'down' | 'degraded' }>,
+    ),
+  ]);
+  const dependencies = Object.fromEntries(
+    Object.entries(probes).map(([name, state]) => [name, state.status]),
+  ) as Record<string, 'up' | 'down' | 'degraded'>;
+  const degraded = Object.values(dependencies).some((state) => state !== 'up');
+  const body = {
+    vaultId,
+    status: degraded ? 'degraded' as const : 'healthy' as const,
+    uptimeSeconds: Math.floor(process.uptime()),
+    metrics: {
+      totalAssets: summary.totalAssets,
+      totalShares: summary.totalShares,
+      sharePrice: summary.sharePrice,
+      apy: summary.apy,
+    },
+    dependencies,
+    timestamp: new Date().toISOString(),
+  };
+
+  cache.set(cacheKey, body, 5);
+  return { ...body, cached: false };
+}
+
+function resolveActingAdminAddress(req: Request): string {
+  const address =
+    req.get('x-admin-address') ||
+    req.get('x-admin-id') ||
+    req.get('x-wallet-address') ||
+    'unknown';
+  return address === 'unknown' ? address : normalizeWalletAddress(address);
+}
+
+function parseLimited(v: unknown, fallback: number, min: number, max: number): number {
+  const n = parseInt(String(v ?? ''), 10);
+  return Number.isNaN(n) ? fallback : Math.min(Math.max(n, min), max);
+}
+
+function isDryRunRequest(req: Request): boolean {
+  const value = req.body?.dryRun ?? req.query.dryRun;
+  return value === true || value === 'true' || value === '1';
+}
+
+function countInclusiveDays(start: string, end: string): number {
+  const startMs = Date.parse(start + 'T00:00:00.000Z');
+  const endMs = Date.parse(end + 'T00:00:00.000Z');
+  return Math.floor((endMs - startMs) / 86400000) + 1;
+}
+
+function paginateByLimit<T>(rows: T[], limit: number): { data: T[]; hasNextPage: boolean } {
+  const hasNextPage = rows.length > limit;
+  return {
+    data: hasNextPage ? rows.slice(0, limit) : rows,
+    hasNextPage,
+  };
+}
+
+function sendStandardListEnvelope<T>(
+  res: Response,
+  input: {
+    data: T[];
+    limit: number;
+    hasNextPage?: boolean;
+    hasPrevPage?: boolean;
+    nextCursor?: string;
+    total?: number;
+    statusCode?: number;
+    extras?: Record<string, unknown>;
+  },
+): void {
+  const payload = createPaginatedResponse(input.data, {
+    count: input.data.length,
+    total: input.total ?? input.data.length,
+    nextCursor: input.nextCursor ?? null,
+    prevCursor: null,
+    currentPage: null,
+    totalPages: null,
+    hasNextPage: input.hasNextPage ?? false,
+    hasPrevPage: input.hasPrevPage ?? false,
+    limit: input.limit,
+  });
+
+  res.status(input.statusCode ?? 200).json({
+    ...payload,
+    ...(input.extras || {}),
+  });
+}
+
+async function buildReferralStatsSnapshot(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+
+  try {
+    const stats = await referralService.getReferralStats(normalizedWallet);
+
+    if (!stats) {
+      // Must be the exact envelope GET /api/v1/referrals/:wallet returns, not
+      // a hand-rolled stand-in — admin impersonation is compared against that
+      // endpoint field-for-field by the governance contract test.
+      return {
+        statusCode: 404,
+        body: buildReferralStatsNotFoundBody(),
+      };
+    }
+
+    return {
+      statusCode: 200,
+      body: stats,
+    };
+  } catch (error) {
+    // Same reasoning as the 404 above. The route reports a failed lookup as a
+    // 500 with the canonical envelope; letting the rejection escape instead
+    // would 500 the entire impersonation response with a different message, so
+    // one broken sub-resource would take the whole snapshot with it (#1319).
+    logger.log('error', 'Error building referral stats snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralStatsErrorBody(),
+    };
+  }
+}
+
+async function buildReferralCodeSnapshot(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+
+  try {
+    const code = await referralService.getOrCreateReferralCode(normalizedWallet);
+    return {
+      statusCode: 200,
+      body: { code },
+    };
+  } catch (error) {
+    logger.log('error', 'Error building referral code snapshot', {
+      error: error instanceof Error ? error.message : String(error),
+      wallet: normalizedWallet,
+    });
+    return {
+      statusCode: 500,
+      body: buildReferralCodeErrorBody(),
+    };
+  }
+}
+
+async function buildWalletTransactionsSnapshot(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+  const prisma = getPrismaClient();
+  // Shared with GET /api/v1/transactions so the proxy can never drift to a
+  // different page size than the endpoint it stands in for (#1322).
+  const limit = TRANSACTION_PAGINATION_CONFIG.defaultLimit ?? 20;
+  const where = { user: normalizedWallet };
+  const [total, transactions] = await Promise.all([
+    prisma.transaction.count({ where }),
+    prisma.transaction.findMany({
+      where,
+      orderBy: { timestamp: 'desc' },
+      take: limit + 1,
+    }),
+  ]);
+  const hasNextPage = transactions.length > limit;
+  const data = hasNextPage ? transactions.slice(0, limit) : transactions;
+
+  return createPaginatedResponse(
+    data,
+    createPaginationEnvelope({
+      count: data.length,
+      limit,
+      total,
+      hasNextPage,
+      hasPrevPage: false,
+      nextCursor: hasNextPage && data.length > 0 ? encodeCursor(data[data.length - 1].id) : null,
+    }),
+  );
+}
+
+async function buildImpersonatedVaultState(wallet: string) {
+  const normalizedWallet = normalizeWalletAddress(wallet);
+  return {
+    walletAddress: normalizedWallet,
+    // Impersonation must show an admin exactly what the wallet's own
+    // dashboard would show, so read the same DB-backed summary
+    // GET /api/v1/vault/summary serves.
+    summary: await buildVaultSummaryResponseFromDb(),
+    transactions: await buildWalletTransactionsSnapshot(normalizedWallet),
+    portfolioHoldings: buildPortfolioHoldingsResponse({ walletAddress: normalizedWallet }),
+    vaultHistory: buildVaultHistoryResponse({}),
+    referralStats: await buildReferralStatsSnapshot(normalizedWallet),
+    referralCode: await buildReferralCodeSnapshot(normalizedWallet),
+  };
+}
+
+function resolveTransactionExportAccess(req: Request):
+  | { kind: 'admin'; walletAddress?: string }
+  | { kind: 'user'; walletAddress: string }
+  | null {
+  const authHeader = req.get('authorization') || '';
+  const walletAddress =
+    typeof req.query.walletAddress === 'string' ? normalizeWalletAddress(req.query.walletAddress) : undefined;
+
+  const apiKeyMatch = authHeader.match(/^ApiKey\s+(.+)$/i);
+  if (apiKeyMatch) {
+    const authenticated = authenticateApiKeyValue(apiKeyMatch[1]);
+    if (!authenticated) {
+      return null;
+    }
+    req.authApiKeyHash = authenticated.hash;
+    req.authApiKeyRole = authenticated.role;
+    return {
+      kind: 'admin',
+      walletAddress: walletAddress || undefined,
+    };
+  }
+
+  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!bearerMatch) {
+    return null;
+  }
+
+  const payload = verifyJwt(bearerMatch[1]);
+  const userWallet = normalizeWalletAddress(payload.sub);
+  if (walletAddress && walletAddress !== userWallet) {
+    throw new Error('FORBIDDEN_WALLET_EXPORT');
+  }
+
+  return {
+    kind: 'user',
+    walletAddress: userWallet,
+  };
+}
+
+function buildTransactionExportFilename(format: 'csv' | 'json'): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `transaction-history-${timestamp}.${format}`;
+}
+
+async function handleTransactionExport(req: Request, res: Response): Promise<void> {
+  const format = req.query.format === 'csv' ? 'csv' : req.query.format === 'json' ? 'json' : null;
+  if (!format) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'format query parameter must be either csv or json',
+    });
+    return;
+  }
+
+  let access;
+  try {
+    access = resolveTransactionExportAccess(req);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'FORBIDDEN_WALLET_EXPORT') {
+      res.status(403).json({
+        error: 'Forbidden',
+        status: 403,
+        message: 'Users may only export their own wallet transactions',
+      });
+      return;
+    }
+
+    res.status(401).json({
+      error: 'Unauthorized',
+      status: 401,
+      message: error instanceof Error ? error.message : 'Invalid authorization header',
+    });
+    return;
+  }
+
+  if (!access) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      status: 401,
+      message: 'Authorization header must contain a Bearer token or ApiKey',
+    });
+    return;
+  }
+
+  const exportQuery = {
+    type: typeof req.query.type === 'string' ? req.query.type : undefined,
+    status: typeof req.query.status === 'string' ? req.query.status : undefined,
+    sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined,
+    sortOrder: (
+      req.query.sortOrder === 'asc' || req.query.sortOrder === 'desc'
+        ? req.query.sortOrder
+        : undefined
+    ) as 'asc' | 'desc' | undefined,
+    walletAddress: access.walletAddress,
+    startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
+    endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
+  };
+
+  try {
+    const artifact = await buildTransactionExportArtifact(format, exportQuery);
+    const fileName = buildTransactionExportFilename(format);
+    const job = await recordExportJob({
+      format,
+      fileName,
+      contentType: artifact.contentType,
+      checksum: artifact.checksum,
+      checksumAlgorithm: artifact.checksumAlgorithm,
+      generatedBy: resolveExportGeneratedBy(req),
+      walletAddress: access.walletAddress,
+      rowCount: artifact.rowCount,
+      filters: {
+        type: exportQuery.type || null,
+        status: exportQuery.status || null,
+        sortBy: exportQuery.sortBy || null,
+        sortOrder: exportQuery.sortOrder || null,
+        startDate: exportQuery.startDate || null,
+        endDate: exportQuery.endDate || null,
+        walletAddress: exportQuery.walletAddress || null,
+      },
+    });
+
+    res.setHeader('Content-Type', artifact.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('X-Export-Job-Id', job.id);
+    res.setHeader('X-Export-Checksum', artifact.checksum);
+    res.setHeader('X-Export-Checksum-Algorithm', artifact.checksumAlgorithm);
+    res.setHeader('X-Export-Metadata', buildExportMetadataHeaderValue(job));
+    res.status(200).send(artifact.body);
+  } catch (error) {
+    logger.log('error', 'Transaction export failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({
+      error: 'Internal Server Error',
+      status: 500,
+      message: 'Failed to generate transaction export',
+    });
+  }
+}
 
 // â”€â”€â”€ Rate Limiting Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Issue #455: Use the Redis-backed limiter factory from rateLimiter.ts.
@@ -327,14 +756,52 @@ app.use(maintenanceModeMiddleware);
  * GET /metrics
  * Exposes Prometheus metrics for operational monitoring
  */
-app.get('/metrics', async (_req: Request, res: Response) => {
+app.get('/metrics', async (req: Request, res: Response) => {
+  const scrapeToken =
+    process.env.METRICS_AUTH_TOKEN ||
+    process.env.METRICS_SCRAPE_TOKEN ||
+    process.env.PROMETHEUS_BEARER_TOKEN;
+
+  if (scrapeToken) {
+    const authHeader = req.headers.authorization;
+    const apiKeyHeader = req.headers['x-api-key'] || req.headers['apikey'];
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const apiKeyMatch = authHeader?.match(/^ApiKey\s+(.+)$/i);
+    const provided =
+      bearerMatch?.[1] ||
+      apiKeyMatch?.[1] ||
+      (typeof apiKeyHeader === 'string' ? apiKeyHeader : undefined);
+
+    if (!provided || provided !== scrapeToken) {
+      res.status(401).type('text/plain').send('Unauthorized');
+      return;
+    }
+  }
+
   try {
     syncJobGovernanceMetrics();
     latencyMonitoringService.syncSloMetrics();
+    try {
+      const [outbox, emails] = await Promise.all([
+        eventOutboxService.getMetrics(),
+        emailQueueService.getQueueMetrics(),
+      ]);
+      const webhooks = getWebhookDeliveryMetrics();
+      eventOutboxPendingCount.set(outbox.pending + outbox.failed);
+      eventOutboxOldestPendingAgeSeconds.set(outbox.oldestPendingAgeSeconds);
+      emailQueuePendingCount.set(emails.pending);
+      emailQueueOldestPendingAgeSeconds.set(emails.oldestPendingAgeSeconds);
+      webhookDeliveryPendingCount.set(webhooks.pending);
+      webhookDeliveryFailedCount.set(webhooks.failed);
+    } catch (error) {
+      logger.log('warn', 'Failed to refresh queue Prometheus gauges', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   } catch (err) {
-    res.status(500).end(err);
+    res.status(500).type('text/plain').send(err instanceof Error ? err.message : String(err));
   }
 });
 
@@ -364,6 +831,47 @@ app.get('/admin/sla/registry', validateApiKey, (_req: Request, res: Response) =>
     generatedAt: new Date().toISOString(),
   });
 });
+
+app.get('/admin/transfers/in-doubt', validateApiKey, (_req: Request, res: Response) => {
+  res.status(200).json({ transfers: listInDoubtTransfers() });
+});
+
+app.post(
+  '/admin/transfers/:key/resolve',
+  validateApiKey,
+  validate({ params: TransferResolveParamsSchema, body: TransferResolveBodySchema }),
+  async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const resolution = req.body as
+      | { transactionHash: string }
+      | { discard: true };
+    const action = 'discard' in resolution ? 'discard' : 'confirm';
+
+    try {
+      const resolved = await resolveInDoubtTransfer(key, resolution);
+      const statusCode = resolved ? 200 : 404;
+      await recordAdminAuditLog(req, `transfers.in_doubt.${action}`, statusCode, {
+        storeKey: key,
+        resolution: action,
+      });
+      if (!resolved) {
+        res.status(404).json({ error: 'In-doubt transfer not found' });
+        return;
+      }
+      res.status(200).json({ resolved: true, storeKey: key, resolution: action });
+    } catch (error) {
+      await recordAdminAuditLog(req, `transfers.in_doubt.${action}`, 500, {
+        storeKey: key,
+        resolution: action,
+      });
+      logger.log('error', 'Failed to resolve in-doubt transfer', {
+        storeKey: key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: 'Failed to resolve in-doubt transfer' });
+    }
+  },
+);
 
 /**
  * GET /admin/rate-limits
@@ -492,7 +1000,6 @@ app.use('/api', createVersionDiscoveryRouter());
 
 // Mount routers under /api/v1
 apiV1.use('/vault', vaultRouter);
-apiV1.use('/vaults', vaultsListRouter);
 apiV1.use('/vaults', vaultListRouter);
 apiV1.use('/wallet-aliases', walletAliasRouter);
 apiV1.use('/referrals', referralRouter);
@@ -636,6 +1143,87 @@ app.post('/auth/logout', (req: Request, res: Response) => {
 app.post('/auth/logout-all', (req: Request, res: Response) => {
   res.redirect(301, '/api/v1/auth/logout-all');
 });
+
+// /api/vault/* â†’ /api/v1/vault/*
+app.get('/api/vault/summary', (_req: Request, res: Response) => {
+  res.setHeader('deprecation', 'true');
+  res.redirect(301, '/api/v1/vault/summary');
+});
+app.get('/api/vault/transactions/export', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/transactions/export');
+});
+app.get('/api/vault/metrics', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/metrics');
+});
+app.get('/api/vault/apy', (_req: Request, res: Response) => {
+  res.redirect(301, '/api/v1/vault/apy');
+});
+
+/**
+ * Shared handler for POST /webhooks/verify and /api/v1/webhooks/verify (#1608).
+ * Requires admin ApiKey with webhook permission. Anonymous gets 401 via validateApiKey.
+ * Uses dedicated webhookVerifyLimiter rate-limit tier.
+ * Never logs secrets.
+ */
+const handleWebhookVerify = (req: Request, res: Response) => {
+  const scopes = (req as any).authApiKeyScopes || [];
+  const role = (req as any).authApiKeyRole || 'admin';
+  const hasWebhookPerm =
+    scopes.includes('*') ||
+    scopes.includes('webhooks') ||
+    scopes.includes('admin') ||
+    role === 'admin' ||
+    role === 'super-admin';
+
+  if (!hasWebhookPerm) {
+    res.status(403).json({
+      error: 'Forbidden',
+      status: 403,
+      message: 'API key lacks required webhooks scope',
+    });
+    return;
+  }
+
+  const { secret, payload, signature } = req.body || {};
+  if (typeof secret !== 'string' || !secret.trim()) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'secret is required and must be a non-empty string',
+    });
+    return;
+  }
+
+  if (typeof payload === 'undefined') {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'payload is required',
+    });
+    return;
+  }
+
+  const computedSignature = createWebhookSignature(secret, payload);
+  const verified =
+    typeof signature === 'string' && signature.length > 0
+      ? verifyWebhookSignature(secret, payload, signature)
+      : null;
+
+  res.status(200).json({
+    algorithm: 'HMAC-SHA256',
+    signature: computedSignature,
+    verified,
+  });
+};
+
+// /webhooks/verify → /api/v1/webhooks/verify (#1608)
+app.post(
+  '/webhooks/verify',
+  webhookVerifyLimiter,
+  validateApiKey,
+  validate({ body: WebhookVerifyBodySchema }),
+  handleWebhookVerify,
+);
 
 // â”€â”€â”€ Backward-compatibility redirects for list/router-mounted paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Generic catch-all redirects for unversioned /vault/*, /referrals/*,
@@ -1142,7 +1730,7 @@ app.post('/admin/feature-flags/overrides', validateApiKey, validate({ body: Feat
  * DELETE /admin/feature-flags/overrides/:id - Delete a feature flag override
  * Requires API key authentication
  */
-app.delete('/admin/feature-flags/overrides/:id', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/feature-flags/overrides/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const { id } = req.params;
   if (!id) {
     res.status(400).json({
@@ -1238,12 +1826,28 @@ app.get('/admin/cache/redis-status', validateApiKey, async (_req: Request, res: 
   });
 });
 
+function isSafeRegexPattern(pattern: string): boolean {
+  if (pattern.length > 100) {
+    return false;
+  }
+  const nestedQuantifiers = /(\([^)]*[+*?]\)[+*?{])|(\([^)]*\|[^)]*\)[+*?{])/;
+  if (nestedQuantifiers.test(pattern)) {
+    return false;
+  }
+  const repeatedQuantifiers = /\([^)]*(\+).*?\)(\+|\*|\{[0-9]+,\})/;
+  if (repeatedQuantifiers.test(pattern)) {
+    return false;
+  }
+  return true;
+}
+
 /**
- * DELETE /admin/cache - Clear entire cache or by regex pattern (R8)
+ * DELETE /admin/cache - Clear entire cache or by regex pattern (R8, Issue #1609)
  * ?pattern=<regex> removes only matching entries
+ * Supports ?dryRun=true preview
  * Requires API key authentication
  */
-app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
+app.delete('/admin/cache', validateApiKey, validate({ query: CacheDeleteQuerySchema }), (req: Request, res: Response) => {
   const pattern = typeof req.query.pattern === 'string' ? req.query.pattern : undefined;
 
   if (pattern !== undefined) {
@@ -1252,6 +1856,22 @@ app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
         error: 'Bad Request',
         status: 400,
         message: 'pattern query parameter must not be empty; omit it to clear the entire cache',
+      });
+      return;
+    }
+    if (pattern.length > 100) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: 'pattern query parameter exceeds maximum length of 100 characters',
+      });
+      return;
+    }
+    if (!isSafeRegexPattern(pattern)) {
+      res.status(400).json({
+        error: 'Bad Request',
+        status: 400,
+        message: `Unsafe regex pattern "${pattern}": potential catastrophic backtracking detected`,
       });
       return;
     }
@@ -1265,6 +1885,18 @@ app.delete('/admin/cache', validateApiKey, (req: Request, res: Response) => {
       });
       return;
     }
+  }
+
+  if (isDryRunRequest(req)) {
+    res.json({
+      dryRun: true,
+      message: 'Cache invalidation dry-run preview',
+      pattern: pattern ?? null,
+      wouldInvalidate: true,
+      stats: getCacheStats(),
+      timestamp: new Date().toISOString(),
+    });
+    return;
   }
 
   const removed = invalidateCache(pattern);
@@ -1494,18 +2126,34 @@ app.get('/admin/emails/queue', validateApiKey, async (req: Request, res: Respons
  * POST /admin/emails/replay/:id
  * Requeues a failed/dead-letter email for another send attempt.
  */
-app.post('/admin/emails/replay/:id', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/emails/replay/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const email = await emailQueueService.replayEmail(req.params.id);
     res.status(200).json({
       message: 'Email requeued successfully',
       email,
     });
-  } catch {
-    res.status(404).json({
-      error: 'Not Found',
-      status: 404,
-      message: 'Email queue item not found',
+  } catch (err: unknown) {
+    const isNotFound =
+      (err && typeof err === 'object' && 'code' in err && (err as { code: unknown }).code === 'P2025') ||
+      (err instanceof Error &&
+        (err.name === 'NotFoundError' ||
+          err.message.includes('No EmailQueue found') ||
+          err.message.includes('not found')));
+
+    if (isNotFound) {
+      sendApiError(req, res, {
+        status: 404,
+        code: 'EMAIL_NOT_FOUND',
+        message: 'Email queue item not found',
+      });
+      return;
+    }
+
+    sendApiError(req, res, {
+      status: 500,
+      code: 'INTERNAL_SERVER_ERROR',
+      message: err instanceof Error ? err.message : 'Failed to replay email',
     });
   }
 });
@@ -1622,7 +2270,7 @@ app.get('/admin/wallet-aliases', validateApiKey, async (_req: Request, res: Resp
  * Deletes a canonical wallet alias group and all linked aliases.
  * Requires API key authentication.
  */
-app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, async (req: Request, res: Response) => {
+app.delete('/admin/wallet-aliases/:canonicalId', validateApiKey, validate({ params: CanonicalIdParamSchema }), async (req: Request, res: Response) => {
   const { canonicalId } = req.params;
   const existing = await walletAliasMappingService.getIdentityLinks(canonicalId);
 
@@ -1863,7 +2511,7 @@ app.delete('/admin/impersonate/sessions/:id', validateApiKey, async (req: Reques
  * GET /admin/impersonate/:wallet - inspect vault state as a specific wallet
  * Requires super-admin API key and a valid non-expired impersonation session.
  */
-app.get('/admin/impersonate/:wallet', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/impersonate/:wallet', validateApiKey, validate({ params: WalletParamSchema }), async (req: Request, res: Response) => {
   const wallet = String(req.params.wallet || '').trim();
   const actingAdminAddress = resolveActingAdminAddress(req);
   const sessionId = String(req.get('x-impersonation-session-id') || '').trim();
@@ -2007,7 +2655,7 @@ app.get('/admin/receipts', validateApiKey, async (req: Request, res: Response) =
  * Retrieves a specific admin action receipt.
  * Requires API key authentication.
  */
-app.get('/admin/receipts/:id', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/receipts/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const receipt = await getAdminReceipt(req.params.id);
     if (!receipt) {
@@ -2029,7 +2677,7 @@ app.get('/admin/receipts/:id', validateApiKey, async (req: Request, res: Respons
  * Verifies the integrity of an admin action receipt.
  * Requires API key authentication.
  */
-app.get('/admin/receipts/:id/verify', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/receipts/:id/verify', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const receipt = await getAdminReceipt(req.params.id);
     if (!receipt) {
@@ -2487,7 +3135,7 @@ app.get('/admin/webhooks/dead-letter', validateApiKey, validate({ query: Webhook
 /**
  * POST /admin/webhooks/dead-letter/:id/retry - re-queue a dead-letter delivery
  */
-app.post('/admin/webhooks/dead-letter/:id/retry', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/webhooks/dead-letter/:id/retry', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   try {
     const entry = await retryWebhookDeadLetter(req.params.id);
     if (!entry) {
@@ -2550,40 +3198,15 @@ app.get('/admin/webhooks/deliveries', validateApiKey, validate({ query: Paginati
 });
 
 /**
- * POST /api/v1/webhooks/verify - verify webhook secret/signature pairing before go-live
+ * POST /api/v1/webhooks/verify - verify webhook secret/signature pairing before go-live (#1608)
  */
-app.post('/api/v1/webhooks/verify', validate({ body: WebhookVerifyBodySchema }), (req: Request, res: Response) => {
-  const { secret, payload, signature } = req.body || {};
-  if (typeof secret !== 'string' || !secret.trim()) {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'secret is required and must be a non-empty string',
-    });
-    return;
-  }
-
-  if (typeof payload === 'undefined') {
-    res.status(400).json({
-      error: 'Bad Request',
-      status: 400,
-      message: 'payload is required',
-    });
-    return;
-  }
-
-  const computedSignature = createWebhookSignature(secret, payload);
-  const verified =
-    typeof signature === 'string' && signature.length > 0
-      ? verifyWebhookSignature(secret, payload, signature)
-      : null;
-
-  res.status(200).json({
-    algorithm: 'HMAC-SHA256',
-    signature: computedSignature,
-    verified,
-  });
-});
+app.post(
+  '/api/v1/webhooks/verify',
+  webhookVerifyLimiter,
+  validateApiKey,
+  validate({ body: WebhookVerifyBodySchema }),
+  handleWebhookVerify,
+);
 
 /**
  * GET /admin/audit/logs - list admin activity logs
@@ -2857,7 +3480,7 @@ app.get('/admin/exports/bulk/jobs', validateApiKey, async (req: Request, res: Re
 /**
  * GET /admin/exports/bulk/jobs/:id - get bulk export job status
  */
-app.get('/admin/exports/bulk/jobs/:id', validateApiKey, async (req: Request, res: Response) => {
+app.get('/admin/exports/bulk/jobs/:id', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const job = await getBulkExportJob(String(req.params.id));
   if (!job) {
     res.status(404).json({
@@ -2873,7 +3496,7 @@ app.get('/admin/exports/bulk/jobs/:id', validateApiKey, async (req: Request, res
 /**
  * POST /admin/exports/bulk/jobs/:id/cancel - cancel a pending/processing bulk export job
  */
-app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const cancelled = await cancelBulkExportJob(String(req.params.id));
   if (!cancelled) {
     const job = await getBulkExportJob(String(req.params.id));
@@ -2901,7 +3524,7 @@ app.post('/admin/exports/bulk/jobs/:id/cancel', validateApiKey, async (req: Requ
 /**
  * GET /admin/exports/bulk/artifacts/:artifactId - download a completed bulk export artifact
  */
-app.get('/admin/exports/bulk/artifacts/:artifactId', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/exports/bulk/artifacts/:artifactId', validateApiKey, validate({ params: ArtifactIdParamSchema }), (req: Request, res: Response) => {
   const artifact = getBulkExportArtifact(String(req.params.artifactId));
   if (!artifact) {
     res.status(404).json({
@@ -3512,7 +4135,7 @@ app.get('/admin/jobs/dead-letters', validateApiKey, (req: Request, res: Response
  * Retrieves a single dead-letter record by ID.
  * Requires API key authentication.
  */
-app.get('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Response) => {
+app.get('/admin/jobs/dead-letters/:id', validateApiKey, validate({ params: IdParamSchema }), (req: Request, res: Response) => {
   const record = getDeadLetterRecord(req.params.id);
   if (!record) {
     res.status(404).json({
@@ -3535,7 +4158,7 @@ app.get('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Resp
  * Supports dryRun flag.
  * Requires API key authentication.
  */
-app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, async (req: Request, res: Response) => {
+app.post('/admin/jobs/dead-letters/:id/retry', validateApiKey, validate({ params: IdParamSchema }), async (req: Request, res: Response) => {
   const record = getDeadLetterRecord(req.params.id);
   if (!record) {
     res.status(404).json({
@@ -3631,7 +4254,7 @@ app.post('/admin/jobs/dead-letters/:id/resolve', validateApiKey, validate({ para
  * Discards a dead-letter record from the queue.
  * Requires API key authentication.
  */
-app.delete('/admin/jobs/dead-letters/:id', validateApiKey, (req: Request, res: Response) => {
+app.delete('/admin/jobs/dead-letters/:id', validateApiKey, validate({ params: IdParamSchema }), (req: Request, res: Response) => {
   const actor = resolveActingAdminAddress(req);
 
   if (isDryRunRequest(req)) {
@@ -3832,8 +4455,18 @@ app.get('/admin/idempotency/keys', validateApiKey, (req: Request, res: Response)
  * Removes a single idempotency key from the store.
  * Requires API key authentication.
  */
-app.delete('/admin/idempotency/keys/:key', validateApiKey, (req: Request, res: Response) => {
-  const key = decodeURIComponent(req.params.key);
+app.delete('/admin/idempotency/keys/:key', validateApiKey, validate({ params: KeyParamSchema }), (req: Request, res: Response) => {
+  let key: string;
+  try {
+    key = decodeURIComponent(req.params.key);
+  } catch (err) {
+    res.status(400).json({
+      error: 'Bad Request',
+      status: 400,
+      message: 'Malformed URI encoding in key parameter',
+    });
+    return;
+  }
   if (isDryRunRequest(req)) {
     const exists = idempotencyStore.inspectKeys().some((entry) => entry.key === key);
     res.status(exists ? 200 : 404).json({

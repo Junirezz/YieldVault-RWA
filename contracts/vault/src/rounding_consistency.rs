@@ -239,7 +239,7 @@ impl RoundingPolicy {
             return Ok(0);
         }
 
-        if basis_points < 0 || basis_points > 10_000 {
+        if !(0..=10_000).contains(&basis_points) {
             return Err(VaultError::InvalidFeeBps);
         }
 

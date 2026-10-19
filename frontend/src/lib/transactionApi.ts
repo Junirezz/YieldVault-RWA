@@ -1,5 +1,6 @@
 import { validate, TransactionQuerySchema } from "./api";
 import { formatNumber } from "./formatters";
+import { networkConfig } from "../config/network";
 import type { TransactionQueryInput } from "./api/schemas";
 
 export type TxType = "deposit" | "withdrawal" | "transfer" | "trade";
@@ -60,13 +61,11 @@ export function normalizeOperation(
   };
 }
 
-const HORIZON_BASE_URL = "https://horizon-testnet.stellar.org";
-
 export async function getTransactions(
   params: TransactionQueryInput,
 ): Promise<Transaction[]> {
   const query = validate(TransactionQuerySchema, params, "TransactionQuery");
-  const url = `${HORIZON_BASE_URL}/accounts/${query.walletAddress}/operations?limit=${query.limit}&order=${query.order}`;
+  const url = `${networkConfig.horizonUrl}/accounts/${query.walletAddress}/operations?limit=${query.limit}&order=${query.order}`;
   const response = await fetch(url);
 
   if (!response.ok) {

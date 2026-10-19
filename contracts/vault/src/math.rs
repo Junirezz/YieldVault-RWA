@@ -9,8 +9,7 @@ pub use share_price_math::{
 #[cfg(test)]
 mod tests {
     use super::{
-        assets_to_shares as checked_assets_to_shares,
-        shares_to_assets as checked_shares_to_assets,
+        assets_to_shares as checked_assets_to_shares, shares_to_assets as checked_shares_to_assets,
     };
     use share_price_math::MathError;
 

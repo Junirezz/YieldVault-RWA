@@ -327,7 +327,7 @@ model EmailQueue {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([status])
+  @@index([status, nextRetryAt])
   @@index([createdAt])
 }
 
@@ -527,19 +527,24 @@ model ApiKey {
   id             String    @id @default(uuid())
   tenantId       String
   hashedKey      String    @unique
-  role           String
+  role           String?
   scopes         String    @default("[]")
   createdAt      DateTime  @default(now())
+  updatedAt      DateTime? @updatedAt
   expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  revoked        Boolean   @default(false)
+  revokedAt      DateTime?
   isActive       Boolean   @default(true)
   deletedAt      DateTime?
   deletedBy      String?
   deletionReason String?
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, deletedAt])
+  @@index([hashedKey])
   @@index([role])
   @@index([deletedAt])
 }

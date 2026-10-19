@@ -67,6 +67,13 @@ export const queryKeys = {
     xlm: (walletAddress?: string | null) =>
       [...queryKeys.balance.all, "xlm", walletAddress] as const,
   },
+  referral: {
+    all: ["referral"] as const,
+    stats: (walletAddress?: string | null) =>
+      [...queryKeys.referral.all, "stats", walletAddress] as const,
+    code: (walletAddress?: string | null) =>
+      [...queryKeys.referral.all, "code", walletAddress] as const,
+  },
 } as const;
 
 export function invalidateVaultQueries(client: QueryClient = queryClient) {

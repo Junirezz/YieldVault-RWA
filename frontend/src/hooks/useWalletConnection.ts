@@ -24,6 +24,7 @@ import {
   setAllowed,
 } from "@stellar/freighter-api";
 import {
+  classifyFreighterApiError,
   classifyWalletConnectionError,
   createWalletConnectionError,
   hasWalletConnectionError,
@@ -45,6 +46,7 @@ import {
   setLastWalletProvider,
   setReconnectPromptDismissed,
   setWalletManualDisconnect,
+  startWalletSession,
   type WalletProvider,
 } from "../lib/walletSession";
 import {
@@ -59,6 +61,31 @@ const IS_AUTOMATED_TEST =
   (process.env.NODE_ENV === "test" || process.env.VITEST === "true");
 
 const WALLET_POLL_INTERVAL_MS = IS_AUTOMATED_TEST ? 100 : 10_000;
+
+/** Upper bound for the backoff applied after consecutive polling failures. */
+const WALLET_POLL_MAX_INTERVAL_MS = IS_AUTOMATED_TEST ? 1_600 : 60_000;
+
+/** Multiplier applied to the poll interval after each consecutive failure. */
+const WALLET_POLL_BACKOFF_FACTOR = 2;
+
+/**
+ * Delay before the next wallet poll.
+ *
+ * Grows exponentially with the number of consecutive failures
+ * (base → 2× → 4× …) and is capped, so a Freighter outage does not turn into a
+ * hot polling loop. Any successful poll resets the counter to zero.
+ */
+export function getWalletPollDelay(
+  consecutiveFailures: number,
+  baseMs: number = WALLET_POLL_INTERVAL_MS,
+  maxMs: number = WALLET_POLL_MAX_INTERVAL_MS,
+): number {
+  if (consecutiveFailures <= 0) return baseMs;
+  return Math.min(
+    baseMs * WALLET_POLL_BACKOFF_FACTOR ** consecutiveFailures,
+    maxMs,
+  );
+}
 
 export type DisconnectReason = "manual" | "session-expired" | "connection-lost";
 
@@ -159,12 +186,14 @@ export function useWalletConnection({
 
   useEffect(() => {
     let mounted = true;
+    let timer: number | undefined;
+    let consecutiveFailures = 0;
 
-    const sync = async () => {
+    const sync = async (): Promise<boolean> => {
       const useExtendedRetry = !initialSyncDoneRef.current;
       try {
         const manualBlock = isWalletManualDisconnectSet() && !walletAddress;
-        if (manualBlock) return;
+        if (manualBlock) return true;
 
         const reachable = await isFreighterReachable();
         const discovered = reachable
@@ -173,7 +202,7 @@ export function useWalletConnection({
             : await discoverConnectedAddress()
           : null;
 
-        if (!mounted) return;
+        if (!mounted) return reachable;
 
         if (discovered && (walletAddress || getLastWalletProvider())) {
           clearWalletManualDisconnect();
@@ -187,6 +216,11 @@ export function useWalletConnection({
             description: t("toast.walletConnectionLost.description"),
           });
         }
+
+        return reachable;
+      } catch (e) {
+        console.error("Wallet connection sync failed", e);
+        return false;
       } finally {
         if (useExtendedRetry && mounted) {
           initialSyncDoneRef.current = true;
@@ -197,12 +231,26 @@ export function useWalletConnection({
       }
     };
 
-    void sync();
-    const interval = window.setInterval(() => void sync(), WALLET_POLL_INTERVAL_MS);
+    const scheduleNextSync = () => {
+      if (!mounted) return;
+      const delay = getWalletPollDelay(consecutiveFailures);
+      timer = window.setTimeout(runSync, delay);
+    };
+
+    const runSync = async () => {
+      const healthy = await sync();
+      if (!mounted) return;
+      consecutiveFailures = healthy ? 0 : consecutiveFailures + 1;
+      scheduleNextSync();
+    };
+
+    void runSync();
 
     return () => {
       mounted = false;
-      window.clearInterval(interval);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
   }, [onConnect, onDisconnect, toast, walletAddress, t]);
 
@@ -215,8 +263,22 @@ export function useWalletConnection({
 
       if (isGranted) {
         const userInfo = await getAddress();
+
+        // Freighter reports some failures in-band (`{ address: "", error }`)
+        // instead of throwing — classify them so the UI receives a real code
+        // (and therefore the matching i18n copy) rather than "no address".
+        if (userInfo.error) {
+          const error = classifyFreighterApiError(userInfo.error);
+          dispatch({ type: "CONNECT_FAILED", error });
+          toast.error({
+            title: t("toast.walletConnectionFailed.title"),
+            description: t("toast.walletConnectionFailed.description"),
+          });
+          return;
+        }
+
         if (userInfo.address) {
-          localStorage.setItem("wallet_session_start", Date.now().toString());
+          startWalletSession();
           clearWalletManualDisconnect();
           clearReconnectPromptDismissed();
           setLastWalletProvider("freighter");

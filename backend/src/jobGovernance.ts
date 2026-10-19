@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { prisma } from './prisma';
 import { logger } from './middleware/structuredLogging';
 
-export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot' | 'vaultRebalance';
+export type JobName = 'priceRefresh' | 'positionReconciliation' | 'reportGeneration' | 'databaseBackup' | 'apySnapshot' | 'vaultRebalance' | 'yieldAccrual';
 
 export type DeadLetterStatus = 'dead-letter' | 'processing' | 'resolved' | 'requeued' | 'discarded' | 'needs_retry';
 
@@ -87,6 +87,12 @@ export const JOB_POLICIES: Record<JobName, JobPolicy> = {
     backoffMultiplier: 2,
     deadLetterThreshold: 2,
     timeoutMs: 30000,
+  },
+  yieldAccrual: {
+    maxAttempts: 3,
+    baseDelayMs: 2000,
+    backoffMultiplier: 2,
+    deadLetterThreshold: 3,
   },
 };
 

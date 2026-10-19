@@ -143,6 +143,29 @@ pub fn require_active_registration(
     }
 }
 
+/// Guarded removal used by `whitelist_strategy(false)`. Mirrors the guards of
+/// `retire_strategy_internal`: the vault's current strategy and Active
+/// strategies cannot be removed, and Retired strategies are terminal so their
+/// record must survive (removing it would let them re-register as Pending).
+/// Only unregistered (no-op) and Pending strategies can be removed.
+pub(crate) fn remove_registration_guarded(
+    env: &Env,
+    strategy: &Address,
+    active_vault_strategy: Option<Address>,
+) -> Result<(), StrategyRegistrationError> {
+    if active_vault_strategy.as_ref() == Some(strategy) {
+        return Err(StrategyRegistrationError::ActiveStrategyInUse);
+    }
+    match read_registration_state(env, strategy) {
+        Some(STATE_ACTIVE) => Err(StrategyRegistrationError::ActiveStrategyInUse),
+        Some(STATE_RETIRED) => Err(StrategyRegistrationError::InvalidTransition),
+        _ => {
+            remove_registration_state(env, strategy);
+            Ok(())
+        }
+    }
+}
+
 pub fn remove_registration(env: &Env, strategy: &Address) {
     remove_registration_state(env, strategy);
 }
@@ -152,7 +175,10 @@ mod tests {
     use super::*;
     use crate::upgrade::set_admin;
     use crate::DataKey;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Address, Env,
+    };
 
     #[test]
     fn test_allowed_transitions() {
@@ -207,7 +233,10 @@ mod tests {
             // 1. None -> Pending via register_strategy
             let res_reg = register_strategy(&env, &admin, &strategy);
             assert_eq!(res_reg, Ok(STATE_PENDING));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
             assert!(is_eligible_for_allocation(&env, &strategy));
             assert_eq!(
                 require_active_registration(&env, &strategy),
@@ -224,7 +253,10 @@ mod tests {
             // 3. Active -> Retired via retire_strategy
             let res_ret = retire_strategy(&env, &admin, &strategy, None);
             assert_eq!(res_ret, Ok(STATE_RETIRED));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
             assert!(!is_eligible_for_allocation(&env, &strategy));
             assert_eq!(
                 require_active_registration(&env, &strategy),
@@ -244,13 +276,22 @@ mod tests {
             let strategy = Address::generate(&env);
             set_admin(&env, &admin);
 
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Pending -> Retired directly
             let res_ret = retire_strategy(&env, &admin, &strategy, None);
             assert_eq!(res_ret, Ok(STATE_RETIRED));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
             assert!(!is_eligible_for_allocation(&env, &strategy));
         });
     }
@@ -266,7 +307,10 @@ mod tests {
             let strategy = Address::generate(&env);
             set_admin(&env, &admin);
 
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
 
             // Attempting to re-register while pending
             let res = register_strategy(&env, &admin, &strategy);
@@ -275,12 +319,21 @@ mod tests {
             // Activate and attempt to re-register
             assert_eq!(activate_strategy(&env, &admin, &strategy), Ok(STATE_ACTIVE));
             let res_active = register_strategy(&env, &admin, &strategy);
-            assert_eq!(res_active, Err(StrategyRegistrationError::AlreadyRegistered));
+            assert_eq!(
+                res_active,
+                Err(StrategyRegistrationError::AlreadyRegistered)
+            );
 
             // Retire and attempt to re-register
-            assert_eq!(retire_strategy(&env, &admin, &strategy, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                retire_strategy(&env, &admin, &strategy, None),
+                Ok(STATE_RETIRED)
+            );
             let res_retired = register_strategy(&env, &admin, &strategy);
-            assert_eq!(res_retired, Err(StrategyRegistrationError::AlreadyRegistered));
+            assert_eq!(
+                res_retired,
+                Err(StrategyRegistrationError::AlreadyRegistered)
+            );
         });
     }
 
@@ -308,7 +361,10 @@ mod tests {
             );
 
             // Register -> Pending
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
 
             // Activate -> Active
             assert_eq!(activate_strategy(&env, &admin, &strategy), Ok(STATE_ACTIVE));
@@ -320,7 +376,10 @@ mod tests {
             );
 
             // Retire -> Retired
-            assert_eq!(retire_strategy(&env, &admin, &strategy, None), Ok(STATE_RETIRED));
+            assert_eq!(
+                retire_strategy(&env, &admin, &strategy, None),
+                Ok(STATE_RETIRED)
+            );
 
             // Cannot activate retired strategy
             assert_eq!(
@@ -348,7 +407,10 @@ mod tests {
             let other_strategy = Address::generate(&env);
             set_admin(&env, &admin);
 
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
             assert_eq!(activate_strategy(&env, &admin, &strategy), Ok(STATE_ACTIVE));
 
             // Attempt to retire while actively set as the vault strategy
@@ -359,7 +421,10 @@ mod tests {
             // Retiring succeeds when active vault strategy is different
             let res_other = retire_strategy(&env, &admin, &strategy, Some(other_strategy));
             assert_eq!(res_other, Ok(STATE_RETIRED));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
         });
     }
 
@@ -383,14 +448,20 @@ mod tests {
             assert_eq!(read_registration_state(&env, &strategy), None);
 
             // Admin registers
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
 
             // Non-admin activate_strategy rejected
             assert_eq!(
                 activate_strategy(&env, &non_admin, &strategy),
                 Err(StrategyRegistrationError::Unauthorized)
             );
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Admin activates
             assert_eq!(activate_strategy(&env, &admin, &strategy), Ok(STATE_ACTIVE));
@@ -441,8 +512,14 @@ mod tests {
             let strategy = Address::generate(&env);
             set_admin(&env, &admin);
 
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
 
             // Remove registration
             remove_registration(&env, &strategy);
@@ -454,8 +531,14 @@ mod tests {
             );
 
             // After removal, re-registration is possible
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_PENDING)
+            );
         });
     }
 
@@ -473,8 +556,12 @@ mod tests {
             // Configure strategy switch cooldown
             let cooldown = 1800u64;
             let start_time = 50_000u64;
-            env.storage().instance().set(&DataKey::StrategySwitchCooldown, &cooldown);
-            env.storage().instance().set(&DataKey::LastStrategySwitchTime, &start_time);
+            env.storage()
+                .instance()
+                .set(&DataKey::StrategySwitchCooldown, &cooldown);
+            env.storage()
+                .instance()
+                .set(&DataKey::LastStrategySwitchTime, &start_time);
 
             // During active cooldown period (start_time + 300 < start_time + 1800)
             env.ledger().with_mut(|li| {
@@ -482,7 +569,10 @@ mod tests {
             });
 
             // Registration and activation are permitted during cooldown
-            assert_eq!(register_strategy(&env, &admin, &strategy), Ok(STATE_PENDING));
+            assert_eq!(
+                register_strategy(&env, &admin, &strategy),
+                Ok(STATE_PENDING)
+            );
             assert_eq!(activate_strategy(&env, &admin, &strategy), Ok(STATE_ACTIVE));
             assert_eq!(read_registration_state(&env, &strategy), Some(STATE_ACTIVE));
 
@@ -494,8 +584,14 @@ mod tests {
             assert!(is_eligible_for_allocation(&env, &strategy));
 
             // Retirement works cleanly after cooldown window
-            assert_eq!(retire_strategy(&env, &admin, &strategy, None), Ok(STATE_RETIRED));
-            assert_eq!(read_registration_state(&env, &strategy), Some(STATE_RETIRED));
+            assert_eq!(
+                retire_strategy(&env, &admin, &strategy, None),
+                Ok(STATE_RETIRED)
+            );
+            assert_eq!(
+                read_registration_state(&env, &strategy),
+                Some(STATE_RETIRED)
+            );
             assert!(!is_eligible_for_allocation(&env, &strategy));
         });
     }

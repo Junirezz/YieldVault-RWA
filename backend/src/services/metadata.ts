@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createHash } from 'crypto';
 
 export interface IPLSPinResult {
   cid: string;

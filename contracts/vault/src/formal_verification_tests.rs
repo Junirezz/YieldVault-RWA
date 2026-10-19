@@ -12,7 +12,6 @@ extern crate std;
 
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, Env};
-use std::vec::Vec;
 
 use crate::{YieldVault, YieldVaultClient};
 

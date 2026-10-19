@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "description": "Shared Zod request/response schemas for YieldVault API consumers",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
