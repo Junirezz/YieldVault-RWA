@@ -22,8 +22,23 @@ Describe what should have happened.
 Describe what happened instead, including any errors, logs, or stack traces.
 
 ## 📍 Impact
-- Affected area: `scope: frontend` / `scope: backend` / `scope: contracts` / `scope: infra`
-- Severity / priority: `priority: p0-critical` / `priority: p1-high` / `priority: p2-medium` / `priority: p3-low`
+
+### Affected Package
+Select the package(s) affected by this bug:
+- [ ] `contracts` - Smart contracts & blockchain
+- [ ] `backend` - Backend services & API
+- [ ] `frontend` - UI & React components
+- [ ] `docs` - Documentation
+- [ ] `infra` - Infrastructure, CI/CD, deployment
+
+### Severity
+Select the severity level based on impact:
+- [ ] `critical` - Production outage, data loss, security breach
+- [ ] `high` - Feature broken, significant performance degradation
+- [ ] `medium` - Feature partially broken, user workflow impacted
+- [ ] `low` - Minor bug, cosmetic issue, documentation
+
+### Environment
 - Environment: Local / Testnet / Mainnet
 - Browser / OS / Runtime: e.g. Chrome v120 / Windows / Node v20
 
