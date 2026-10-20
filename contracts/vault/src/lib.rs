@@ -4251,6 +4251,11 @@ impl YieldVault {
         if threshold <= 0 {
             return Err(VaultError::InvalidDaoThreshold);
         }
+        let total_assets: i128 = env.storage().instance().get(&DataKey::TotalAssets).unwrap_or(0);
+        let max_threshold = total_assets.saturating_mul(95).saturating_div(100);
+        if threshold > max_threshold {
+            return Err(VaultError::InvalidDaoThreshold);
+        }
         env.storage()
             .instance()
             .set(&DataKey::LargeWithdrawalThreshold, &threshold);
@@ -4331,6 +4336,10 @@ impl YieldVault {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
         Self::assert_admin_param_interval(&env)?;
+        const MAX_COOLDOWN: u64 = 365 * 24 * 60 * 60;
+        if seconds > MAX_COOLDOWN {
+            return Err(VaultError::InvalidDaoThreshold);
+        }
         let old: u64 = env
             .storage()
             .instance()
