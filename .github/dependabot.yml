@@ -52,6 +52,20 @@ updates:
       - "security"
       - "general"
 
+  - package-ecosystem: "npm"
+    directory: "/packages/api-schemas"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 10
+    security-updates: true
+    rebase-strategy: auto
+    labels:
+      - "dependencies"
+      - "security"
+      - "general"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
