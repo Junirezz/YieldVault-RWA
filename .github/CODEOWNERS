@@ -38,3 +38,12 @@
 /CONTRIBUTING.md @YieldVault-RWA/docs-maintainers @YieldVault-RWA/core-maintainers
 /TRIAGE_AND_REVIEW.md @YieldVault-RWA/docs-maintainers @YieldVault-RWA/core-maintainers
 /README.md @YieldVault-RWA/docs-maintainers
+
+# Monitoring & Observability
+/monitoring/ @YieldVault-RWA/devops-maintainers
+
+# Testing Infrastructure
+/tests/ @YieldVault-RWA/backend-maintainers @YieldVault-RWA/frontend-maintainers
+
+# Packages
+/packages/ @YieldVault-RWA/backend-maintainers
