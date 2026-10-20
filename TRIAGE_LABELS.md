@@ -27,6 +27,7 @@ Severity indicates impact and urgency. Every issue must have exactly one severit
 | `high` | 🟠 Orange | Feature broken, significant performance degradation, security vulnerability (no active exploit) | 1 hour | 1 day |
 | `medium` | 🟡 Yellow | Feature partially broken, user workflow impacted, performance issue (non-critical path) | 4 hours | 3 days |
 | `low` | 🟢 Green | Minor bug, cosmetic issue, documentation, question | 1 day | 2 weeks |
+| `trivial` | 🔵 Blue | Very minor fix, typo, extremely low priority | 3 days | 4 weeks |
 
 **Severity Definitions**:
 
@@ -99,6 +100,7 @@ Status indicates where the issue is in its lifecycle. Use exactly one status lab
 | Label | Purpose | Example |
 |---|---|---|
 | `roadmap-qX-YYYY` | Links issue to roadmap phase | `roadmap-q3-2026`, `roadmap-q4-2026` |
+| `stellar-wave` | Links issue to Stellar Wave initiative | Strategic work related to Stellar blockchain |
 | `breaking-change` | Requires major version bump | API signature change |
 | `security` | Security-related (in addition to `area:security`) | Use for visibility |
 | `good-first-issue` | Suitable for new contributors | Small scope, clear requirements |
