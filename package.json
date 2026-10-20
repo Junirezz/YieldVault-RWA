@@ -65,7 +65,8 @@
     "validate:renovate": "tsx scripts/validate-renovate-config.ts",
     "test:validate-renovate": "vitest run scripts/validate-renovate-config.test.ts",
     "audit:pnpm": "pnpm audit --audit-level=high",
-    "check:security-audit": "pnpm validate:renovate && pnpm test:validate-renovate && pnpm audit --audit-level=high"
+    "check:security-audit": "pnpm validate:renovate && pnpm test:validate-renovate && pnpm audit --audit-level=high",
+    "validate": "pnpm validate:contribution-standards && pnpm validate:testing-strategy && pnpm validate:sprint-and-triage && pnpm validate:release-notes && pnpm validate:nfr-baselines && pnpm validate:codeowners && pnpm validate:pr-template && pnpm validate:renovate"
   },
   "pnpm": {
     "overrides": {
