@@ -388,7 +388,18 @@ pub struct StrategyProposal {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 /// Pending large withdrawal with 24-hour timelock.
+///
+/// ## Share Price Behavior
+///
+/// The shares recorded here are NOT reserved or priced at request time.
+/// When `execute_withdrawal` is called after the timelock expires, the shares
+/// are converted to assets using the then-current `total_assets` and `total_shares`.
+/// This means the user's effective share price depends on what happens during the
+/// timelock period (yield accrual, deposits, other withdrawals, etc.).
+///
+/// Related: issue #1683
 pub struct PendingWithdrawal {
     pub shares: i128,
     pub unlock_timestamp: u64,
