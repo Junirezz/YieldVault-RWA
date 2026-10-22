@@ -43,6 +43,10 @@ module.exports = {
     '^@yieldvault/api-schemas$': '<rootDir>/../packages/api-schemas/dist/index.js',
     '^@yieldvault/api-schemas/(.*)$': '<rootDir>/../packages/api-schemas/dist/$1',
     '^@prisma/instrumentation$': '<rootDir>/src/__tests__/mocks/prismainstrumentation.js',
+    // pnpm does not hoist dotfile packages (.prisma/client) to the top-level
+    // node_modules, so Jest cannot resolve it with its default resolver.
+    // Map it explicitly to the generated location in the pnpm content store.
+    '^\\.prisma/client$': '<rootDir>/../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/.prisma/client/index.js',
     '^@opentelemetry/(.*)$': '<rootDir>/src/__tests__/mocks/opentelemetry.js',
     // Redirect the sorobanClient module that vaultEndpoints imports (./sorobanClient)
     // so existing integration tests keep passing without a live Stellar RPC.

@@ -6,6 +6,20 @@ import { redactSensitiveLogAttributes } from '../auditRedaction';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * Structural interface for the Logger so modules that accept a logger via
+ * dependency injection can type their parameter without importing the private
+ * Logger class directly.  All four log-level methods must be present.
+ *
+ * The concrete `logger` singleton exported below satisfies this interface.
+ */
+export interface Logger {
+  debug(message: string, fields?: Partial<LogEntry>): void;
+  info(message: string, fields?: Partial<LogEntry>): void;
+  warn(message: string, fields?: Partial<LogEntry>): void;
+  error(message: string, fields?: Partial<LogEntry>): void;
+}
+
 export interface LogEntry {
   timestamp: string;
   level: LogLevel;
@@ -21,7 +35,7 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-class Logger {
+class LoggerImpl implements Logger {
   private minLevel: LogLevel = 'info';
   private readonly levelOrder: Record<LogLevel, number> = {
     debug: 0,
@@ -77,7 +91,7 @@ class Logger {
   }
 }
 
-export const logger = new Logger();
+export const logger: Logger = new LoggerImpl();
 
 export const structuredLoggingMiddleware: RequestHandler = (
   req: CorrelationIdRequest,
