@@ -1878,13 +1878,16 @@ impl YieldVault {
     /// This exchange rate represents the value of one vault share in underlying
     /// assets and is the basis for frontend share-price reporting. When no shares
     /// are outstanding, the share price is defined as zero.
+    ///
+    /// Uses total vault assets (`total_assets()`, including idle tokens and strategy
+    /// valuation) as the canonical assets base for pricing.
     pub fn share_price(env: Env) -> i128 {
         let state = Self::get_state(&env);
         if state.total_shares == 0 {
             return 0;
         }
-        state
-            .total_assets
+        let total_assets = Self::total_assets(env).unwrap_or(state.total_assets);
+        total_assets
             .checked_mul(SHARE_PRICE_SCALE)
             .expect("overflow")
             .checked_div(state.total_shares)
@@ -2521,12 +2524,15 @@ impl YieldVault {
     /// Always rounds DOWN to prevent over-minting shares.
     pub fn calculate_shares(env: Env, assets: i128) -> Result<i128, VaultError> {
         let state = Self::get_state(&env);
-        crate::math::try_assets_to_shares(assets, state.total_shares, state.total_assets)
+        let total_assets = Self::total_assets(env)?;
+        crate::math::try_assets_to_shares(assets, state.total_shares, total_assets)
             .map_err(|_| VaultError::MathOverflow)
     }
 
     /// Calculates the number of assets that would be returned for a given share amount.
     ///
+    /// Uses total vault assets (`total_assets()`, including idle tokens and strategy
+    /// valuation) as the canonical assets base for conversion.
     /// Uses the deterministic round-down policy defined in the `math` module.
     /// See [`math::shares_to_assets`] for detailed rounding behavior.
     ///
@@ -2540,7 +2546,8 @@ impl YieldVault {
     /// Always rounds DOWN to prevent over-withdrawal of assets.
     pub fn calculate_assets(env: Env, shares: i128) -> Result<i128, VaultError> {
         let state = Self::get_state(&env);
-        crate::math::try_shares_to_assets(shares, state.total_shares, state.total_assets)
+        let total_assets = Self::total_assets(env)?;
+        crate::math::try_shares_to_assets(shares, state.total_shares, total_assets)
             .map_err(|_| VaultError::MathOverflow)
     }
 
@@ -2571,8 +2578,9 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        let total_assets = Self::total_assets(env.clone())?;
         let limits = Self::load_protocol_limits(&env);
-        crate::risk_limits::check_deposit_tvl(state.total_assets, amount, limits.max_vault_tvl)?;
+        crate::risk_limits::check_deposit_tvl(total_assets, amount, limits.max_vault_tvl)?;
 
         // Goal 3: enforce minimum deposit
         let min_deposit: i128 = env
@@ -2587,9 +2595,9 @@ impl YieldVault {
         let token_addr: Address = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
         let token_client = token::Client::new(&env, &token_addr);
 
-        // Use centralized conversion with deterministic round-down policy
+        // Use centralized conversion with deterministic round-down policy based on total_assets
         let shares_to_mint =
-            crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
+            crate::math::try_assets_to_shares(amount, state.total_shares, total_assets)
                 .map_err(|_| VaultError::MathOverflow)?;
 
         // Prevent silent loss of funds if shares round down to 0
@@ -2619,7 +2627,7 @@ impl YieldVault {
             crate::math::try_shares_to_assets(
                 shares_to_mint,
                 state.total_shares,
-                state.total_assets,
+                total_assets,
             )
             .map_err(|_| VaultError::MathOverflow)?
         };
@@ -2764,8 +2772,9 @@ impl YieldVault {
             return Err(VaultError::InvalidAmount);
         }
 
+        let total_assets = Self::total_assets(env.clone())?;
         let limits = Self::load_protocol_limits(&env);
-        crate::risk_limits::check_deposit_tvl(state.total_assets, amount, limits.max_vault_tvl)?;
+        crate::risk_limits::check_deposit_tvl(total_assets, amount, limits.max_vault_tvl)?;
 
         // Enforce minimum deposit
         let min_deposit: i128 = env
@@ -2780,9 +2789,9 @@ impl YieldVault {
         let token_addr: Address = env.storage().instance().get(&DataKey::TokenAsset).unwrap();
         let token_client = token::Client::new(&env, &token_addr);
 
-        // Compute shares using deterministic round-down policy
+        // Compute shares using deterministic round-down policy based on total_assets
         let shares_to_mint =
-            crate::math::try_assets_to_shares(amount, state.total_shares, state.total_assets)
+            crate::math::try_assets_to_shares(amount, state.total_shares, total_assets)
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if shares_to_mint == 0 {
@@ -2810,7 +2819,7 @@ impl YieldVault {
             crate::math::try_shares_to_assets(
                 shares_to_mint,
                 state.total_shares,
-                state.total_assets,
+                total_assets,
             )
             .map_err(|_| VaultError::MathOverflow)?
         };
@@ -3196,9 +3205,10 @@ impl YieldVault {
             .get(&DataKey::LargeWithdrawalThreshold)
             .unwrap_or(i128::MAX);
 
-        // Use centralized conversion with deterministic round-down policy
+        let total_assets = Self::total_assets(env.clone())?;
+        // Use centralized conversion with deterministic round-down policy based on total_assets
         let assets_to_return =
-            crate::math::try_shares_to_assets(shares, state.total_shares, state.total_assets)
+            crate::math::try_shares_to_assets(shares, state.total_shares, total_assets)
                 .map_err(|_| VaultError::MathOverflow)?;
 
         if assets_to_return > threshold {
@@ -3257,11 +3267,12 @@ impl YieldVault {
 
         let mut state = Self::get_state(&env);
 
-        // Use centralized conversion with deterministic round-down policy
+        let total_assets = Self::total_assets(env.clone())?;
+        // Use centralized conversion with deterministic round-down policy based on total_assets
         let assets_to_return = crate::math::try_shares_to_assets(
             pending.shares,
             state.total_shares,
-            state.total_assets,
+            total_assets,
         )
         .map_err(|_| VaultError::MathOverflow)?;
 

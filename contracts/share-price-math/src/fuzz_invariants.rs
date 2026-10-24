@@ -10,9 +10,9 @@ fn assets_for(shares: i128, total_shares: i128, total_assets: i128) -> Result<i1
     try_shares_to_assets(shares, total_shares, total_assets)
 }
 
-/// Real vaults are either empty or have both shares and assets outstanding.
+/// Real vaults are either empty or have shares outstanding (including zero idle assets).
 fn is_valid_vault_state(total_shares: i128, total_assets: i128) -> bool {
-    (total_shares == 0 && total_assets == 0) || (total_shares > 0 && total_assets > 0)
+    (total_shares == 0 && total_assets == 0) || (total_shares > 0 && total_assets >= 0)
 }
 
 /// Decode a little-endian `i128` from eight bytes (any value, including zero).
@@ -142,5 +142,10 @@ mod tests {
     #[test]
     fn bootstrap_invariant_holds() {
         assert_share_price_invariants(1000, 0, 0, 1);
+    }
+
+    #[test]
+    fn zero_idle_state_invariant_holds() {
+        assert_share_price_invariants(100, 50, 0, 10);
     }
 }
