@@ -169,16 +169,65 @@ fn test_vault_with_benji_strategy() {
     assert_eq!(strategy.total_value(), 66);
     assert_eq!(vault.total_assets(), 106); // 40 idle + 66 in strategy
 
-    // Manually divest 10 USDC to cover the upcoming withdrawal
-    vault.divest(&10);
+    // Manually divest 13 USDC to cover the upcoming withdrawal (50 shares = 53 assets)
+    vault.divest(&13);
+    benji_admin_client.clawback(&strategy_id, &13);
 
     // 5. User Withdraws some shares.
-    // state.total_assets=100, state.total_shares=100 → 50 shares = 50 assets
+    // Total assets = 106 (53 idle + 53 in strategy), total shares = 100 → 50 shares = 53 assets
     let withdrawn = vault.withdraw(&user, &50);
-    assert_eq!(withdrawn, 50); // 50 shares * 100 state_assets / 100 shares = 50
+    assert_eq!(withdrawn, 53); // 50 shares * 106 total_assets / 100 total_shares = 53
 
     assert_eq!(vault.total_shares(), 50);
-    assert_eq!(vault.total_assets(), 56); // 0 idle + 56 BENJI still in strategy (burned 10 on withdraw)
+    assert_eq!(vault.total_assets(), 53); // 0 idle + 53 BENJI still in strategy
+}
+
+#[test]
+fn test_deposit_mints_at_correct_price_while_strategy_holds_part_of_assets() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let usdc = create_token(&env, &token_admin);
+    let usdc_admin_client = token::StellarAssetClient::new(&env, &usdc.address);
+    usdc_admin_client.mint(&user1, &1000);
+    usdc_admin_client.mint(&user2, &1000);
+
+    let benji_token = create_token(&env, &token_admin);
+    let vault_id = env.register(YieldVault, ());
+    let vault = YieldVaultClient::new(&env, &vault_id);
+
+    let strategy_id = env.register(BenjiStrategy, ());
+    let strategy = BenjiStrategyClient::new(&env, &strategy_id);
+
+    vault.initialize(&admin, &usdc.address);
+    strategy.initialize(&vault_id, &usdc.address, &benji_token.address);
+    vault.whitelist_strategy(&strategy_id, &true);
+    vault.set_strategy(&strategy_id);
+
+    // 1. User 1 deposits 100 USDC -> receives 100 shares (1:1 conversion on initial deposit)
+    let minted1 = vault.deposit(&user1, &100);
+    assert_eq!(minted1, 100);
+    assert_eq!(vault.total_assets(), 100);
+    assert_eq!(vault.total_shares(), 100);
+
+    // 2. Invest 60 USDC into strategy -> vault has 40 idle USDC, 60 USDC in strategy
+    vault.invest(&60);
+    assert_eq!(strategy.total_value(), 60);
+    assert_eq!(vault.total_assets(), 100);
+
+    // 3. User 2 deposits 50 USDC while strategy holds part of the assets
+    // Total assets is 100 (40 idle + 60 strategy), total shares is 100.
+    // Pricing base is total_assets() = 100, so 50 USDC mints exactly 50 shares.
+    let minted2 = vault.deposit(&user2, &50);
+    assert_eq!(minted2, 50);
+    assert_eq!(vault.total_assets(), 150);
+    assert_eq!(vault.total_shares(), 150);
+    assert_eq!(vault.share_price(), SHARE_PRICE_SCALE);
 }
 
 #[test]
