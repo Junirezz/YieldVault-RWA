@@ -223,8 +223,10 @@ npm run validate:nfr-baselines
 ```
 ## 🤝 Contributing
 
-Fork the repository and clone it to your local machine
-Create a new branch for your changes
-Make and test your updates following the project guidelines
-Commit and push your changes to your fork
-Open a Pull Request with a clear description
+Contributions are welcome! Please review our [Contributing Guide](./CONTRIBUTING.md) and [Code of Conduct](./CODE_OF_CONDUCT.md) before submitting a pull request.
+
+1. Fork the repository and clone it to your local machine
+2. Create a new branch for your changes (`git checkout -b feat/your-feature`)
+3. Make and test your updates following the project guidelines
+4. Commit and push your changes to your fork
+5. Open a Pull Request with a clear description referencing relevant issues

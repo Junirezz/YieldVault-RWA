@@ -1,6 +1,23 @@
 # Normalize all text files to LF in the repository and on checkout.
 * text=auto eol=lf
 
+# Explicit LF normalization for scripts, configuration, and documentation
+*.sh text eol=lf
+*.bash text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+
+# Windows command scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 # Generated artifacts are rewritten by tooling, so pin them explicitly to LF.
 # Without this, a CRLF working copy produced by a Windows editor/checkout is
 # preserved by regeneration and shows up as a phantom modification even though
