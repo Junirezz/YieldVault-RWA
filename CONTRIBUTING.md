@@ -11,6 +11,7 @@ Welcome to the YieldVault-RWA project. This guide outlines how to set up your en
 - [Pull Request Process](#pull-request-process)
 - [Review Expectations](#review-expectations)
 - [Release Cycle](#release-cycle)
+- [Code of Conduct](#code-of-conduct)
 
 ## Setup
 
@@ -311,8 +312,13 @@ We use [Semantic Versioning](https://semver.org/):
 
 See [Release Documentation](./backend/docs/) for detailed procedures.
 
+## Code of Conduct
+
+All contributors and maintainers are expected to adhere to our [Code of Conduct](./CODE_OF_CONDUCT.md). Please report any violations or unacceptable behavior to [community@yieldvault.finance](mailto:community@yieldvault.finance).
+
 ## Resources
 
+- [Code of Conduct](./CODE_OF_CONDUCT.md)
 - [Architecture Overview](./ARCHITECTURE_SUMMARY.md)
 - [Security Review Guidelines](./SECURITY_REVIEW.md)
 - [Roadmap](./ROADMAP.md)
