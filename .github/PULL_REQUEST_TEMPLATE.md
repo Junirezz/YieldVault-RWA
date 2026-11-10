@@ -252,7 +252,7 @@ Before marking PR as ready for review:
 - [ ] All tests passing locally: `npm test`
 - [ ] Linter passing: `npm run lint`
 - [ ] Slither passing locally OR findings documented: `slither . --config-file slither.config.json`
-- [ ] Code follows project style guide
+- [ ] Code follows project style guide and adheres to the [Code of Conduct](CODE_OF_CONDUCT.md)
 - [ ] No merge conflicts
 - [ ] Commits are clean and well-documented
 - [ ] Branch is up-to-date with main/develop

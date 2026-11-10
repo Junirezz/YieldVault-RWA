@@ -4,7 +4,7 @@ This guide documents the fastest supported way to boot the repository locally fo
 
 ## What You Need
 
-- Node.js 18+ and npm
+- Node.js 22 (pinned via `.nvmrc`, requires Node.js >=22) and pnpm >=9.12
 - Rust and Cargo
 - `wasm32-unknown-unknown` Rust target for Soroban contract builds
 
