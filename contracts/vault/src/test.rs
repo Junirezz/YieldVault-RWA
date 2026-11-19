@@ -628,6 +628,219 @@ fn test_accrue_yield_increases_total_assets() {
     assert_eq!(vault.total_shares(), 0); // shares unchanged.
 }
 
+// ─── 4b. batched accrual (#1735) ─────────────────────────────────────────────
+
+fn accrue_all(
+    vault: &YieldVaultClient<'_>,
+    usdc_sa: &token::StellarAssetClient<'_>,
+    admin: &Address,
+    amounts: &[i128],
+) {
+    for a in amounts {
+        usdc_sa.mint(admin, a);
+        vault.accrue_yield(a);
+    }
+}
+
+#[test]
+fn test_accrual_batching_disabled_by_default_applies_immediately() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+
+    assert_eq!(vault.accrual_batch_config().min_flush_amount, 0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 20]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 30);
+}
+
+#[test]
+fn test_accrual_batching_defers_small_accruals_until_amount_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&100, &0);
+
+    accrue_all(&vault, &usdc_sa, &admin, &[30, 30, 30]);
+    // Still pending: 90 < 100. Tokens have already moved into the vault.
+    let pending = vault.pending_accrual().expect("pending batch");
+    assert_eq!(pending.net_yield + pending.fee, 90);
+    assert_eq!(usdc.balance(&vault.address), 90);
+
+    // The next accrual crosses the threshold and commits everything in one step.
+    accrue_all(&vault, &usdc_sa, &admin, &[30]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 120);
+}
+
+#[test]
+fn test_accrual_batching_flushes_on_age_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000_000, &60);
+
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.ledger().with_mut(|li| li.timestamp += 59);
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.ledger().with_mut(|li| li.timestamp += 1); // oldest entry is now 60s old
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 15);
+}
+
+#[test]
+fn test_accrual_batching_matches_unbatched_totals_and_share_price() {
+    // Same deposits and accruals, one vault batched and one not: totals, treasury
+    // and what a later depositor receives must be identical (no yield lost), and
+    // the share price must never decrease across accruals.
+    let amounts: [i128; 6] = [7, 13, 1, 250, 3, 40];
+
+    let run = |batched: bool| {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        usdc_sa.mint(&alice, &10_000);
+        usdc_sa.mint(&bob, &10_000);
+        vault.deposit(&alice, &10_000);
+        if batched {
+            vault.set_accrual_batch_config(&100_000, &0);
+        }
+
+        let mut last_price = 0i128;
+        for a in amounts.iter() {
+            accrue_all(&vault, &usdc_sa, &admin, &[*a]);
+            // Reading the price folds any pending batch in, so it already
+            // reflects every accrual so far.
+            let price = vault.total_assets() * 1_000_000 / vault.total_shares();
+            assert!(price >= last_price);
+            last_price = price;
+        }
+        vault.deposit(&bob, &5_000);
+        (
+            vault.total_assets(),
+            vault.total_shares(),
+            vault.treasury_balance(),
+            vault.balance(&bob),
+        )
+    };
+
+    assert_eq!(run(false), run(true));
+}
+
+#[test]
+fn test_accrual_batching_pending_yield_included_in_deposit_pricing() {
+    let make = |batched: bool| {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        usdc_sa.mint(&alice, &1_000);
+        usdc_sa.mint(&bob, &1_000);
+        vault.deposit(&alice, &1_000);
+        if batched {
+            vault.set_accrual_batch_config(&1_000_000, &0);
+        }
+        accrue_all(&vault, &usdc_sa, &admin, &[100, 100, 100]);
+        if batched {
+            // Yield is still pending at this point.
+            assert!(vault.pending_accrual().is_some());
+        }
+        // The deposit must see the pending yield.
+        vault.deposit(&bob, &1_000);
+        (
+            vault.balance(&bob),
+            vault.total_assets(),
+            vault.treasury_balance(),
+        )
+    };
+    assert_eq!(make(false), make(true));
+}
+
+#[test]
+fn test_flush_pending_accrual_is_permissionless_and_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 10]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.set_auths(&[]); // no authorization at all
+    vault.flush_pending_accrual();
+    assert_eq!(vault.pending_accrual(), None);
+    vault.flush_pending_accrual(); // no-op
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 20);
+}
+
+#[test]
+fn test_changing_batch_config_commits_pending_first() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 10]);
+    assert!(vault.pending_accrual().is_some());
+
+    vault.set_accrual_batch_config(&0, &0); // disable batching
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 20);
+
+    assert_eq!(
+        vault.try_set_accrual_batch_config(&-1, &0),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_treasury_balance_includes_pending_batched_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.queue_fee_bps_change(&10_000); // 100% fee
+    vault.execute_fee_bps_change();
+    vault.set_accrual_batch_config(&1_000_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[40, 60]);
+
+    assert_eq!(vault.treasury_balance(), 100);
+}
+
+#[test]
+fn test_batched_accrual_uses_fewer_resources_than_unbatched() {
+    let measure = |batched: bool| -> u64 {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        usdc_sa.mint(&alice, &10_000);
+        vault.deposit(&alice, &10_000);
+        // Realistic setup: a non-zero protocol fee, so every unbatched accrual also
+        // pays for a treasury read/write and a fee event.
+        vault.queue_fee_bps_change(&1_000);
+        vault.execute_fee_bps_change();
+        if batched {
+            vault.set_accrual_batch_config(&1_000_000, &0);
+        }
+        usdc_sa.mint(&admin, &10_000);
+        env.cost_estimate().budget().reset_unlimited();
+        for _ in 0..20 {
+            vault.accrue_yield(&100);
+        }
+        env.cost_estimate().budget().cpu_instruction_cost()
+    };
+    let unbatched = measure(false);
+    let batched = measure(true);
+    std::println!("ACCRUAL_BENCH unbatched_cpu={unbatched} batched_cpu={batched}");
+    assert!(batched < unbatched, "batched={batched} unbatched={unbatched}");
+}
+
 #[test]
 fn test_checkpoint() {
     let env = Env::default();
