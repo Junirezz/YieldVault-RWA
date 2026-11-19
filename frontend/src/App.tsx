@@ -19,6 +19,7 @@ import { FeatureGate } from "./components/FeatureGate";
 import { FeatureFlagProvider } from "./context/FeatureFlagContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { PreferencesProvider } from "./context/PreferencesContext";
+import { WithdrawalNotificationProvider } from "./context/WithdrawalNotificationContext";
 import { useUsdcBalance, useXlmBalance } from "./hooks/useBalanceData";
 import { queryClient } from "./lib/queryClient";
 import { clearWalletSessionState } from "./lib/sessionCleanup";
@@ -183,7 +184,8 @@ function AppContent() {
   return (
     <PreferencesProvider walletAddress={walletAddress}>
       <KeyboardShortcutProvider walletAddress={walletAddress}>
-        <MotionProvider>
+        <WithdrawalNotificationProvider walletAddress={walletAddress}>
+          <MotionProvider>
         <SkipLinks />
         <RouteAnnouncer />
         <NetworkBannerStack
@@ -342,6 +344,7 @@ function AppContent() {
           <ToastCenter />
         </div>
         </MotionProvider>
+        </WithdrawalNotificationProvider>
       </KeyboardShortcutProvider>
     </PreferencesProvider>
   );
