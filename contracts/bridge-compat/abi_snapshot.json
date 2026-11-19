@@ -103,6 +103,7 @@
       "pub fn is_strategy_whitelisted(env: Env, strategy: Address) -> bool",
       "pub fn korean_strategy(env: Env) -> Address",
       "pub fn large_withdrawal_threshold(env: Env) -> i128",
+      "pub fn list_whitelisted_strategies(env: Env) -> soroban_sdk::Vec<Address>",
       "pub fn max_batch_size(env: Env) -> u32",
       "pub fn max_conc_bps(env: Env) -> i128",
       "pub fn max_deploy_bps(env: Env) -> i128",

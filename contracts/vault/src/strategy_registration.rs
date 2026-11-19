@@ -3,10 +3,15 @@
 //! State is persisted as `u32` in the existing `StrategyWhitelist` storage slot:
 //! `1` = Pending, `2` = Active, `3` = Retired.
 
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::upgrade::get_admin;
 use crate::DataKey;
+
+/// Storage key for the enumeration index. A standalone symbol is used because
+/// `DataKey` is already at Soroban's 50-variant limit for `#[contracttype]` enums.
+/// Eligibility is always read from `DataKey::StrategyWhitelist`, never from this index.
+const STRATEGY_INDEX_KEY: Symbol = symbol_short!("STRATIDX");
 
 pub const STATE_PENDING: u32 = 1;
 pub const STATE_ACTIVE: u32 = 2;
@@ -28,16 +33,58 @@ pub fn read_registration_state(env: &Env, strategy: &Address) -> Option<u32> {
         .get(&DataKey::StrategyWhitelist(strategy.clone()))
 }
 
+fn read_strategy_index(env: &Env) -> Vec<Address> {
+    env.storage()
+        .instance()
+        .get(&STRATEGY_INDEX_KEY)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Appends `strategy` to the enumeration index the first time it is registered.
+/// The index is insertion-ordered, which makes `list_whitelisted_strategies`
+/// deterministic.
+fn index_strategy(env: &Env, strategy: &Address) {
+    let mut index = read_strategy_index(env);
+    if !index.contains(strategy) {
+        index.push_back(strategy.clone());
+        env.storage().instance().set(&STRATEGY_INDEX_KEY, &index);
+    }
+}
+
+fn unindex_strategy(env: &Env, strategy: &Address) {
+    let mut index = read_strategy_index(env);
+    if let Some(pos) = index.first_index_of(strategy) {
+        index.remove(pos);
+        env.storage().instance().set(&STRATEGY_INDEX_KEY, &index);
+    }
+}
+
 fn write_registration_state(env: &Env, strategy: &Address, state: u32) {
     env.storage()
         .instance()
         .set(&DataKey::StrategyWhitelist(strategy.clone()), &state);
+    index_strategy(env, strategy);
 }
 
 fn remove_registration_state(env: &Env, strategy: &Address) {
     env.storage()
         .instance()
         .remove(&DataKey::StrategyWhitelist(strategy.clone()));
+    unindex_strategy(env, strategy);
+}
+
+/// Returns every strategy currently eligible for allocation (Pending or
+/// Active), in registration order. Applies the same predicate as
+/// `is_eligible_for_allocation`, which `set_strategy` validates against, so
+/// Retired strategies are excluded.
+pub fn list_eligible_strategies(env: &Env) -> Vec<Address> {
+    let mut out: Vec<Address> = Vec::new(env);
+    for strategy in read_strategy_index(env).iter() {
+        if is_eligible_for_allocation(env, &strategy) {
+            out.push_back(strategy);
+        }
+    }
+    out
 }
 
 pub fn is_allowed_transition(from: Option<u32>, to: u32) -> bool {

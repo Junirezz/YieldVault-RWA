@@ -985,6 +985,16 @@ impl YieldVault {
         SecureWhitelist::is_strategy_whitelisted(&env, &strategy)
     }
 
+    /// Returns all currently whitelisted strategy addresses.
+    ///
+    /// Read-only and requires no authorization. The result uses the same
+    /// predicate as `is_strategy_whitelisted` / `set_strategy` validation
+    /// (Pending or Active; Retired and removed strategies are excluded) and is
+    /// ordered deterministically by first registration.
+    pub fn list_whitelisted_strategies(env: Env) -> soroban_sdk::Vec<Address> {
+        SecureWhitelist::list_whitelisted_strategies(&env)
+    }
+
     /// Read the active strategy address.
     pub fn strategy(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Strategy)
