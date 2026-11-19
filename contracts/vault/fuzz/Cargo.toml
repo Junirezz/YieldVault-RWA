@@ -19,3 +19,9 @@ name = "share_price_math"
 path = "fuzz_targets/share_price_math.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "share_price_extreme_ranges"
+path = "fuzz_targets/share_price_extreme_ranges.rs"
+test = false
+doc = false
