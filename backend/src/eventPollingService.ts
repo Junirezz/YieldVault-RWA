@@ -3,6 +3,11 @@ import { logger } from './middleware/structuredLogging';
 import { redisClientManager } from './rateLimiter';
 import { scValToNative, xdr } from '@stellar/stellar-base';
 import Decimal from 'decimal.js';
+import {
+  recordEventPollerLedgers,
+  recordEventPollerSuccess,
+  resetEventPollerMetrics,
+} from './metrics';
 
 const prisma = getPrismaClient();
 
@@ -35,6 +40,9 @@ export class EventPollingService {
   private lastPollError: string | null = null;
   private lastPollErrorAt: string | null = null;
   private consecutivePollFailures = 0;
+  // Latest ledger seen on the RPC and the persisted cursor, for lag metrics (#1726).
+  private latestObservedLedger: number | null = null;
+  private lastProcessedLedger: number | null = null;
 
   constructor(config: EventPollingConfig) {
     this.config = config;
@@ -93,6 +101,9 @@ export class EventPollingService {
 
     // Release leader lock on shutdown
     await this.releaseLeaderLock();
+
+    // Do not keep exporting stale poller gauges once polling has stopped.
+    resetEventPollerMetrics();
 
     logger.log('info', 'Event polling service stopped');
   }
@@ -381,11 +392,19 @@ export class EventPollingService {
     this.lastPollError = null;
     this.lastPollErrorAt = null;
     this.consecutivePollFailures = 0;
+    recordEventPollerSuccess();
+  }
+
+  private publishLedgerMetrics(): void {
+    recordEventPollerLedgers(this.latestObservedLedger, this.lastProcessedLedger);
   }
 
   private async getLastProcessedLedger(): Promise<number> {
     const cursor = await prisma.eventCursor.findUnique({ where: { id: 1 } });
-    return cursor?.lastLedgerSeq ?? 0;
+    const lastLedger = cursor?.lastLedgerSeq ?? 0;
+    this.lastProcessedLedger = lastLedger;
+    this.publishLedgerMetrics();
+    return lastLedger;
   }
 
   private async updateCursor(ledgerSeq: number): Promise<void> {
@@ -394,6 +413,8 @@ export class EventPollingService {
       update: { lastLedgerSeq: ledgerSeq },
       create: { id: 1, lastLedgerSeq: ledgerSeq },
     });
+    this.lastProcessedLedger = ledgerSeq;
+    this.publishLedgerMetrics();
   }
 
   private async isEventProcessed(eventId: string): Promise<boolean> {
@@ -517,6 +538,8 @@ export class EventPollingService {
       throw new Error('RPC response missing valid sequence number');
     }
 
+    this.latestObservedLedger = data.result.sequence;
+    this.publishLedgerMetrics();
     return data.result.sequence;
   }
 
