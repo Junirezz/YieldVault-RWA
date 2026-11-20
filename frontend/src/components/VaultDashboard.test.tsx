@@ -281,6 +281,43 @@ describe("VaultDashboard", () => {
     }, { timeout: 10000 });
   }, 15000);
 
+  it("updates the TVL display after a successful deposit", async () => {
+    // Initial summary state
+    const initialSummary = { ...mockSummary, tvl: 1000000 };
+    vi.mocked(vaultDataHooks.useVaultSummary).mockReturnValue({
+      data: initialSummary,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({}),
+    } as any);
+
+    renderDashboard("GTVLUPDATEWALLET000000000000000000000000000000000");
+
+    // Check initial TVL
+    expect(await screen.findByText(/\$1,000,000/)).toBeInTheDocument();
+
+    // Prepare updated summary for after deposit
+    const updatedSummary = { ...mockSummary, tvl: 1000100 };
+    vi.mocked(vaultDataHooks.useVaultSummary).mockReturnValue({
+      data: updatedSummary,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({}),
+    } as any);
+
+    // Perform deposit
+    const input = await screen.findByPlaceholderText("0.00");
+    fireEvent.change(input, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Deposit" })); // Ensure we're on deposit tab
+    fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
+
+    // Wait for finalization and TVL update
+    await waitFor(() => {
+      expect(screen.getByText(/\$1,000,100/)).toBeInTheDocument();
+    }, { timeout: 10000 });
+  });
+
   it("plays the first deposit confetti once per wallet", async () => {
     renderDashboard("GFIRSTDEPOSITWALLET000000000000000000000000000000");
 

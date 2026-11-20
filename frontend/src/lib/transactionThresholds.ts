@@ -19,6 +19,21 @@
 export const UNUSUAL_AMOUNT_THRESHOLD = 10000; // 10,000 XLM or USDC equivalent
 
 /**
+ * Threshold for large withdrawals that trigger a 24-hour timelock.
+ *
+ * This must match the `LargeWithdrawalThreshold` configured in the vault
+ * contract. Withdrawals above this amount are not processed immediately.
+ */
+export const LARGE_WITHDRAWAL_THRESHOLD = 10000;
+
+/**
+ * The duration of the withdrawal timelock in hours.
+ *
+ * Current contract implementation uses a fixed 86,400 second (24 hour) delay.
+ */
+export const WITHDRAWAL_TIMELOCK_DURATION_HOURS = 24;
+
+/**
  * Fee multiplier above which a transaction fee is flagged as "unusual".
  *
  * Derivation: Stellar base fee is 100 stroops (0.00001 XLM).

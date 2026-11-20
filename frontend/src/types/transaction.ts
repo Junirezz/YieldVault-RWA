@@ -43,4 +43,10 @@ export interface TransactionSummary {
 
   /** True if contractName is null (contract not in allowlist) */
   isUnknownContract: boolean;
+
+  /** True if the withdrawal amount triggers a contract-enforced timelock */
+  requiresTimelock: boolean;
+
+  /** The duration of the timelock in hours (e.g., 24) if requiresTimelock is true */
+  timelockDurationHours: number | null;
 }

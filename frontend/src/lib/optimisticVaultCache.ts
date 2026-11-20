@@ -112,15 +112,19 @@ export async function cancelVaultOptimisticQueries(
   ]);
 }
 
-export function invalidateVaultOptimisticQueries(
+export async function invalidateVaultOptimisticQueries(
   queryClient: QueryClient,
   walletAddress: string,
-): void {
+): Promise<void> {
   const keys = getVaultCacheKeys(walletAddress);
-  void queryClient.invalidateQueries({ queryKey: keys.balanceKey });
-  void queryClient.invalidateQueries({ queryKey: keys.holdingsKey });
-  void queryClient.invalidateQueries({ queryKey: keys.summaryKey });
-  void queryClient.invalidateQueries({ queryKey: keys.txKey });
+  // We use Promise.all to ensure all invalidations are triggered, 
+  // and we return the promise so mutations can await them if needed.
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: keys.balanceKey }),
+    queryClient.invalidateQueries({ queryKey: keys.holdingsKey }),
+    queryClient.invalidateQueries({ queryKey: keys.summaryKey }),
+    queryClient.invalidateQueries({ queryKey: keys.txKey }),
+  ]);
 }
 
 export function buildPendingTransaction(

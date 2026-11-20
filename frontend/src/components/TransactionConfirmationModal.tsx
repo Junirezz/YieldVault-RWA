@@ -44,7 +44,11 @@ export const TransactionConfirmationModal: React.FC<TransactionConfirmationModal
   summary,
 }) => {
   // Determine if confirm button should use warning style
-  const hasWarnings = summary.isUnusualAmount || summary.isUnusualFee || summary.isUnknownContract;
+  const hasWarnings =
+    summary.isUnusualAmount ||
+    summary.isUnusualFee ||
+    summary.isUnknownContract ||
+    summary.requiresTimelock;
   const confirmButtonLabel = hasWarnings ? "Confirm Anyway" : "Confirm";
 
   return (
@@ -59,7 +63,7 @@ export const TransactionConfirmationModal: React.FC<TransactionConfirmationModal
       aria-describedby="modal-desc-risk-summary"
     >
       <div style={{ padding: "12px 0" }}>
-        {/* Warnings Section: Unusual Values */}
+        {/* Warnings Section: Unusual Values & Timelocks */}
         {hasWarnings && (
           <div
             style={{
@@ -78,6 +82,11 @@ export const TransactionConfirmationModal: React.FC<TransactionConfirmationModal
                 Review Transaction Details
               </div>
               <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.85rem", color: "var(--text-secondary)" }}>
+                {summary.requiresTimelock && (
+                  <li>
+                    <strong>{summary.timelockDurationHours}-hour timelock:</strong> This withdrawal exceeds the large-transaction threshold and will require a second step to complete after the timelock expires.
+                  </li>
+                )}
                 {summary.isUnusualAmount && (
                   <li>This amount is unusually large.</li>
                 )}
@@ -210,8 +219,8 @@ export const TransactionConfirmationModal: React.FC<TransactionConfirmationModal
         <div
           id="modal-desc-risk-summary"
           style={{
-            background: "rgba(0, 240, 255, 0.05)",
-            border: "1px solid rgba(0, 240, 255, 0.2)",
+            background: summary.requiresTimelock ? "rgba(255, 159, 10, 0.05)" : "rgba(0, 240, 255, 0.05)",
+            border: summary.requiresTimelock ? "1px solid rgba(255, 159, 10, 0.2)" : "1px solid rgba(0, 240, 255, 0.2)",
             borderRadius: "8px",
             padding: "12px",
             marginBottom: "24px",
@@ -220,11 +229,20 @@ export const TransactionConfirmationModal: React.FC<TransactionConfirmationModal
             lineHeight: "1.5",
           }}
         >
-          <p style={{ margin: 0, fontWeight: 500, color: "var(--accent-cyan)", marginBottom: "6px" }}>
-            ⚠️ Important
+          <p
+            style={{
+              margin: 0,
+              fontWeight: 500,
+              color: summary.requiresTimelock ? "var(--text-warning)" : "var(--accent-cyan)",
+              marginBottom: "6px",
+            }}
+          >
+            ⚠️ {summary.requiresTimelock ? "Pending Withdrawal Notice" : "Important"}
           </p>
           <p style={{ margin: 0 }}>
-            This transaction cannot be reversed once signed. Review all details carefully before confirming. Only proceed if you understand and accept the transaction parameters.
+            {summary.requiresTimelock
+              ? `Because this withdrawal is above the security threshold, it will be queued with a ${summary.timelockDurationHours}-hour timelock. You will need to return to this dashboard to execute the final transfer once the lock expires.`
+              : "This transaction cannot be reversed once signed. Review all details carefully before confirming. Only proceed if you understand and accept the transaction parameters."}
           </p>
         </div>
 

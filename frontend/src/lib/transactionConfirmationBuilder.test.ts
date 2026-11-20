@@ -11,6 +11,8 @@ import {
 } from './transactionConfirmationBuilder';
 import {
   UNUSUAL_AMOUNT_THRESHOLD,
+  LARGE_WITHDRAWAL_THRESHOLD,
+  WITHDRAWAL_TIMELOCK_DURATION_HOURS,
   UNUSUAL_FEE_MULTIPLIER,
   STELLAR_BASE_FEE_XLM,
 } from './transactionThresholds';
@@ -152,6 +154,41 @@ describe('transactionConfirmationBuilder', () => {
 
       // Network must be one of the valid options
       expect(['Mainnet', 'Testnet', 'Futurenet']).toContain(summary.network);
+    });
+
+    it('detects timelock requirements for large withdrawals', () => {
+      // Small withdrawal: no timelock
+      const smallSummary = buildTransactionSummary({
+        actionType: 'withdraw',
+        amount: LARGE_WITHDRAWAL_THRESHOLD - 1,
+        asset: 'USDC',
+        feeXlm: 0.00001,
+        contractAddress,
+      });
+      expect(smallSummary.requiresTimelock).toBe(false);
+      expect(smallSummary.timelockDurationHours).toBeNull();
+
+      // Large withdrawal: timelock required
+      const largeSummary = buildTransactionSummary({
+        actionType: 'withdraw',
+        amount: LARGE_WITHDRAWAL_THRESHOLD,
+        asset: 'USDC',
+        feeXlm: 0.00001,
+        contractAddress,
+      });
+      expect(largeSummary.requiresTimelock).toBe(true);
+      expect(largeSummary.timelockDurationHours).toBe(WITHDRAWAL_TIMELOCK_DURATION_HOURS);
+    });
+
+    it('does not apply timelock to deposits regardless of amount', () => {
+      const largeDepositSummary = buildTransactionSummary({
+        actionType: 'deposit',
+        amount: LARGE_WITHDRAWAL_THRESHOLD + 10000,
+        asset: 'USDC',
+        feeXlm: 0.00001,
+        contractAddress,
+      });
+      expect(largeDepositSummary.requiresTimelock).toBe(false);
     });
   });
 

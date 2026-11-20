@@ -6,6 +6,8 @@
 import type { TransactionSummary } from '../types/transaction';
 import {
   UNUSUAL_AMOUNT_THRESHOLD,
+  LARGE_WITHDRAWAL_THRESHOLD,
+  WITHDRAWAL_TIMELOCK_DURATION_HOURS,
   UNUSUAL_FEE_MULTIPLIER,
   STELLAR_BASE_FEE_XLM,
   TRUSTED_CONTRACT_ADDRESSES,
@@ -52,6 +54,10 @@ export function buildTransactionSummary(
   const isUnusualFee = feeXlm > STELLAR_BASE_FEE_XLM * UNUSUAL_FEE_MULTIPLIER;
   const isUnknownContract = contractName === null;
 
+  // Detect timelock requirements
+  const requiresTimelock = actionType === 'withdraw' && amount >= LARGE_WITHDRAWAL_THRESHOLD;
+  const timelockDurationHours = requiresTimelock ? WITHDRAWAL_TIMELOCK_DURATION_HOURS : null;
+
   return {
     amount: `${amount.toFixed(2)} ${asset}`,
     asset,
@@ -63,6 +69,8 @@ export function buildTransactionSummary(
     isUnusualAmount,
     isUnusualFee,
     isUnknownContract,
+    requiresTimelock,
+    timelockDurationHours,
   };
 }
 
