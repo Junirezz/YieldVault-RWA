@@ -253,6 +253,47 @@ Use our [PR template](./.github/PULL_REQUEST_TEMPLATE.md):
 - For sensitive changes (auth, secrets, dependencies): additional review required
 - Discussions must be resolved before merging
 
+### PR Size Guideline
+
+Keep pull requests small enough to review in one sitting. Smaller PRs are easier
+to review, faster to merge, and correlate with fewer defects. As a guideline, a
+pull request should stay within:
+
+- **≤ 1000 changed lines** (additions + deletions), and
+- **≤ 50 changed files**.
+
+Generated and locked files are **excluded** from these counts, because they are
+rewritten by tooling rather than authored by hand:
+
+- Lockfiles: `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`,
+  and any `*.lock` file
+- Build output and caches: `dist/`, `build/`, `coverage/`, `node_modules/`,
+  `.next/`, `target/`
+- Minified assets: `*.min.js`, `*.min.css`
+- Committed generated artifacts: `backend/openapi.json`,
+  `backend/schema-snapshots/**`, `docs/schemas/webhooks/**`,
+  `contracts/bridge-compat/abi_snapshot.json`,
+  `contracts/vault/benches/baseline.json`
+
+#### CI enforcement
+
+The [`pr-size`](./.github/workflows/pr-size.yml) workflow reports the changed
+line and file counts on every pull request, both in the job summary and as a
+sticky PR comment. When the guideline is exceeded it emits an **advisory warning
+only — it never fails the check and never blocks the merge**.
+
+#### Exception process
+
+If a PR legitimately must exceed the guideline (for example, an atomic change
+that cannot be split, a mechanical rename, or a required regeneration of a large
+artifact):
+
+1. Add the **`size:exception`** label to the PR.
+2. Explain in the PR description why the change cannot be split into smaller PRs.
+
+Once the label is applied, the CI report records the PR as exempt and stops
+warning about its size.
+
 ## Review Expectations
 
 ### Who Reviews
