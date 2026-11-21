@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { NetworkBannerStack } from "../components/NetworkBannerStack";
+import { readSelectedNetwork } from "../config/selectedNetwork";
 
 // ─── Mock all hooks ───────────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ function renderStack(walletAddress: string | null = null) {
 describe("NetworkBannerStack", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     setAllGreen();
   });
 
@@ -220,6 +222,21 @@ describe("NetworkBannerStack", () => {
     const alert = screen.getByRole("alert");
     expect(alert.getAttribute("aria-live")).toBe("assertive");
     expect(screen.getByText(/networkWarning.wrongNetwork/)).toBeTruthy();
+  });
+
+  it("offers a guided fix that selects the wallet's network", () => {
+    vi.mocked(useWalletNetwork).mockReturnValue({
+      isMismatch: true,
+      walletNetwork: "Mainnet",
+      expectedNetwork: "Testnet",
+      isChecking: false,
+      checkNow: vi.fn(),
+    });
+
+    renderStack(WALLET);
+    fireEvent.click(screen.getByText(/networkWarning.useWalletNetwork/));
+
+    expect(readSelectedNetwork()).toBe("mainnet");
   });
 
   it("network mismatch takes priority over high latency", () => {

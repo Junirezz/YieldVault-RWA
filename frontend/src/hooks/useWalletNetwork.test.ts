@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useWalletNetwork } from "./useWalletNetwork";
+import { setSelectedNetwork } from "../config/selectedNetwork";
 
 const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
@@ -14,6 +15,7 @@ vi.mock("@stellar/freighter-api", () => ({
 describe("useWalletNetwork", () => {
   beforeEach(() => {
     getNetworkDetails.mockReset();
+    localStorage.clear();
   });
 
   it("reports no wallet network and no mismatch when no wallet is connected", () => {
@@ -78,6 +80,34 @@ describe("useWalletNetwork", () => {
 
     expect(result.current.isChecking).toBe(false);
     expect(result.current.walletNetwork).toBe("Mainnet");
+  });
+
+  it("uses the persisted selection as the expected network", async () => {
+    setSelectedNetwork("mainnet");
+    getNetworkDetails.mockResolvedValue({ networkPassphrase: TESTNET_PASSPHRASE });
+
+    const { result } = renderHook(() => useWalletNetwork("GABC123"));
+    await waitFor(() => expect(result.current.walletNetwork).toBe("Testnet"));
+    expect(result.current.expectedNetwork).toBe("Mainnet");
+    expect(result.current.isMismatch).toBe(true);
+  });
+
+  it("rechecks the wallet after a reconnect and switches to the new selection", async () => {
+    getNetworkDetails.mockResolvedValue({ networkPassphrase: MAINNET_PASSPHRASE });
+    const { result, rerender } = renderHook(
+      ({ address }) => useWalletNetwork(address),
+      { initialProps: { address: null as string | null } },
+    );
+
+    expect(result.current.walletNetwork).toBeNull();
+    rerender({ address: "GABC123" });
+    await waitFor(() => expect(result.current.walletNetwork).toBe("Mainnet"));
+    expect(result.current.isMismatch).toBe(true);
+
+    // Selecting the wallet's network resolves the mismatch immediately.
+    act(() => setSelectedNetwork("mainnet"));
+    expect(result.current.expectedNetwork).toBe("Mainnet");
+    expect(result.current.isMismatch).toBe(false);
   });
 
   it("does not attempt a recheck when no wallet is connected", async () => {
