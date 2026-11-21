@@ -897,6 +897,11 @@ export const es = {
     closeQuickActionsAria: "Cerrar acciones rápidas",
     activityLabel: "Actividad",
   },
+  yieldBreakdownChart: {
+    loadingAnnouncement: "Cargando datos del desglose de rendimiento",
+    errorTitle: "No se pudo cargar el rendimiento",
+    errorDesc: "No pudimos cargar el desglose de rendimiento. Inténtalo de nuevo.",
+  },
   vaultPerformanceChart: {
     title: "Rendimiento de la bóveda",
     subtitle: "Índice de precio de acción yvUSDC (100 = base)",

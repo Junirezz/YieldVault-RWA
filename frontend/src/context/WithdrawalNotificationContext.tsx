@@ -94,6 +94,7 @@ export const WithdrawalNotificationProvider: React.FC<
   // Sync state when walletAddress changes
   useEffect(() => {
     const loaded = loadPersistedState(walletAddress);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNotifications(loaded.notifications);
     seenIdsRef.current = new Set(loaded.seenIds);
   }, [walletAddress]);

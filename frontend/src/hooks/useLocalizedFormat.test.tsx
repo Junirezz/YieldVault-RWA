@@ -68,7 +68,8 @@ describe("useLocalizedFormat", () => {
       wrapper: createWrapper(),
     });
 
-    const dateStr = result.current.fmt.date(new Date("2025-06-15"), {
+    // Use a local-time date so the assertion is independent of the runner's timezone.
+    const dateStr = result.current.fmt.date(new Date(2025, 5, 15), {
       year: "numeric",
       month: "short",
       day: "numeric",
