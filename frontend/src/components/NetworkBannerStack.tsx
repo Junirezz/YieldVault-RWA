@@ -20,6 +20,8 @@ import React, { useState } from "react";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { useNetworkQuality } from "../hooks/useNetworkQuality";
 import { useWalletNetwork } from "../hooks/useWalletNetwork";
+import { useSelectedNetwork } from "../hooks/useSelectedNetwork";
+import type { StellarNetwork } from "../config/selectedNetwork";
 import { useRetryState } from "../hooks/useRetryState";
 import { useTranslation } from "../i18n";
 import { queryClient } from "../lib/queryClient";
@@ -126,6 +128,7 @@ interface MismatchBannerViewProps {
   expectedNetwork: string;
   isChecking: boolean;
   onFixNow: () => void;
+  onUseWalletNetwork: () => void;
 }
 
 function MismatchBannerView({
@@ -133,6 +136,7 @@ function MismatchBannerView({
   expectedNetwork,
   isChecking,
   onFixNow,
+  onUseWalletNetwork,
 }: MismatchBannerViewProps) {
   const { t } = useTranslation();
 
@@ -169,6 +173,25 @@ function MismatchBannerView({
         <strong>{expectedNetwork}</strong>.{" "}
         {t("networkWarning.switchInstructions").replace("{{network}}", expectedNetwork)}
       </span>
+      {walletNetwork && (
+        <button
+          type="button"
+          onClick={onUseWalletNetwork}
+          style={{
+            background: "rgba(255, 255, 255, 0.15)",
+            border: "1px solid rgba(255, 255, 255, 0.4)",
+            borderRadius: "6px",
+            color: "#fff",
+            padding: "4px 10px",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          {t("networkWarning.useWalletNetwork").replace("{{network}}", walletNetwork)}
+        </button>
+      )}
       <button
         type="button"
         onClick={onFixNow}
@@ -302,6 +325,7 @@ export const NetworkBannerStack: React.FC<NetworkBannerStackProps> = ({
   const { quality, latencyMs, jitterMs } = useNetworkQuality();
   const { isMismatch, walletNetwork, expectedNetwork, isChecking, checkNow } =
     useWalletNetwork(walletAddress);
+  const { setSelectedNetwork } = useSelectedNetwork();
   const { isRetrying, secondsUntilRetry } = useRetryState();
 
   // ── Per-banner dismissed/success state ────────────────────────────────────
@@ -368,6 +392,11 @@ export const NetworkBannerStack: React.FC<NetworkBannerStackProps> = ({
             expectedNetwork={expectedNetwork}
             isChecking={isChecking}
             onFixNow={() => setGuideOpen(true)}
+            onUseWalletNetwork={() => {
+              if (walletNetwork) {
+                setSelectedNetwork(walletNetwork.toLowerCase() as StellarNetwork);
+              }
+            }}
           />
           <NetworkMismatchGuideModal
             isOpen={guideOpen}
