@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { toast as sonnerToast } from "sonner";
 import { ToastProvider, useToast } from "./ToastContext";
+
+const TX_HASH = "a".repeat(64);
 
 function ToastHarness() {
   const toast = useToast();
@@ -31,6 +34,53 @@ function ToastHarness() {
       >
         Show error
       </button>
+    </div>
+  );
+}
+
+/** Simulates repeated poll/event responses for one transaction hash. */
+function TransactionToastHarness() {
+  const { toasts, ...toast } = useToast();
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() =>
+          toast.success({
+            title: "Transaction submitted",
+            description: "Waiting for confirmation",
+            transactionHash: TX_HASH,
+            status: "submitted",
+            duration: 5000,
+          })
+        }
+      >
+        Poll submitted
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          toast.success({
+            title: "Transaction confirmed",
+            description: "Included in the ledger",
+            transactionHash: TX_HASH,
+            status: "success",
+            duration: 5000,
+          })
+        }
+      >
+        Poll confirmed
+      </button>
+      <button
+        type="button"
+        onClick={() => toast.info({ title: "Unrelated notice", duration: 5000 })}
+      >
+        Unrelated
+      </button>
+      <output data-testid="toast-list">
+        {toasts.map((item) => `${item.id}:${item.title}:${item.status ?? ""}`).join("|")}
+      </output>
     </div>
   );
 }
@@ -100,5 +150,62 @@ describe("ToastProvider", () => {
     });
 
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("deduplicates repeated poll responses for the same transaction hash", () => {
+    const sonnerSpy = vi.spyOn(sonnerToast, "success");
+    render(
+      <ToastProvider>
+        <TransactionToastHarness />
+      </ToastProvider>,
+    );
+
+    const poll = screen.getByText(/Poll submitted/i);
+    fireEvent.click(poll);
+    fireEvent.click(poll);
+    fireEvent.click(poll);
+
+    const list = screen.getByTestId("toast-list");
+    expect(list.textContent?.split("|")).toHaveLength(1);
+    expect(list.textContent).toContain("Transaction submitted");
+    // The same sonner id is reused, so the notification is never stacked.
+    expect(sonnerSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates the existing toast when the transaction status changes", () => {
+    const sonnerSpy = vi.spyOn(sonnerToast, "success");
+    render(
+      <ToastProvider>
+        <TransactionToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByText(/Poll submitted/i));
+    fireEvent.click(screen.getByText(/Poll confirmed/i));
+
+    const list = screen.getByTestId("toast-list");
+    expect(list.textContent?.split("|")).toHaveLength(1);
+    expect(list.textContent).toContain("Transaction confirmed:success");
+    expect(list.textContent).not.toContain("Transaction submitted");
+    // The status transition reuses the original toast id.
+    expect(sonnerSpy).toHaveBeenCalledTimes(2);
+    expect(sonnerSpy.mock.calls[1][1]?.id).toBe(sonnerSpy.mock.calls[0][1]?.id);
+  });
+
+  it("does not suppress unrelated toasts", () => {
+    render(
+      <ToastProvider>
+        <TransactionToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByText(/Poll submitted/i));
+    fireEvent.click(screen.getByText(/Poll submitted/i));
+    fireEvent.click(screen.getByText(/Unrelated/i));
+
+    const list = screen.getByTestId("toast-list");
+    expect(list.textContent?.split("|")).toHaveLength(2);
+    expect(list.textContent).toContain("Transaction submitted");
+    expect(list.textContent).toContain("Unrelated notice");
   });
 });
