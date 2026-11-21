@@ -228,3 +228,5 @@ Create a new branch for your changes
 Make and test your updates following the project guidelines
 Commit and push your changes to your fork
 Open a Pull Request with a clear description
+
+Please review the [Code of Conduct](./CODE_OF_CONDUCT.md) and [Contributing Guide](./CONTRIBUTING.md).

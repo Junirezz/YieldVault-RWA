@@ -12,11 +12,16 @@ Welcome to the YieldVault-RWA project. This guide outlines how to set up your en
 - [Review Expectations](#review-expectations)
 - [Release Cycle](#release-cycle)
 
+## Code of Conduct
+
+By participating in this project, you agree to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+Report unacceptable behavior confidentially to `security@yieldvault.io`.
+
 ## Setup
 
 ### Prerequisites
 
-- Node.js 18+ (for backend)
+- Node.js 22 (use `nvm use` from the root `.nvmrc`)
 - Rust 1.70+ (for WASM/contracts)
 - Docker (for local database and services)
 - Git
