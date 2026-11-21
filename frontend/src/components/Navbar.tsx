@@ -11,6 +11,7 @@ import { Layers } from "./icons";
 import { useTranslation } from "../i18n";
 import { useWalletNetwork } from "../hooks/useWalletNetwork";
 import Badge from "./Badge";
+import NotificationBell from "./NotificationBell";
 import { usePendingTransactionCount } from "../hooks/usePendingTransactionCount";
 import { getRoutePrefetchHandlers } from "../lib/routePrefetch";
 import type { UserRole } from "../lib/roles";
@@ -209,6 +210,7 @@ const Navbar: FC<NavbarProps> = ({
                 {networkLabel}
               </span>
             )}
+            <NotificationBell />
             <ThemeToggle />
             <LanguageSwitcher compact />
           </div>
@@ -282,6 +284,7 @@ const Navbar: FC<NavbarProps> = ({
         )}
 
         <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
+          <NotificationBell />
           <ThemeToggle />
           <LanguageSwitcher compact />
           {walletAddress && <span>{networkLabel}</span>}

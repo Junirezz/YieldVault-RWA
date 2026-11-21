@@ -58,6 +58,7 @@ import { useStaleSubmissionGuard } from "../hooks/useStaleSubmissionGuard";
 import { useTransactionIntent } from "../hooks/useTransactionIntent";
 import { saveVaultFormDraft, clearVaultFormDraft } from "../lib/formDraftStorage";
 import { buildDepositSummary, buildWithdrawalSummary } from "../lib/transactionConfirmationBuilder";
+import { dispatchWithdrawalReady } from "../lib/withdrawalNotificationEvents";
 import TransactionConflictResolver from "./TransactionConflictResolver";
 import RiskSummaryCard, { type RiskAction } from "./RiskSummaryCard";
 import FeeUtilizationPanel from "./FeeUtilizationPanel";
@@ -712,6 +713,16 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
         txHash: submittedTxHash,
       });
       setTxTimelineStatus("finalized");
+
+      if (actionType === "withdraw") {
+        dispatchWithdrawalReady({
+          transactionHash: submittedTxHash || `tx-${Date.now()}`,
+          amount: value.toFixed(2),
+          asset: "USDC",
+          timestamp: new Date().toISOString(),
+          status: "completed",
+        });
+      }
 
       toast.success({
         title: actionType === "deposit" ? t("vaultDashboard.toast.depositSuccessTitle") : t("vaultDashboard.toast.withdrawalSuccessTitle"),
