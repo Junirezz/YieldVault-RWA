@@ -848,7 +848,7 @@ describe("TransactionHistory — asset filter", () => {
     await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
 
     const assetSelect = screen.getByRole("combobox", { name: /Asset/i });
-    expect(assetSelect).toHaveValue("USDC");
+    await waitFor(() => expect(assetSelect).toHaveValue("USDC"));
 
     fireEvent.change(assetSelect, { target: { value: "XLM" } });
 
@@ -1546,7 +1546,9 @@ describe("TransactionHistory — advanced filters", () => {
     ).toBeInTheDocument();
     // An empty table here would read as "you have no transactions".
     const table = screen.getByRole("table");
-    expect(within(table).getByText("USDC")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(table).getByText("USDC")).toBeInTheDocument(),
+    );
   });
 
   it("explains a contradictory amount range and keeps showing the rows", async () => {
@@ -1561,7 +1563,9 @@ describe("TransactionHistory — advanced filters", () => {
       screen.getByText(/minimum amount is above the maximum/i),
     ).toBeInTheDocument();
     const table = screen.getByRole("table");
-    expect(within(table).getByText("USDC")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(table).getByText("USDC")).toBeInTheDocument(),
+    );
   });
 
   it("narrows rather than widens when the search has several terms", async () => {
