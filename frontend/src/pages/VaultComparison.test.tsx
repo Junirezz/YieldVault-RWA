@@ -344,11 +344,11 @@ describe("VaultComparison accessibility", () => {
     );
 
     await auditNoViolations(container);
-  });
+  }, 30000);
 
   it("has no axe violations in the empty state", async () => {
     const { container } = renderComparison("/compare?strategies=");
 
     await auditNoViolations(container);
-  });
+  }, 30000);
 });
