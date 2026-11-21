@@ -730,6 +730,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           actionType === "deposit"
             ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
             : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
+        // Repeated poll/event updates for this hash must not stack toasts.
+        transactionHash: submittedTxHash ?? undefined,
+        status: "success",
       });
     } catch (err: unknown) {
       if (isTransactionConflict(err)) {
