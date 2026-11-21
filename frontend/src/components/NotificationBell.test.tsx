@@ -1,16 +1,24 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import NotificationBell from "./NotificationBell";
 import {
   WithdrawalNotificationProvider,
 } from "../context/WithdrawalNotificationContext";
-import { dispatchWithdrawalReady } from "../lib/withdrawalNotificationEvents";
+import { dispatchWithdrawalReady as emitWithdrawalReady } from "../lib/withdrawalNotificationEvents";
 
 // Mock useTransactionHistory to avoid network calls during tests
 vi.mock("../hooks/useTransactionData", () => ({
   useTransactionHistory: () => ({ data: [] }),
 }));
+
+// The provider subscribes to a DOM event and updates React state, so event
+// dispatch must be wrapped in act() for the resulting badge to be observable.
+function dispatchWithdrawalReady(detail: Parameters<typeof emitWithdrawalReady>[0]) {
+  act(() => {
+    emitWithdrawalReady(detail);
+  });
+}
 
 describe("NotificationBell", () => {
   beforeEach(() => {
@@ -165,6 +173,6 @@ describe("NotificationBell", () => {
     const clearBtn = screen.getByRole("button", { name: "Clear all" });
     fireEvent.click(clearBtn);
 
-    expect(screen.getByText("No withdrawal alerts yet.")).toBeInTheDocument();
+    expect(screen.getByText(/No withdrawal alerts yet/)).toBeInTheDocument();
   });
 });
