@@ -95,6 +95,43 @@ export function createAdminAuditMiddleware() {
   };
 }
 
+export interface AppendAuditLogInput {
+  actor: string;
+  action: string;
+  method?: string;
+  path: string;
+  statusCode: number;
+  ip?: string;
+  correlationId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Append a structured entry from outside the request middleware (e.g. a
+ * service that must record exact before/after values). Entries are returned
+ * by the same `/admin/audit-logs` query as middleware-created ones.
+ */
+export function appendAuditLogEntry(input: AppendAuditLogInput): AuditLogEntry {
+  const entry: AuditLogEntry = {
+    id: `audit_${crypto.randomBytes(8).toString('hex')}`,
+    timestamp: new Date().toISOString(),
+    actor: input.actor,
+    method: input.method ?? 'PUT',
+    path: input.path,
+    action: input.action,
+    statusCode: input.statusCode,
+    durationMs: 0,
+    ip: hashIpIfNeeded(input.ip ?? 'unknown'),
+    correlationId: input.correlationId,
+    metadata: input.metadata ? redactSensitiveAttributes(input.metadata) : undefined,
+  };
+  entries.unshift(entry);
+  if (entries.length > entryLimit) {
+    entries.length = entryLimit;
+  }
+  return entry;
+}
+
 export function getAuditLogs(filters: AuditLogFilters = {}): AuditLogEntry[] {
   const normalizedLimit = Math.max(1, Math.min(filters.limit ?? 100, 500));
   const normalizedOffset = Math.max(0, filters.offset ?? 0);

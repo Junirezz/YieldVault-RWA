@@ -6,7 +6,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { API_KEY_AUDIT_ACTIONS, getApiKeyFingerprintFromHash, getApiKeyFingerprintFromValue, isApiKeyHash, listApiKeyAuditEvents, recordApiKeyAuditEvent, resolveApiKeyAuditActor } from '../apiKeyAudit';
-import { AllowlistWalletBodySchema, ApiKeyRegisterSchema, ApiKeyRevokeSchema, ApiKeyRotateSchema, ApyBackfillBodySchema, AuditLogQuerySchema, CacheInvalidateSchema, CreateVaultBodySchema, DeadLetterIdsSchema, DeadLetterProcessSchema, DeadLetterResolveSchema, EventReplayBodySchema, FeatureFlagOverrideSchema, GovernanceSnapshotExportSchema, IdParamSchema, ImpersonationSessionBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, ScopedTokenCreateSchema, WindowIdParamSchema, WithdrawalLimitOverrideSchema, validate } from '../middleware/validate';
+import { StrategyWeightsBodySchema, AllowlistWalletBodySchema, ApiKeyRegisterSchema, ApiKeyRevokeSchema, ApiKeyRotateSchema, ApyBackfillBodySchema, AuditLogQuerySchema, CacheInvalidateSchema, CreateVaultBodySchema, DeadLetterIdsSchema, DeadLetterProcessSchema, DeadLetterResolveSchema, EventReplayBodySchema, FeatureFlagOverrideSchema, GovernanceSnapshotExportSchema, IdParamSchema, ImpersonationSessionBodySchema, MaintenanceToggleSchema, MaintenanceWindowBodySchema, ScopedTokenCreateSchema, WindowIdParamSchema, WithdrawalLimitOverrideSchema, validate } from '../middleware/validate';
 import { DateRangeParseError, parseUtcDateRange } from '../dateRange';
 import { type DeadLetterStatus, type JobName, bulkDiscardDeadLetters, bulkRetryDeadLetters, discardDeadLetter, getDeadLetterRecord, getJobHealthStatus, getJobMetrics, listDeadLetters, processDeadLetterQueue, resolveDeadLetter, retryDeadLetter } from '../jobGovernance';
 import { type ImpersonationSessionRecord, endImpersonationSession, listImpersonationSessions, resolveImpersonationSessionContext, startImpersonationSession, validateImpersonationSession } from '../impersonationSessionService';
@@ -14,6 +14,7 @@ import { TRANSACTION_PAGINATION_CONFIG, buildPortfolioHoldingsResponse, buildVau
 import { type WithdrawalSagaStatus, withdrawalRecoveryCoordinator } from '../withdrawalRecovery';
 import { addAddress, allowlistSize, listAddresses, removeAddress } from '../middleware/allowlist';
 import { backfillApySnapshots } from '../apySnapshot';
+import { InvalidRebalanceTargetError, RebalanceConflictError, VaultNotRebalanceableError, rebalanceVaultAllocations } from '../services/allocation';
 import { buildReferralCodeErrorBody, buildReferralStatsErrorBody, buildReferralStatsNotFoundBody } from '../referralEndpoints';
 import { buildVaultSummaryResponseFromDb, isDryRunRequest, paginateByLimit, parseLimited, resolveActingAdminAddress, sendStandardListEnvelope } from './shared';
 import { cancelMaintenanceWindow, listMaintenanceWindows, scheduleMaintenanceWindow } from '../maintenanceWindow';
@@ -1787,6 +1788,56 @@ router.get('/admin/audit/logs', validateApiKey, validate({ query: AuditLogQueryS
     },
   });
 });
+
+/**
+ * PUT /admin/vaults/:id/allocations - change a vault's strategy weights (#1728)
+ *
+ * Weights must sum to 100% (validated before anything is written). Every
+ * change - and every rejected invalid-sum attempt - is written to the audit
+ * log with actor, timestamp, vault id and the full before/after weight maps,
+ * queryable via GET /admin/audit-logs?action=vault.strategy_weights.
+ */
+router.put(
+  '/admin/vaults/:id/allocations',
+  validateApiKey,
+  validate({ params: IdParamSchema, body: StrategyWeightsBodySchema }),
+  async (req: Request, res: Response) => {
+    const vaultId = req.params.id;
+    try {
+      const result = await rebalanceVaultAllocations(vaultId, req.body.weights, {
+        actor: resolveActingAdminAddress(req),
+        ip: req.ip,
+        path: req.originalUrl || req.path,
+        correlationId: req.header('x-correlation-id') || undefined,
+      });
+      res.status(200).json({
+        vaultId: result.vaultId,
+        before: result.before,
+        after: result.after,
+        totalWeight: result.totalWeight,
+        weights: result.weights,
+      });
+    } catch (error) {
+      if (error instanceof InvalidRebalanceTargetError) {
+        res.status(400).json({ error: 'Bad Request', status: 400, code: error.code, reason: error.reason, message: error.message });
+        return;
+      }
+      if (error instanceof VaultNotRebalanceableError) {
+        res.status(404).json({ error: 'Not Found', status: 404, code: error.code, message: error.message });
+        return;
+      }
+      if (error instanceof RebalanceConflictError) {
+        res.status(409).json({ error: 'Conflict', status: 409, code: error.code, message: error.message });
+        return;
+      }
+      logger.error('Failed to change strategy weights', {
+        vaultId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: 'Internal Server Error', status: 500, message: 'Failed to change strategy weights' });
+    }
+  },
+);
 
 /**
  * GET /admin/audit-logs - list admin audit entries (Issue #253)

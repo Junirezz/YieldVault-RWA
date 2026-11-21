@@ -32,6 +32,7 @@
 
 import Decimal from 'decimal.js';
 import { prisma } from '../prisma';
+import { appendAuditLogEntry } from '../auditLog';
 import { logger } from '../middleware/structuredLogging';
 import {
   rebalanceSerializationRetryTotal,
@@ -58,10 +59,31 @@ export interface RebalanceResult {
   weights: RebalanceAllocationResult[];
   /** Sum of the persisted weights. Guaranteed within `WEIGHT_SUM_TOLERANCE` of 100. */
   totalWeight: number;
+  /** Strategy weights as they were before this change (strategyId -> %), read inside the transaction. */
+  before: Record<string, number>;
+  /** Strategy weights after this change (strategyId -> %). Strategies not listed are retired (0%). */
+  after: Record<string, number>;
   /** Number of transaction attempts made (1 = no retry). */
   attempts: number;
   /** True when the first attempt lost a serialization race and was retried. */
   retried: boolean;
+}
+
+/** Who is making a weight change, for the audit trail (#1728). */
+export interface WeightChangeAuditContext {
+  actor: string;
+  ip?: string;
+  path?: string;
+  correlationId?: string;
+}
+
+export const WEIGHT_CHANGED_AUDIT_ACTION = 'vault.strategy_weights.changed';
+export const WEIGHT_REJECTED_AUDIT_ACTION = 'vault.strategy_weights.rejected';
+
+function weightMap(targets: RebalanceTarget[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of targets) out[t.strategyId] = t.weight;
+  return out;
 }
 
 /** Per-vault allocation state, read outside any write transaction. */
@@ -417,10 +439,15 @@ async function applyRebalance(
     totalWeight: weights.reduce((sum, row) => sum + row.weight, 0),
   });
 
+  const before: Record<string, number> = {};
+  for (const row of current) before[row.strategyId] = row.weight;
+
   return {
     vaultId,
     weights,
     totalWeight: weights.reduce((sum, row) => sum + row.weight, 0),
+    before,
+    after: weightMap(targets),
     attempts: 1,
     retried: false,
   };
@@ -440,10 +467,31 @@ async function applyRebalance(
  */
 export async function rebalanceVaultAllocations(
   vaultId: string,
-  targets: RebalanceTarget[]
+  targets: RebalanceTarget[],
+  audit?: WeightChangeAuditContext
 ): Promise<RebalanceResult> {
   // Fail fast on a malformed request so it never contends for a write lock.
-  validateTargetWeights(targets);
+  try {
+    validateTargetWeights(targets);
+  } catch (err) {
+    if (audit && err instanceof InvalidRebalanceTargetError) {
+      appendAuditLogEntry({
+        actor: audit.actor,
+        action: WEIGHT_REJECTED_AUDIT_ACTION,
+        path: audit.path ?? `/admin/vaults/${vaultId}/allocations`,
+        statusCode: 400,
+        ip: audit.ip,
+        correlationId: audit.correlationId,
+        metadata: {
+          vaultId,
+          requested: weightMap(targets),
+          reason: err.reason,
+          message: err.message,
+        },
+      });
+    }
+    throw err;
+  }
 
   const limit = maxAttempts();
   let lastError: unknown;
@@ -461,7 +509,26 @@ export async function rebalanceVaultAllocations(
 
       rebalanceTotal.inc({ operation: 'rebalance', outcome: attempt === 1 ? 'ok' : 'ok_after_retry' });
 
-      return { ...result, attempts: attempt, retried: attempt > 1 };
+      const final = { ...result, attempts: attempt, retried: attempt > 1 };
+
+      if (audit) {
+        appendAuditLogEntry({
+          actor: audit.actor,
+          action: WEIGHT_CHANGED_AUDIT_ACTION,
+          path: audit.path ?? `/admin/vaults/${vaultId}/allocations`,
+          statusCode: 200,
+          ip: audit.ip,
+          correlationId: audit.correlationId,
+          metadata: {
+            vaultId,
+            before: final.before,
+            after: final.after,
+            totalWeight: final.totalWeight,
+          },
+        });
+      }
+
+      return final;
     } catch (err) {
       if (!isSerializationFailure(err)) {
         rebalanceTotal.inc({ operation: 'rebalance', outcome: 'error' });

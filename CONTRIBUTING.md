@@ -10,6 +10,7 @@ Welcome to the YieldVault-RWA project. This guide outlines how to set up your en
 - [Testing Requirements](#testing-requirements)
 - [Pull Request Process](#pull-request-process)
 - [Review Expectations](#review-expectations)
+- [Writing Good Issues](#writing-good-issues)
 - [Release Cycle](#release-cycle)
 
 ## Setup
@@ -78,7 +79,7 @@ npm run dev
 
 ### Before You Start
 
-1. Check the [Roadmap](#roadmap) to understand current priorities
+1. Check the [Roadmap](ROADMAP.md) to understand current priorities
 2. Review existing issues and pull requests to avoid duplication
 3. Ask in discussions if your feature is significant or aligns with current direction
 
@@ -284,6 +285,37 @@ Use our [PR template](./.github/PULL_REQUEST_TEMPLATE.md):
 - Use "Request Changes" only for critical issues
 
 See [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) for sensitive review guidelines.
+
+## Writing Good Issues
+
+A clear title and the right labels get an issue triaged in minutes instead of days. Search existing issues first, then use the closest [issue template](.github/ISSUE_TEMPLATE).
+
+### Titles
+
+Use `[area] short imperative summary`:
+
+- **`[area]`** is where the change lands: `backend`, `frontend`, `contract`, `infra`, `docs`, `ci`.
+- **Summary** starts with a verb (`add`, `fix`, `remove`, `return`, ...), says what should change, and stays under about 70 characters. Put detail in the body, not the title.
+
+| Good | Bad | Why |
+|---|---|---|
+| `[backend] return 404 instead of 500 for unknown vault id` | `vault bug` | Names the area, the behavior, and the expected outcome |
+| `[frontend] announce deposit errors to screen readers` | `[frontend] accessibility problems!!` | One concrete change, not a vague complaint |
+| `[contract] reject rebalance weights that do not sum to 100%` | `contract stuff is broken, please fix ASAP` | Imperative and specific; urgency belongs in the severity label |
+
+### Labels
+
+Every issue gets one **type** label, at least one **scope/area** label, and a status. Templates apply `status: needs-triage` automatically. Severity and the full area list are defined in [TRIAGE_LABELS.md](TRIAGE_LABELS.md).
+
+| Primary label | Use it when |
+|---|---|
+| `type: bug` | Something that used to work, or should work, is wrong (include reproduction steps and expected vs actual behavior) |
+| `type: feature` | New capability or an enhancement to existing behavior |
+| `type: chore` | Maintenance, refactoring, CI, tooling, dependency updates, **and documentation changes** |
+| `type: perf` | Latency, memory, or throughput regression (include numbers) |
+| `type: security` | Vulnerability or hardening. Report real vulnerabilities privately via [SECURITY.md](SECURITY.md), not a public issue |
+
+Add `scope: backend`, `scope: frontend`, `scope: contracts`, or `scope: infra` for the affected component, and `good-first-issue` if the scope is small and the acceptance criteria are clear.
 
 ## Release Cycle
 
