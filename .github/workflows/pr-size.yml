@@ -1,0 +1,167 @@
+name: PR Size Check
+
+# Advisory-only PR size reporting. This workflow never fails a build and never
+# blocks a merge: it reports changed-line and file counts so reviewers can spot
+# oversized pull requests. See the "PR Size Guideline" in CONTRIBUTING.md for the
+# guideline thresholds and the exception process.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-size:
+    name: Report PR Size (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed lines and file counts
+        id: size
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          MAX_LINES=1000
+          MAX_FILES=50
+
+          # Generated, vendored, and lock files are excluded from the size budget.
+          EXCLUDE_RE='(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock)$|\.lock$|\.min\.(js|css)$|(^|/)(dist|build|coverage|node_modules|\.next|target)/|^backend/openapi\.json$|^backend/schema-snapshots/|^docs/schemas/webhooks/|^contracts/bridge-compat/abi_snapshot\.json$|^contracts/vault/benches/baseline\.json$'
+
+          # fetch-depth: 0 already fetched all branches; this is a best-effort guard.
+          git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
+
+          # numstat prints "<added>\t<deleted>\t<path>" per changed file. The
+          # three-dot diff compares against the merge base, matching the PR view.
+          git diff --numstat "origin/${BASE_REF}...HEAD" > /tmp/numstat.txt || true
+
+          total_lines=0
+          included_files=0
+          excluded_files=0
+
+          while IFS=$'\t' read -r added deleted path; do
+            [ -z "${path:-}" ] && continue
+            if echo "$path" | grep -Eq "$EXCLUDE_RE"; then
+              excluded_files=$((excluded_files + 1))
+              continue
+            fi
+            [ "$added" = "-" ] && added=0
+            [ "$deleted" = "-" ] && deleted=0
+            total_lines=$((total_lines + added + deleted))
+            included_files=$((included_files + 1))
+          done < /tmp/numstat.txt
+
+          exempt="${{ contains(github.event.pull_request.labels.*.name, 'size:exception') }}"
+
+          exceeded=false
+          if [ "$total_lines" -gt "$MAX_LINES" ] || [ "$included_files" -gt "$MAX_FILES" ]; then
+            exceeded=true
+          fi
+
+          {
+            echo "max_lines=$MAX_LINES"
+            echo "max_files=$MAX_FILES"
+            echo "changed_lines=$total_lines"
+            echo "changed_files=$included_files"
+            echo "excluded_files=$excluded_files"
+            echo "exceeded=$exceeded"
+            echo "exempt=$exempt"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$exceeded" = "true" ] && [ "$exempt" != "true" ]; then
+            echo "::warning title=Large PR::This PR changes ${total_lines} lines across ${included_files} files (guideline: ${MAX_LINES} lines / ${MAX_FILES} files). This is an advisory warning only and does not block the merge."
+          fi
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## 📏 PR Size Report (advisory)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| Changed lines (additions + deletions) | ${{ steps.size.outputs.changed_lines }} |"
+            echo "| Changed files | ${{ steps.size.outputs.changed_files }} |"
+            echo "| Excluded generated/lock files | ${{ steps.size.outputs.excluded_files }} |"
+            echo "| Guideline | ≤ ${{ steps.size.outputs.max_lines }} lines and ≤ ${{ steps.size.outputs.max_files }} files |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.size.outputs.exempt }}" = "true" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "✅ Exempt via the \`size:exception\` label." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.size.outputs.exceeded }}" = "true" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ This PR exceeds the recommended size. This warning is **advisory only** and does not block the merge. See the PR Size Guideline in CONTRIBUTING.md for the exception process." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "✅ Within the recommended size." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post advisory comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          CHANGED_LINES: ${{ steps.size.outputs.changed_lines }}
+          CHANGED_FILES: ${{ steps.size.outputs.changed_files }}
+          EXCLUDED_FILES: ${{ steps.size.outputs.excluded_files }}
+          MAX_LINES: ${{ steps.size.outputs.max_lines }}
+          MAX_FILES: ${{ steps.size.outputs.max_files }}
+          EXCEEDED: ${{ steps.size.outputs.exceeded }}
+          EXEMPT: ${{ steps.size.outputs.exempt }}
+        with:
+          script: |
+            const marker = '<!-- pr-size-report -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            let status;
+            if (process.env.EXEMPT === 'true') {
+              status = '✅ Exempt — this PR carries the `size:exception` label.';
+            } else if (process.env.EXCEEDED === 'true') {
+              status = '⚠️ This PR exceeds the recommended size. **This is an advisory warning and does not block the merge.** Consider splitting it, or follow the exception process in `CONTRIBUTING.md`.';
+            } else {
+              status = '✅ Within the recommended size.';
+            }
+
+            const body = [
+              marker,
+              '## 📏 PR Size Report',
+              '',
+              '| Metric | Value |',
+              '| --- | --- |',
+              `| Changed lines (additions + deletions) | ${process.env.CHANGED_LINES} |`,
+              `| Changed files | ${process.env.CHANGED_FILES} |`,
+              `| Excluded generated/lock files | ${process.env.EXCLUDED_FILES} |`,
+              `| Guideline | ≤ ${process.env.MAX_LINES} lines and ≤ ${process.env.MAX_FILES} files |`,
+              '',
+              status,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
