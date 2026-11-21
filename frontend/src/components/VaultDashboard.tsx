@@ -704,6 +704,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       transactionIntent.clearIntent();
       staleGuard.refreshSnapshot();
       setRetryCount(0);
+      
+      // Explicitly trigger a vault refresh to ensure TVL and other metrics are updated
+      // after the transaction is finalized.
+      void refresh();
 
       setTransactionResult({
         success: true,

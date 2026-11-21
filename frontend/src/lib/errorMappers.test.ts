@@ -1,7 +1,70 @@
-import { describe, it, expect } from "vitest";
-import { mapServerError } from "./errorMappers";
+import { describe, it, expect, vi } from "vitest";
+import { mapServerError, mapTransactionError } from "./errorMappers";
 
 describe("Error Mappers", () => {
+  describe("mapTransactionError", () => {
+    it("maps known numeric contract error codes", () => {
+      const error = { serverCode: "2" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("insufficientShares");
+      expect(result.retryable).toBe(false);
+      expect(result.technicalCode).toBe("2");
+    });
+
+    it("maps known string contract error names", () => {
+      const error = { code: "ContractPaused" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("contractPaused");
+      expect(result.retryable).toBe(false);
+      expect(result.technicalCode).toBe("ContractPaused");
+    });
+
+    it("maps user-cap errors correctly", () => {
+      const error = { serverCode: "5" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("exceedsUserCap");
+    });
+
+    it("maps timelock errors correctly", () => {
+      const error = { serverCode: "7" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("timelockActive");
+    });
+
+    it("falls back to regex for wallet rejections", () => {
+      const error = { message: "User rejected the transaction" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("walletRejected");
+      expect(result.retryable).toBe(true);
+    });
+
+    it("falls back to regex for network issues", () => {
+      const error = { message: "Failed to fetch from RPC" };
+      const result = mapTransactionError(error);
+      expect(result.kind).toBe("network");
+      expect(result.retryable).toBe(true);
+    });
+
+    it("categorizes unknown codes as 'unknown' and logs them", () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const error = { serverCode: "999" };
+      const result = mapTransactionError(error);
+      
+      expect(result.kind).toBe("unknown");
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Unmapped transaction error code: 999"),
+        error
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("includes correlation IDs in the mapped result", () => {
+      const error = { correlationId: "corr-123", serverCode: "4" };
+      const result = mapTransactionError(error);
+      expect(result.supportReference).toBe("corr-123");
+    });
+  });
+
   describe("mapServerError", () => {
     it("maps field-level errors from server response", () => {
       const error = {

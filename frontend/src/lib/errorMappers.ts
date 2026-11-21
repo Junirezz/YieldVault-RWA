@@ -44,7 +44,35 @@ export type TransactionErrorKind =
   | "insufficientFunds"
   | "contractState"
   | "validation"
-  | "unknown";
+  | "unknown"
+  | "insufficientShares"
+  | "contractPaused"
+  | "exceedsUserCap"
+  | "minDepositNotMet"
+  | "timelockActive"
+  | "noPendingWithdrawal"
+  | "slippageExceeded"
+  | "withdrawalCooldown";
+
+/** Central mapping of Soroban contract error codes to friendly UI kinds. */
+const CONTRACT_ERROR_MAP: Record<string, TransactionErrorKind> = {
+  "2": "insufficientShares",
+  InsufficientShares: "insufficientShares",
+  "4": "contractPaused",
+  ContractPaused: "contractPaused",
+  "5": "exceedsUserCap",
+  ExceedsUserCap: "exceedsUserCap",
+  "6": "minDepositNotMet",
+  MinDepositNotMet: "minDepositNotMet",
+  "7": "timelockActive",
+  TimelockNotExpired: "timelockActive",
+  "8": "noPendingWithdrawal",
+  NoPendingWithdrawal: "noPendingWithdrawal",
+  "12": "withdrawalCooldown",
+  WithdrawalCooldownActive: "withdrawalCooldown",
+  "15": "slippageExceeded",
+  SlippageExceeded: "slippageExceeded",
+};
 
 export interface MappedTransactionError {
   kind: TransactionErrorKind;
@@ -55,27 +83,49 @@ export interface MappedTransactionError {
 
 /** Classify wallet/RPC/contract failures without exposing raw provider text. */
 export function mapTransactionError(error: unknown): MappedTransactionError {
-  const apiError = error && typeof error === "object"
-    ? error as { code?: string; serverCode?: string; serverError?: string; message?: string; retryable?: boolean; correlationId?: string; traceId?: string }
-    : undefined;
-  const raw = [apiError?.serverCode, apiError?.serverError, apiError?.message]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+  const apiError =
+    error && typeof error === "object"
+      ? (error as {
+          code?: string;
+          serverCode?: string;
+          serverError?: string;
+          message?: string;
+          retryable?: boolean;
+          correlationId?: string;
+          traceId?: string;
+        })
+      : undefined;
+
   const technicalCode = apiError?.serverCode || apiError?.code;
   const supportReference = apiError?.correlationId || apiError?.traceId;
-  const result = (kind: TransactionErrorKind, retryable: boolean): MappedTransactionError => ({
+  const result = (
+    kind: TransactionErrorKind,
+    retryable: boolean,
+  ): MappedTransactionError => ({
     kind,
     retryable,
     technicalCode,
     supportReference,
   });
 
+  // 1. Check central contract error map first for precise matches
+  if (technicalCode && CONTRACT_ERROR_MAP[technicalCode]) {
+    return result(CONTRACT_ERROR_MAP[technicalCode], false);
+  }
+
+  const raw = [apiError?.serverCode, apiError?.serverError, apiError?.message]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  // 2. Fall back to regex-based classification for broader categories
   if (/reject|denied|cancel|declin/.test(raw)) return result("walletRejected", true);
   if (/permission|unauthori[sz]|not allowed|wallet.*(locked|disconnected)/.test(raw)) {
     return result("walletPermission", true);
   }
   if (/insufficient|not enough|balance|funds|liquidity/.test(raw)) {
+    // If it's a balance issue but not specifically mapped to a contract code,
+    // we still categorize it generally.
     return result("insufficientFunds", false);
   }
   if (/network|timeout|rpc|service unavailable|fetch failed|gateway/.test(raw)) {
@@ -91,6 +141,11 @@ export function mapTransactionError(error: unknown): MappedTransactionError {
     return result("walletPermission", false);
   }
   if (apiError?.retryable === true) return result("network", true);
+
+  // 3. Fallback to generic unknown error
+  if (technicalCode) {
+    console.warn(`Unmapped transaction error code: ${technicalCode}`, error);
+  }
   return result("unknown", false);
 }
 
