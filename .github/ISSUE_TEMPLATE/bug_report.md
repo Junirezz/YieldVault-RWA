@@ -6,6 +6,9 @@ labels: 'type: bug, status: needs-triage'
 assignees: ''
 ---
 
+> Title format: `[area] short imperative summary`. See [Writing Good Issues](../../CONTRIBUTING.md#writing-good-issues) for titles and labels.
+
+
 ## 🐛 Summary
 Provide a short summary of the defect and its impact on users, workflows, or system behavior.
 

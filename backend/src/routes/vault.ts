@@ -11,6 +11,7 @@ import { computeVaultApy } from '../services/apy';
 import { createTimeoutFor } from '../middleware/timeoutMiddleware';
 import { healthProbeService } from '../healthProbe';
 import { readsLimiter } from '../rateLimiter';
+import { buildRiskLimitsResponse } from '../riskLimits';
 
 const cacheVaultMetricsTtl = parseInt(process.env.CACHE_TTL_MS || process.env.CACHE_VAULT_METRICS_TTL_MS || '60000', 10);
 
@@ -81,6 +82,16 @@ router.get('/api/vault/apy', (_req: Request, res: Response) => {
 });
 
 // â”€â”€â”€ Versioned vault summary/metrics/apy endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+/**
+ * GET /api/v1/vault/risk-limits - read-only view of the active protocol risk
+ * limits and exposure caps (TVL cap, concentration, deployed capital, stress
+ * mode). Resolved per request so it reflects the live configuration (#1729).
+ */
+router.get('/api/v1/vault/risk-limits', readsLimiter, (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).json(buildRiskLimitsResponse());
+});
 
 /**
  * GET /api/v1/vaults/:id/health - monitoring-friendly vault health payload.

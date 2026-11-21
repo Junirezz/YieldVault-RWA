@@ -71,6 +71,18 @@ export const WebhookListQuerySchema = PaginationQuerySchema.extend({
   end: z.string().optional(),
 }).passthrough();
 
+/** Body of PUT /admin/vaults/:id/allocations (#1728). Sum-to-100 is enforced by the service. */
+export const StrategyWeightsBodySchema = z.object({
+  weights: z
+    .array(
+      z.object({
+        strategyId: z.string().trim().min(1, 'strategyId is required'),
+        weight: z.number(),
+      }),
+    )
+    .min(1, 'weights must contain at least one strategy'),
+});
+
 export const IdParamSchema = z.object({
   id: z
     .string()

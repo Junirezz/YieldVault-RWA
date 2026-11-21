@@ -6,6 +6,9 @@ labels: 'type: chore, status: needs-triage'
 assignees: ''
 ---
 
+> Title format: `[area] short imperative summary`. See [Writing Good Issues](../../CONTRIBUTING.md#writing-good-issues) for titles and labels.
+
+
 ## 📋 Task Summary
 Describe the technical task, maintenance work, or documentation update required.
 
