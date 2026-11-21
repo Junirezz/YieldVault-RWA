@@ -923,6 +923,11 @@ export const en = {
     closeQuickActionsAria: "Close quick actions",
     activityLabel: "Activity",
   },
+  yieldBreakdownChart: {
+    loadingAnnouncement: "Loading yield breakdown data",
+    errorTitle: "Unable to load yield data",
+    errorDesc: "We could not load your yield breakdown. Please try again.",
+  },
   vaultPerformanceChart: {
     title: "Vault Performance",
     subtitle: "yvUSDC share price index (100 = baseline)",

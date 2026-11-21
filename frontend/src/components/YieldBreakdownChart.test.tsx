@@ -63,6 +63,40 @@ describe("YieldBreakdownChart", () => {
     expect(screen.getByText(/no yield data yet/i)).toBeInTheDocument();
   });
 
+  it("shows an accessible skeleton while loading and replaces it with the chart", () => {
+    const { rerender } = render(
+      <YieldBreakdownChart totalGain={1000} isLoading />,
+    );
+
+    expect(screen.getByTestId("yield-chart-area").style.height).toBe("220px");
+    expect(screen.getByTestId("skeleton-chart")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /loading yield breakdown data/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("responsive-container")).not.toBeInTheDocument();
+
+    rerender(<YieldBreakdownChart totalGain={1000} />);
+
+    expect(screen.queryByTestId("skeleton-chart")).not.toBeInTheDocument();
+    expect(screen.getByTestId("responsive-container")).toBeInTheDocument();
+    expect(screen.getByTestId("yield-chart-area").style.height).toBe("220px");
+  });
+
+  it("shows a retryable error state when the chart data fails to load", () => {
+    const onRetry = vi.fn();
+    render(
+      <YieldBreakdownChart totalGain={1000} isError onRetry={onRetry} />,
+    );
+
+    expect(screen.getByTestId("chart-placeholder-error")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert").length).toBeGreaterThan(0);
+    expect(screen.getByText(/unable to load yield data/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("responsive-container")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the period total consistent regardless of point-sampling for rendering", () => {
     // The chart downsamples the rendered series for long ranges (see sampleChartSeries),
     // but the displayed total must reflect the full underlying dataset, not the

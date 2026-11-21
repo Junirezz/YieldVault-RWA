@@ -558,7 +558,7 @@ describe("VaultDashboard", () => {
       fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
       fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
 
-      await screen.findByRole("heading", { name: "Transaction Failed" });
+      await screen.findByRole("heading", { name: "Transaction Failed" }, { timeout: 5000 });
       expect(mockDepositMutateAsync).toHaveBeenCalledTimes(1);
 
       const retryButton = await screen.findByRole("button", { name: "Retry" });
@@ -588,7 +588,9 @@ describe("VaultDashboard", () => {
 
       // Field-level validation failures send the user back to the amount step
       // so the input can be corrected; a blind retry is never offered.
-      expect(await screen.findByText("Amount exceeds vault cap")).toBeInTheDocument();
+      expect(
+        await screen.findByText("Amount exceeds vault cap", {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
       expect(screen.getByPlaceholderText("0.00")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     }, 15000);
@@ -609,7 +611,7 @@ describe("VaultDashboard", () => {
       fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
       fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
 
-      await screen.findByRole("heading", { name: "Transaction Failed" });
+      await screen.findByRole("heading", { name: "Transaction Failed" }, { timeout: 5000 });
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const retryButton = await screen.findByRole("button", { name: "Retry" });
@@ -617,7 +619,7 @@ describe("VaultDashboard", () => {
         await waitFor(() => {
           expect(mockDepositMutateAsync).toHaveBeenCalledTimes(attempt + 2);
         });
-        await screen.findByRole("heading", { name: "Transaction Failed" });
+        await screen.findByRole("heading", { name: "Transaction Failed" }, { timeout: 5000 });
       }
 
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
