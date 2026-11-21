@@ -613,6 +613,211 @@ fn test_withdraw_from_zero_balance_returns_error() {
     assert!(result.is_err());
 }
 
+// ─── 3b. withdrawable_assets view function (#1730) ───────────────────────────
+
+#[test]
+fn test_withdrawable_assets_typical_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &200);
+    usdc_sa.mint(&admin, &100);
+
+    vault.deposit(&user, &200);
+    vault.accrue_yield(&100); // 300 assets / 200 shares => 1.5 assets per share
+
+    // Quote 100 shares -> expected 150 assets
+    let quoted = vault.withdrawable_assets(&user, &100);
+    assert_eq!(quoted, 150);
+
+    // Also verify compute_withdrawable_assets alias produces identical quote
+    let quoted_alias = vault.compute_withdrawable_assets(&user, &100);
+    assert_eq!(quoted_alias, 150);
+
+    // Verify real withdrawal produces byte-for-byte identical assets to the quote
+    let received = vault.withdraw(&user, &100);
+    assert_eq!(received, quoted);
+    assert_eq!(received, 150);
+    assert_eq!(usdc.balance(&user), 150);
+    assert_eq!(vault.balance(&user), 100);
+
+    // Remaining 100 shares quote: 100 * 150 / 100 = 150 assets
+    let quoted_remaining = vault.withdrawable_assets(&user, &50);
+    assert_eq!(quoted_remaining, 75);
+    let received_remaining = vault.withdraw(&user, &50);
+    assert_eq!(received_remaining, quoted_remaining);
+}
+
+#[test]
+fn test_withdrawable_assets_is_read_only_and_preserves_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &300);
+    usdc_sa.mint(&admin, &100);
+
+    vault.deposit(&user, &300);
+    vault.accrue_yield(&100);
+
+    let balance_before = vault.balance(&user);
+    let total_shares_before = vault.total_shares();
+    let total_assets_before = vault.total_assets();
+    let user_token_before = usdc.balance(&user);
+    let vault_token_before = usdc.balance(&vault.address);
+
+    // Call view function multiple times
+    let q1 = vault.withdrawable_assets(&user, &100);
+    let q2 = vault.withdrawable_assets(&user, &100);
+    let q3 = vault.compute_withdrawable_assets(&user, &100);
+    assert_eq!(q1, q2);
+    assert_eq!(q2, q3);
+
+    // Assert zero mutations occurred
+    assert_eq!(vault.balance(&user), balance_before);
+    assert_eq!(vault.total_shares(), total_shares_before);
+    assert_eq!(vault.total_assets(), total_assets_before);
+    assert_eq!(usdc.balance(&user), user_token_before);
+    assert_eq!(usdc.balance(&vault.address), vault_token_before);
+}
+
+#[test]
+fn test_withdrawable_assets_rejects_zero_and_negative_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &100);
+    vault.deposit(&user, &100);
+
+    // Zero shares must be rejected with InvalidAmount
+    let res_zero = vault.try_withdrawable_assets(&user, &0);
+    assert_eq!(res_zero, Err(Ok(VaultError::InvalidAmount)));
+
+    let res_zero_alias = vault.try_compute_withdrawable_assets(&user, &0);
+    assert_eq!(res_zero_alias, Err(Ok(VaultError::InvalidAmount)));
+
+    // Negative shares must be rejected with InvalidAmount
+    let res_neg = vault.try_withdrawable_assets(&user, &-1);
+    assert_eq!(res_neg, Err(Ok(VaultError::InvalidAmount)));
+
+    let res_min = vault.try_withdrawable_assets(&user, &i128::MIN);
+    assert_eq!(res_min, Err(Ok(VaultError::InvalidAmount)));
+}
+
+#[test]
+fn test_withdrawable_assets_rejects_above_balance_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &100);
+    vault.deposit(&user, &100);
+
+    // Slightly above balance
+    let res_above = vault.try_withdrawable_assets(&user, &101);
+    assert_eq!(res_above, Err(Ok(VaultError::InsufficientShares)));
+
+    let res_above_alias = vault.try_compute_withdrawable_assets(&user, &101);
+    assert_eq!(res_above_alias, Err(Ok(VaultError::InsufficientShares)));
+
+    // Significantly above balance / i128::MAX
+    let res_max = vault.try_withdrawable_assets(&user, &i128::MAX);
+    assert_eq!(res_max, Err(Ok(VaultError::InsufficientShares)));
+
+    // User with zero shares
+    let other_user = Address::generate(&env);
+    let res_zero_user = vault.try_withdrawable_assets(&other_user, &1);
+    assert_eq!(res_zero_user, Err(Ok(VaultError::InsufficientShares)));
+}
+
+#[test]
+fn test_withdrawable_assets_dust_values_and_rounding() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    let whale = Address::generate(&env);
+
+    // User deposits 10 shares, whale deposits 990 shares (total 1000 shares)
+    usdc_sa.mint(&user, &10);
+    usdc_sa.mint(&whale, &990);
+    vault.deposit(&user, &10);
+    vault.deposit(&whale, &990);
+
+    // Accrue yield of 500 (total_assets = 1500, total_shares = 1000)
+    // 1.5 assets per share
+    usdc_sa.mint(&admin, &500);
+    vault.accrue_yield(&500);
+
+    // Dust: quote 1 share -> 1 * 1500 / 1000 = 1 (rounds down from 1.5)
+    let quoted_dust = vault.withdrawable_assets(&user, &1);
+    assert_eq!(quoted_dust, 1);
+    // Real withdrawal must yield exact same round-down result
+    let actual_dust = vault.withdraw(&user, &1);
+    assert_eq!(actual_dust, quoted_dust);
+    assert_eq!(actual_dust, 1);
+
+    // Dust: quote 9 shares -> 9 * 1499 / 999 = 13491 / 999 = 13 (rounds down from 13.5)
+    let quoted_dust_9 = vault.withdrawable_assets(&user, &9);
+    let actual_dust_9 = vault.withdraw(&user, &9);
+    assert_eq!(actual_dust_9, quoted_dust_9);
+    assert_eq!(actual_dust_9, 13);
+
+    // Now test extreme dust rounding to zero:
+    // Create new vault scenario where 1 share value < 1 asset
+    let env2 = Env::default();
+    env2.mock_all_auths();
+    let (vault2, _, usdc_sa2, _) = setup_vault(&env2);
+    let user2 = Address::generate(&env2);
+    let whale2 = Address::generate(&env2);
+
+    usdc_sa2.mint(&user2, &10);
+    usdc_sa2.mint(&whale2, &10_000);
+    vault2.deposit(&user2, &10);
+    vault2.deposit(&whale2, &10_000);
+
+    // Simulate scenario: quote 1 share out of 10010 when total_assets is 10010
+    // 1 * 10010 / 10010 = 1
+    assert_eq!(vault2.withdrawable_assets(&user2, &1), 1);
+}
+
+#[test]
+fn test_withdrawable_assets_maximum_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    let large_deposit: i128 = 10_000_000_000_000; // 10T units
+    usdc_sa.mint(&user, &large_deposit);
+    usdc_sa.mint(&admin, &5_000_000_000_000);
+
+    vault.deposit(&user, &large_deposit);
+    vault.accrue_yield(&5_000_000_000_000);
+
+    // Full balance withdrawal quote (shares == user_shares)
+    let quoted_max = vault.withdrawable_assets(&user, &large_deposit);
+    let expected_max = 15_000_000_000_000;
+    assert_eq!(quoted_max, expected_max);
+
+    // Real withdrawal matches full balance quote
+    let actual_max = vault.withdraw(&user, &large_deposit);
+    assert_eq!(actual_max, quoted_max);
+    assert_eq!(actual_max, expected_max);
+    assert_eq!(vault.balance(&user), 0);
+
+    // Once drained, even 1 share is rejected as InsufficientShares
+    let res_drained = vault.try_withdrawable_assets(&user, &1);
+    assert_eq!(res_drained, Err(Ok(VaultError::InsufficientShares)));
+}
+
 // ─── 4. accrue_yield ─────────────────────────────────────────────────────────
 
 #[test]

@@ -3,7 +3,6 @@ use crate::upgrade::{get_admin, is_initialized, PendingUpgrade, IMPLEMENTATION_S
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::{
     symbol_short, Address, BytesN, Env, IntoVal, String as SorobanString, TryFromVal,
-}
 };
 
 #[test]
