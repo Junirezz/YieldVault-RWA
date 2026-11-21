@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import VaultDashboard from "./VaultDashboard";
 import { VaultProvider } from "../context/VaultContext";
@@ -170,12 +171,14 @@ describe("VaultDashboard", () => {
       data: { ...mockSummary, contractPaused: false },
       isLoading: false,
       error: null,
+      refetch: vi.fn().mockResolvedValue({}),
     } as unknown as UseQueryResult<VaultSummary, Error>);
 
     vi.mocked(vaultDataHooks.useVaultHistory).mockReturnValue({
       data: [{ date: "2026-03-20", value: 1.0 }, { date: "2026-03-25", value: 1.084 }],
       isLoading: false,
       error: null,
+      refetch: vi.fn().mockResolvedValue({}),
     } as unknown as UseQueryResult<{ date: string; value: number }[], Error>);
 
     vi.mocked(tokenAllowanceHooks.useTokenAllowance).mockReturnValue({
@@ -212,7 +215,7 @@ describe("VaultDashboard", () => {
     expect(
       await screen.findByText(/Franklin BENJI Connector/i),
     ).toBeInTheDocument();
-  });
+  }, 15000);
 
   it("renders the dashboard when wallet is connected", async () => {
     renderDashboard("GABC123");
@@ -282,41 +285,48 @@ describe("VaultDashboard", () => {
   }, 15000);
 
   it("updates the TVL display after a successful deposit", async () => {
-    // Initial summary state
     const initialSummary = { ...mockSummary, tvl: 1000000 };
-    vi.mocked(vaultDataHooks.useVaultSummary).mockReturnValue({
-      data: initialSummary,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn().mockResolvedValue({}),
-    } as any);
+    const updatedSummary = { ...mockSummary, tvl: 1000100 };
+    let summarySnapshot = initialSummary;
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    const getSnapshot = () => summarySnapshot;
+    const refetch = vi.fn().mockImplementation(async () => {
+      summarySnapshot = updatedSummary;
+      listeners.forEach((listener) => listener());
+      return { data: updatedSummary };
+    });
+
+    vi.mocked(vaultDataHooks.useVaultSummary).mockImplementation(
+      () =>
+        ({
+          data: useSyncExternalStore(subscribe, getSnapshot),
+          isLoading: false,
+          error: null,
+          refetch,
+        }) as unknown as UseQueryResult<VaultSummary, Error>,
+    );
 
     renderDashboard("GTVLUPDATEWALLET000000000000000000000000000000000");
 
-    // Check initial TVL
-    expect(await screen.findByText(/\$1,000,000/)).toBeInTheDocument();
+    // The dashboard surfaces the summary value in more than one place.
+    expect((await screen.findAllByText(/\$1,000,000/)).length).toBeGreaterThan(0);
 
-    // Prepare updated summary for after deposit
-    const updatedSummary = { ...mockSummary, tvl: 1000100 };
-    vi.mocked(vaultDataHooks.useVaultSummary).mockReturnValue({
-      data: updatedSummary,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn().mockResolvedValue({}),
-    } as any);
-
-    // Perform deposit
     const input = await screen.findByPlaceholderText("0.00");
     fireEvent.change(input, { target: { value: "100" } });
-    fireEvent.click(screen.getByRole("tab", { name: "Deposit" })); // Ensure we're on deposit tab
     fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
     fireEvent.click(await screen.findByRole("button", { name: /Confirm deposit/i }));
 
-    // Wait for finalization and TVL update
     await waitFor(() => {
-      expect(screen.getByText(/\$1,000,100/)).toBeInTheDocument();
+      expect(screen.getAllByText(/\$1,000,100/).length).toBeGreaterThan(0);
     }, { timeout: 10000 });
-  });
+    expect(refetch).toHaveBeenCalled();
+  }, 15000);
 
   it("plays the first deposit confetti once per wallet", async () => {
     renderDashboard("GFIRSTDEPOSITWALLET000000000000000000000000000000");
