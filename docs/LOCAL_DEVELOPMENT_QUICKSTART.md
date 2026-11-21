@@ -4,9 +4,12 @@ This guide documents the fastest supported way to boot the repository locally fo
 
 ## What You Need
 
-- Node.js 18+ and npm
+- Node.js 22 (the repository-pinned CI and local version)
+- npm and pnpm 9.12+
 - Rust and Cargo
 - `wasm32-unknown-unknown` Rust target for Soroban contract builds
+
+Run `nvm use` from the repository root to select the version recorded in `.nvmrc`.
 
 Optional:
 
@@ -138,6 +141,26 @@ Optional Terminal 3 for contract work:
 ```bash
 cargo test
 ```
+
+## Docker Compose Full Stack
+
+From the repository root, copy the environment templates and start Postgres,
+the backend, and the frontend development server:
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+docker compose up --build
+```
+
+Services:
+
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:3000/health`
+- Postgres: `localhost:5432`
+
+Stop and remove the containers with `docker compose down`. Use
+`docker compose down -v` to also remove the Postgres volume.
 
 ## Validation Checklist
 
