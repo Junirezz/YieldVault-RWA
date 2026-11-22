@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.1
     ports:
       - "9090:9090"
     volumes:
@@ -11,22 +11,37 @@ services:
       - monitoring
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+      - tempo
+    networks:
+      - monitoring
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "4318:4318" # OTLP HTTP
+      - "4317:4317" # OTLP gRPC
+      - "3200:3200" # Tempo query API (used by the Grafana datasource)
     networks:
       - monitoring
 
   # Local backend instance for the observability stack. Copy/adjust to your env.
   backend:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: Dockerfile
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -34,6 +49,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
     ports:
       - "3000:3000"
+    depends_on:
+      - tempo
     networks:
       - monitoring
 
