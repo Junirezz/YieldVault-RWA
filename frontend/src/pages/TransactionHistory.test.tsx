@@ -589,6 +589,40 @@ describe("TransactionHistory — Stellar Explorer link network", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
+
+  it("gives the explorer link a label that names the transaction, not just the truncated hash", async () => {
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: VALID_HASH, status: "completed" }),
+    ]);
+
+    renderPage(WALLET);
+
+    const link = await screen.findByTitle(VALID_HASH);
+    expect(link).toHaveAttribute(
+      "aria-label",
+      `View transaction ${VALID_HASH} on the Stellar explorer`,
+    );
+    // The visible text stays truncated for layout; the label carries the
+    // full hash so assistive technology announces something unambiguous.
+    expect(link).not.toHaveTextContent(VALID_HASH);
+  });
+
+  it("renders plain text rather than a dead link when the hash is not a valid hash", async () => {
+    const invalidHash = "not-a-valid-transaction-hash";
+    mockGetTransactions.mockResolvedValue([
+      makeTransaction({ transactionHash: invalidHash, status: "completed" }),
+    ]);
+
+    renderPage(WALLET);
+
+    const table = await screen.findByRole("table");
+    const cell = await within(table).findByTitle(invalidHash);
+
+    expect(cell.tagName).toBe("SPAN");
+    expect(within(table).queryByRole("link")).not.toBeInTheDocument();
+    // The row stays readable even though there is nowhere to navigate to.
+    expect(cell).toHaveTextContent("not-a-va...hash");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1080,9 +1114,11 @@ function makeSortFixtures(): Transaction[] {
 /** Hash cell text, in the order the table renders it. */
 function renderedHashPrefixes(): string[] {
   const table = screen.getByRole("table");
-  return within(table)
-    .getAllByRole("link")
-    .map((link) => link.getAttribute("title")?.slice(0, 3) ?? "");
+  // Selects every hash cell whether it rendered as a link or as plain text —
+  // an unparseable hash has no explorer URL, so it is not an <a>.
+  return Array.from(table.querySelectorAll("[data-tx-hash]")).map((cell) =>
+    (cell.getAttribute("data-tx-hash") ?? "").slice(0, 3),
+  );
 }
 
 function renderAt(initialEntries: string[], walletAddress = WALLET) {
