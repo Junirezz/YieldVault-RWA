@@ -399,7 +399,6 @@ pub struct StrategyProposal {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
 /// Pending large withdrawal with 24-hour timelock.
 ///
 /// ## Share Price Behavior
@@ -881,6 +880,9 @@ impl YieldVault {
                 .get(&DataKey::LastStrategySwitchTime)
                 .unwrap_or(0);
             let earliest_switch = last_switch.saturating_add(cooldown);
+            if env.ledger().timestamp() < earliest_switch {
+                return Err(VaultError::AdminParamChangeTooSoon);
+            }
         }
 
         let current_strategy = Self::strategy(env.clone());
@@ -2551,6 +2553,49 @@ impl YieldVault {
             .map_err(|_| VaultError::MathOverflow)
     }
 
+    /// Returns the assets obtainable for a specified number of shares for `user`.
+    ///
+    /// Exposes a read-only view quoting the withdrawable underlying assets without
+    /// requiring caller authorization or mutating contract state. Uses the exact same
+    /// conversion path, deterministic round-down rounding policy, and fee deductions
+    /// (none) as [`Self::withdraw`].
+    ///
+    /// ### Parameters
+    /// * `user` - The address of the share holder whose share balance is checked.
+    /// * `shares` - The number of shares to quote withdrawal for.
+    ///
+    /// ### Returns
+    /// The quantity of underlying tokens that would be returned for `shares`.
+    ///
+    /// ### Errors
+    /// * [`VaultError::InvalidAmount`] - if `shares` is zero or negative.
+    /// * [`VaultError::InsufficientShares`] - if `shares` exceeds `user`'s share balance.
+    /// * [`VaultError::MathOverflow`] - if arithmetic overflow occurs during conversion.
+    pub fn withdrawable_assets(env: Env, user: Address, shares: i128) -> Result<i128, VaultError> {
+        if shares <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        let user_shares: i128 = Self::get_share_balance(&env, &user);
+        if user_shares < shares {
+            return Err(VaultError::InsufficientShares);
+        }
+
+        let state = Self::get_state(&env);
+        let total_assets = Self::total_assets(env)?;
+        crate::math::try_shares_to_assets(shares, state.total_shares, total_assets)
+            .map_err(|_| VaultError::MathOverflow)
+    }
+
+    /// Alias for [`Self::withdrawable_assets`] to compute withdrawable assets for a given share amount.
+    pub fn compute_withdrawable_assets(
+        env: Env,
+        user: Address,
+        shares: i128,
+    ) -> Result<i128, VaultError> {
+        Self::withdrawable_assets(env, user, shares)
+    }
+
     /// Deposits underlying tokens in exchange for vault shares.
     ///
     /// ### Parameters
@@ -3277,11 +3322,6 @@ impl YieldVault {
         .map_err(|_| VaultError::MathOverflow)?;
 
         Self::do_withdraw(&env, &mut state, user, pending.shares, assets_to_return)
-    }
-
-    /// Returns the pending large withdrawal for `user`, if one exists.
-    pub fn pending_withdrawal(env: Env, user: Address) -> Option<PendingWithdrawal> {
-        env.storage().instance().get(&DataKey::PendingWithdrawal(user))
     }
 
     /// Cancel a pending large withdrawal before its timelock expires.
