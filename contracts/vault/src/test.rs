@@ -2601,6 +2601,158 @@ fn test_whitelist_toggle_multiple_strategies() {
     assert!(vault.is_strategy_whitelisted(&strategy3));
 }
 
+// ─── list_whitelisted_strategies (#1738) ─────────────────────────────────────
+
+#[test]
+fn test_list_whitelisted_strategies_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+
+    assert_eq!(vault.list_whitelisted_strategies().len(), 0);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_single_entry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.whitelist_strategy(&strategy, &true);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list.get(0).unwrap(), strategy);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_multiple_entries_in_registration_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let s3 = Address::generate(&env);
+
+    vault.whitelist_strategy(&s2, &true);
+    vault.whitelist_strategy(&s3, &true);
+    vault.whitelist_strategy(&s1, &true);
+    // Re-adding is idempotent and must not duplicate or reorder.
+    vault.whitelist_strategy(&s3, &true);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list.get(0).unwrap(), s2);
+    assert_eq!(list.get(1).unwrap(), s3);
+    assert_eq!(list.get(2).unwrap(), s1);
+    // Deterministic: repeated reads return the identical sequence.
+    assert_eq!(vault.list_whitelisted_strategies(), list);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_add_remove_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let s3 = Address::generate(&env);
+
+    vault.whitelist_strategy(&s1, &true);
+    vault.whitelist_strategy(&s2, &true);
+    vault.whitelist_strategy(&s3, &true);
+
+    // Remove the middle entry; remaining order is preserved.
+    vault.whitelist_strategy(&s2, &false);
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list.get(0).unwrap(), s1);
+    assert_eq!(list.get(1).unwrap(), s3);
+
+    // Removing an already-removed strategy is a no-op.
+    vault.whitelist_strategy(&s2, &false);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 2);
+
+    // Re-adding appends at the end.
+    vault.whitelist_strategy(&s2, &true);
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list.get(2).unwrap(), s2);
+
+    // Remove everything -> empty again.
+    vault.whitelist_strategy(&s1, &false);
+    vault.whitelist_strategy(&s2, &false);
+    vault.whitelist_strategy(&s3, &false);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 0);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_excludes_retired() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let keep = Address::generate(&env);
+    let retired = Address::generate(&env);
+
+    vault.whitelist_strategy(&keep, &true);
+    vault.whitelist_strategy(&retired, &true);
+    vault.retire_strategy(&retired);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list.get(0).unwrap(), keep);
+    assert!(!vault.is_strategy_whitelisted(&retired));
+}
+
+#[test]
+fn test_list_whitelisted_strategies_matches_set_strategy_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let pending = Address::generate(&env);
+    let active = Address::generate(&env);
+    let retired = Address::generate(&env);
+    let unknown = Address::generate(&env);
+
+    vault.register_strategy(&pending);
+    vault.register_strategy(&active);
+    vault.activate_strategy_registration(&active);
+    vault.register_strategy(&retired);
+    vault.retire_strategy(&retired);
+
+    let list = vault.list_whitelisted_strategies();
+    for s in [&pending, &active, &retired, &unknown] {
+        assert_eq!(list.contains(s), vault.is_strategy_whitelisted(s));
+    }
+    assert_eq!(list.len(), 2);
+
+    // Anything not listed is rejected by set_strategy: unknown strategies with
+    // StrategyNotWhitelisted, retired ones with InvalidMigrationTarget.
+    assert_eq!(
+        vault.try_set_strategy(&unknown),
+        Err(Ok(VaultError::StrategyNotWhitelisted))
+    );
+    assert_eq!(
+        vault.try_set_strategy(&retired),
+        Err(Ok(VaultError::InvalidMigrationTarget))
+    );
+}
+
+#[test]
+fn test_list_whitelisted_strategies_requires_no_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+    vault.whitelist_strategy(&strategy, &true);
+
+    // Drop all mocked auths: a pure read must still succeed.
+    let env2 = &env;
+    env2.set_auths(&[]);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 1);
+}
+
 #[test]
 fn test_set_strategy_requires_whitelisted_strategy() {
     let env = Env::default();
