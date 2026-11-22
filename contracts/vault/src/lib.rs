@@ -54,6 +54,7 @@
 //!
 //! See `DEPLOYMENT.md` for step-by-step deployment to Stellar testnet/mainnet.
 
+pub mod accrual_batch;
 pub mod admin;
 pub mod audit_events;
 /// Test-only reference strategy implementation. Excluded from production
@@ -1729,7 +1730,17 @@ impl YieldVault {
         }
     }
 
+    /// Reads vault state, first committing any batched accrual (#1735) so that
+    /// every caller sees, and every later write preserves, all accrued yield.
     fn get_state(env: &Env) -> VaultState {
+        if let Some(pending) = accrual_batch::read_pending(env) {
+            // Cannot fail short of i128 overflow, which `accrue_yield` already guards against.
+            let _ = Self::apply_pending_accrual(env, pending);
+        }
+        Self::read_state_raw(env)
+    }
+
+    fn read_state_raw(env: &Env) -> VaultState {
         env.storage()
             .instance()
             .get(&DataKey::State)
@@ -3850,25 +3861,9 @@ impl YieldVault {
         Ok(())
     }
 
-    /// Admin function to artificially accrue yield, deducting the protocol fee.
-    /// The fee portion is credited to the treasury balance.
-    pub fn accrue_yield(env: Env, amount: i128) -> Result<(), VaultError> {
-        let admin: Address = get_admin(&env).expect("Admin not set");
-        admin.require_auth();
-
-        if amount <= 0 {
-            return Err(VaultError::InvalidAmount);
-        }
-
-        let fee_bps = Self::effective_fee_bps(env.clone())?;
-        let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps)?;
-
-        let token_addr = Self::token(env.clone());
-        let token_client = token::Client::new(&env, &token_addr);
-
-        token_client.transfer(&admin, &env.current_contract_address(), &amount);
-
-        // Accumulate fee in treasury balance with bounded accumulator protection
+    /// Credits `fee_amount` to the treasury balance with bounded accumulator
+    /// protection (overflow moves to rollover excess). `who` is the event topic.
+    fn credit_treasury_fee(env: &Env, who: &Address, fee_amount: i128) -> Result<(), VaultError> {
         if fee_amount > 0 {
             let mut treasury_bal: i128 = env
                 .storage()
@@ -3894,7 +3889,7 @@ impl YieldVault {
                     .instance()
                     .set(&DataKey::TreasuryRolloverExcess, &new_rollover);
                 env.events()
-                    .publish((symbol_short!("rolvr"), admin.clone()), excess);
+                    .publish((symbol_short!("rolvr"), who.clone()), excess);
             } else {
                 treasury_bal = treasury_bal
                     .checked_add(fee_amount)
@@ -3905,10 +3900,135 @@ impl YieldVault {
                 .instance()
                 .set(&DataKey::TreasuryBalance, &treasury_bal);
             env.events().publish(
-                (symbol_short!("feeacc"), admin.clone()),
+                (symbol_short!("feeacc"), who.clone()),
                 (fee_amount, treasury_bal),
             );
+    
         }
+        Ok(())
+    }
+
+    /// Commits a batched accrual: folds `net_yield` into vault state and credits
+    /// the accumulated fee to the treasury, then clears the pending slot.
+    fn apply_pending_accrual(
+        env: &Env,
+        pending: accrual_batch::PendingAccrual,
+    ) -> Result<(), VaultError> {
+        accrual_batch::clear_pending(env);
+        Self::credit_treasury_fee(env, &env.current_contract_address(), pending.fee)?;
+
+        let mut state = Self::read_state_raw(env);
+        let price_before = if state.total_shares > 0 {
+            state
+                .total_assets
+                .checked_mul(SHARE_PRICE_SCALE)
+                .ok_or(VaultError::MathOverflow)?
+                .checked_div(state.total_shares)
+                .ok_or(VaultError::MathOverflow)?
+        } else {
+            0
+        };
+        state.total_assets = state
+            .total_assets
+            .checked_add(pending.net_yield)
+            .ok_or(VaultError::MathOverflow)?;
+        if state.total_shares > 0 {
+            let price_after = state
+                .total_assets
+                .checked_mul(SHARE_PRICE_SCALE)
+                .ok_or(VaultError::MathOverflow)?
+                .checked_div(state.total_shares)
+                .ok_or(VaultError::MathOverflow)?;
+            assert!(
+                price_after >= price_before,
+                "share price must not decrease during yield accrual"
+            );
+        }
+        Self::persist_accounting_state(env, &state)
+    }
+
+    /// Configure batched accrual. `min_flush_amount == 0` disables batching.
+    /// Any pending batch is committed first so nothing is stranded by a config change.
+    pub fn set_accrual_batch_config(
+        env: Env,
+        min_flush_amount: i128,
+        max_age_secs: u64,
+    ) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+        if min_flush_amount < 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+        if let Some(pending) = accrual_batch::read_pending(&env) {
+            Self::apply_pending_accrual(&env, pending)?;
+        }
+        accrual_batch::write_config(
+            &env,
+            &accrual_batch::AccrualBatchConfig {
+                min_flush_amount,
+                max_age_secs,
+            },
+        );
+        Ok(())
+    }
+
+    /// Current batched-accrual configuration.
+    pub fn accrual_batch_config(env: Env) -> accrual_batch::AccrualBatchConfig {
+        accrual_batch::read_config(&env)
+    }
+
+    /// Accrual deltas recorded but not yet committed to vault state, if any.
+    pub fn pending_accrual(env: Env) -> Option<accrual_batch::PendingAccrual> {
+        accrual_batch::read_pending(&env)
+    }
+
+    /// Commits any pending batched accrual. Permissionless: it only moves
+    /// already-accrued amounts into vault state and cannot change their value.
+    pub fn flush_pending_accrual(env: Env) -> Result<(), VaultError> {
+        if let Some(pending) = accrual_batch::read_pending(&env) {
+            Self::apply_pending_accrual(&env, pending)?;
+        }
+        Ok(())
+    }
+
+    /// Admin function to artificially accrue yield, deducting the protocol fee.
+    /// The fee portion is credited to the treasury balance.
+    pub fn accrue_yield(env: Env, amount: i128) -> Result<(), VaultError> {
+        let admin: Address = get_admin(&env).expect("Admin not set");
+        admin.require_auth();
+
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        let fee_bps = Self::effective_fee_bps(env.clone())?;
+        let (fee_amount, net_yield) = fee_math::calculate_protocol_fee(amount, fee_bps)?;
+
+        let token_addr = Self::token(env.clone());
+        let token_client = token::Client::new(&env, &token_addr);
+
+        token_client.transfer(&admin, &env.current_contract_address(), &amount);
+
+        // Batched mode (#1735): tokens have moved, but defer the bookkeeping.
+        let batch_cfg = accrual_batch::read_config(&env);
+        if batch_cfg.is_enabled() {
+            let now = env.ledger().timestamp();
+            let pending = accrual_batch::add_to_pending(
+                accrual_batch::read_pending(&env),
+                net_yield,
+                fee_amount,
+                now,
+            )
+            .ok_or(VaultError::MathOverflow)?;
+            if accrual_batch::should_flush(&batch_cfg, &pending, now) {
+                Self::apply_pending_accrual(&env, pending)?;
+            } else {
+                accrual_batch::write_pending(&env, &pending);
+            }
+            return Ok(());
+        }
+
+        Self::credit_treasury_fee(&env, &admin, fee_amount)?;
 
         let mut state = Self::get_state(&env);
         let price_before = if state.total_shares > 0 {
@@ -4443,6 +4563,9 @@ impl YieldVault {
 
     /// Returns the accumulated fee balance in the treasury.
     pub fn treasury_balance(env: Env) -> i128 {
+        if let Some(pending) = accrual_batch::read_pending(&env) {
+            let _ = Self::apply_pending_accrual(&env, pending);
+        }
         env.storage()
             .instance()
             .get(&DataKey::TreasuryBalance)
@@ -4520,6 +4643,9 @@ impl YieldVault {
     pub fn claim_all_fees(env: Env) -> Result<(), VaultError> {
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
+        if let Some(pending) = accrual_batch::read_pending(&env) {
+            let _ = Self::apply_pending_accrual(&env, pending);
+        }
 
         let treasury: Address = env
             .storage()
@@ -4581,6 +4707,9 @@ impl YieldVault {
     /// ### Errors
     /// Panics if no treasury address is configured or the balance is zero.
     pub fn claim_fees(env: Env) -> Result<(), VaultError> {
+        if let Some(pending) = accrual_batch::read_pending(&env) {
+            Self::apply_pending_accrual(&env, pending)?;
+        }
         let admin: Address = get_admin(&env).expect("Admin not set");
         admin.require_auth();
 

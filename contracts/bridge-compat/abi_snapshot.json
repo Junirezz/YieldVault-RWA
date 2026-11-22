@@ -42,6 +42,7 @@
   "vault": {
     "functions": [
       "pub fn accept_admin(env: Env, proposal_id: u32) -> Result<(), VaultError>",
+      "pub fn accrual_batch_config(env: Env) -> accrual_batch::AccrualBatchConfig",
       "pub fn accrue_korean_debt_yield(env: Env) -> Result<i128, VaultError>",
       "pub fn accrue_yield(env: Env, amount: i128) -> Result<(), VaultError>",
       "pub fn activate_strategy_registration(env: Env, strategy: Address) -> Result<(), VaultError>",
@@ -88,6 +89,7 @@
       "pub fn fee_bps(env: Env) -> i128",
       "pub fn fee_curve(env: Env) -> fee_curve::FeeCurve",
       "pub fn finalize_governance_migration(env: Env)",
+      "pub fn flush_pending_accrual(env: Env) -> Result<(), VaultError>",
       "pub fn gasless_deposit( env: Env, relayer: Address, user: Address, amount: i128, ) -> Result<i128, VaultError>",
       "pub fn governance_signers(env: Env) -> Option<Vec<Address>>",
       "pub fn governance_threshold(env: Env) -> u32",
@@ -117,6 +119,7 @@
       "pub fn pause_reason(env: Env) -> Option<PauseReason>",
       "pub fn pauser(env: Env) -> Option<Address>",
       "pub fn pause_with_role( env: Env, caller: Address, reason: PauseReason, ) -> Result<(), VaultError>",
+      "pub fn pending_accrual(env: Env) -> Option<accrual_batch::PendingAccrual>",
       "pub fn pending_admin(env: Env) -> Option<Address>",
       "pub fn pending_fee_bps_change(env: Env) -> Option<timelock::PendingI128Change>",
       "pub fn pending_fee_curve_change(env: Env) -> Option<fee_curve::PendingFeeCurveChange>",
@@ -142,6 +145,7 @@
       "pub fn require_governance_threshold( env: Env, approvals: Vec<Address>, ) -> Result<(), VaultError>",
       "pub fn retire_strategy(env: Env, strategy: Address) -> Result<(), VaultError>",
       "pub fn sensitive_timelock_delay(env: Env) -> u64",
+      "pub fn set_accrual_batch_config( env: Env, min_flush_amount: i128, max_age_secs: u64, ) -> Result<(), VaultError>",
       "pub fn set_admin_param_change_interval(env: Env, seconds: u64) -> Result<(), VaultError>",
       "pub fn set_dao_threshold(env: Env, threshold: i128) -> Result<(), VaultError>",
       "pub fn set_diagnostics_enabled(env: Env, enabled: bool) -> Result<(), VaultError>",
