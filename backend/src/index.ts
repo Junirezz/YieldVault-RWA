@@ -49,6 +49,7 @@ import { startDbBackupScheduler } from './dbBackupJob';
 import { startPositionReconciliationScheduler, startLedgerReconciliationScheduler } from './positionReconciliationJob';
 import { initializeJobGovernance } from './jobGovernance';
 import { setupSwagger } from './swagger';
+import { buildPublicConfig } from './publicConfig';
 import { sorobanCircuitBreaker } from './circuitBreaker';
 import { correlationIdMiddleware, CorrelationIdRequest } from './middleware/correlationId';
 import { structuredLoggingMiddleware, logger, LogLevel } from './middleware/structuredLogging';
@@ -1025,6 +1026,15 @@ app.get('/ready', async (_req: Request, res: Response) => {
  */
 app.get('/maintenance/status', (_req: Request, res: Response) => {
   res.status(200).json(buildMaintenanceStatusPayload());
+});
+
+/**
+ * GET /config
+ * Public, non-secret runtime feature flags + minimal public config (Issue #1722).
+ * Lets the frontend discover enabled features at startup instead of hardcoding them.
+ */
+app.get('/config', (_req: Request, res: Response) => {
+  res.status(200).json(buildPublicConfig());
 });
 
 // Enable Swagger UI documentation

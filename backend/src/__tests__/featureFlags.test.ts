@@ -48,4 +48,38 @@ describe('FeatureFlagService', () => {
     });
     expect(svc.isEnabled('deposit-v2')).toBe(false);
   });
+
+  describe('getPublicFlags', () => {
+    it('returns an empty snapshot when no flags are configured', () => {
+      expect(svc.getPublicFlags()).toEqual({});
+    });
+
+    it('exposes the configured value of allow-listed flags', () => {
+      process.env.FEATURE_FLAGS = JSON.stringify({
+        'deposit-v2': { enabled: true },
+        'strategy-selection': { enabled: false },
+      });
+      expect(svc.getPublicFlags()).toEqual({
+        'deposit-v2': true,
+        'strategy-selection': false,
+      });
+    });
+
+    it('omits non-allow-listed flags so internal flags cannot leak', () => {
+      process.env.FEATURE_FLAGS = JSON.stringify({
+        'deposit-v2': { enabled: true },
+        'internal-experiment': { enabled: true },
+      });
+      expect(svc.getPublicFlags()).toEqual({ 'deposit-v2': true });
+    });
+
+    it('never discloses per-wallet allowlists (reports the anonymous view)', () => {
+      process.env.FEATURE_FLAGS = JSON.stringify({
+        'deposit-v2': { enabled: true, allowlist: ['WALLET_A', 'WALLET_B'] },
+      });
+      const snapshot = svc.getPublicFlags();
+      expect(snapshot).toEqual({ 'deposit-v2': false });
+      expect(JSON.stringify(snapshot)).not.toContain('WALLET_A');
+    });
+  });
 });
