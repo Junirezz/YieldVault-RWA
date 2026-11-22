@@ -56,3 +56,5 @@ Examples include:
 | [ADR-004](ADR-004-soroban-vault-contracts.md) | Multi-Tenant Vault Isolation via Soroban Smart Contracts | 2024-05-05 | Accepted |
 | [ADR-005](ADR-005-soc2-audit-log-traceability.md) | SOC2 Audit Log Traceability with IP and User-Agent Capture | 2026-09-29 | Accepted |
 | [ADR-006](ADR-006-driftless-scheduler-for-critical-jobs.md) | Driftless Scheduler for Critical Hourly Jobs Using setTimeout with Recalculation | 2026-09-29 | Accepted |
+| [ADR-007](ADR-007-monorepo-layout.md) | Monorepo Layout for Contracts, Backend, and Frontend | 2026-11-22 | Accepted |
+| [ADR-008](ADR-008-freighter-wallet-integration.md) | Freighter as the Wallet Integration for Stellar Transactions | 2026-11-22 | Accepted |
