@@ -24,7 +24,7 @@ jobs:
 
       # Generate the full CHANGELOG.md (all releases, written to file)
       - name: Generate full CHANGELOG.md
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: --verbose
@@ -35,7 +35,7 @@ jobs:
       # Generate release-only notes for the GitHub Release body
       - name: Generate release notes for this tag
         id: cliff
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: --latest --strip all
@@ -45,7 +45,7 @@ jobs:
 
       # Open a PR for CHANGELOG.md updates to comply with branch protection
       - name: Create Pull Request for CHANGELOG.md
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(release): update CHANGELOG.md for ${{ github.ref_name }}"
@@ -96,7 +96,7 @@ jobs:
 
       # Create the GitHub Release with the generated notes and SBOMs
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
