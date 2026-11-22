@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
+import ToastTransactionRow, {
+  type ToastNotifier,
+} from "../components/ToastTransactionRow";
 
 export type ToastVariant = "success" | "error" | "warning" | "info";
 
@@ -10,6 +13,12 @@ export interface ToastOptions {
   variant?: ToastVariant;
   /** Unique key for deduplication. If not provided, deduplication uses title+description+variant */
   dedupeKey?: string;
+  /**
+   * Stellar transaction hash to render as a copyable explorer link beneath the
+   * description. Rendered only when the hash parses as a valid 64-character
+   * hash; ignored otherwise.
+   */
+  txHash?: string;
 }
 
 export interface ToastItem extends ToastOptions {
@@ -43,10 +52,34 @@ function generateDedupeKey(options: ToastOptions): string {
   return `${options.title}|${options.description || ""}|${options.variant || "info"}`;
 }
 
-function pushSonner(toast: ToastItem) {
+/**
+ * Builds the `description` payload sonner renders. Without a `txHash` this is
+ * the plain string, exactly as before. With one, the description text and the
+ * copyable hash row are grouped in a single inline element so the markup stays
+ * valid whether sonner nests it in a `<div>` or a `<p>`.
+ */
+function buildDescription(
+  toast: ToastItem,
+  notify: ToastNotifier,
+): React.ReactNode {
+  if (!toast.txHash) {
+    return toast.description;
+  }
+
+  return (
+    <span className="yv-toast-tx-group">
+      {toast.description ? (
+        <span className="yv-toast-tx-description">{toast.description}</span>
+      ) : null}
+      <ToastTransactionRow txHash={toast.txHash} notify={notify} />
+    </span>
+  );
+}
+
+function pushSonner(toast: ToastItem, notify: ToastNotifier) {
   const payload = {
     id: toast.id,
-    description: toast.description,
+    description: buildDescription(toast, notify),
     duration: toast.duration,
     closeButton: true,
   };
@@ -152,7 +185,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
       return queued.slice(-MAX_QUEUE);
     });
     recentToasts.current.set(dedupeKey, id);
-    pushSonner(nextToast);
+    pushSonner(nextToast, {
+      success: (options) => showToast({ ...options, variant: "success" }),
+      error: (options) => showToast({ ...options, variant: "error" }),
+    });
 
     const timeoutId = window.setTimeout(() => {
       dismissToast(id);
