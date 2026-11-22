@@ -228,3 +228,7 @@ Create a new branch for your changes
 Make and test your updates following the project guidelines
 Commit and push your changes to your fork
 Open a Pull Request with a clear description
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
