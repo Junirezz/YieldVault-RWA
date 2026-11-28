@@ -578,6 +578,7 @@ export const en = {
     assetHeader: "Asset",
     dateHeader: "Date",
     hashHeader: "Transaction Hash",
+    viewOnExplorerAria: "View transaction {{hash}} on the Stellar explorer",
     clickToTrack: "Click to track live status",
     noTransactions: {
       title: "No transactions yet",
