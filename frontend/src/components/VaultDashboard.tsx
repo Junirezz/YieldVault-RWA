@@ -357,7 +357,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   useEffect(() => {
     if (!walletAddress) return;
-    if (!amount.trim() && dashboardUrl.state.step === "amount") return;
+    if (!amount.trim()) return;
 
     saveVaultFormDraft({
       tab: dashboardUrl.state.tab,
@@ -561,6 +561,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   });
 
   const resetWizard = () => {
+    // Clear the touched/validation flags before changing the value; otherwise
+    // revalidation immediately re-surfaces "Amount is required" on the fresh form.
+    resetErrors();
     setValues({ amount: "" });
     dashboardUrl.setState({ step: "amount", amount: "" });
     clearVaultFormDraft();
@@ -568,7 +571,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     setRetryCount(0);
     setActiveConflict(null);
     staleGuard.clearReviewSnapshot();
-    clearVaultFormDraft();
     if (walletAddress) {
       transactionIntent.clearIntent();
     }
@@ -719,6 +721,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       setTxTimelineStatus("finalized");
 
       if (actionType === "withdraw") {
+        // Confirmed success: clear the amount and validation/touched state so a
+        // completed withdrawal cannot be submitted twice by accident. Keep the
+        // tab, result view, timeline and pending state untouched.
+        resetErrors();
+        setValues({ amount: "" });
+        clearVaultFormDraft();
+
         dispatchWithdrawalReady({
           transactionHash: submittedTxHash || `tx-${Date.now()}`,
           amount: value.toFixed(2),

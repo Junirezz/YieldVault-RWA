@@ -672,4 +672,43 @@ describe("VaultDashboard", () => {
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       expect(screen.getByText(/Still not going through/i)).toBeInTheDocument();
     }, 15000);
+
+    it("resets the withdrawal form after a confirmed successful submission", async () => {
+      renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 1250.5, "/?tab=withdraw");
+
+      const input = await screen.findByLabelText("Withdrawal amount");
+      fireEvent.change(input, { target: { value: "50" } });
+      fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
+      fireEvent.click(await screen.findByRole("button", { name: /Confirm withdraw/i }));
+
+      await screen.findByRole("heading", { name: "Transaction Successful" }, { timeout: 10000 });
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+      await waitFor(() => {
+        const resetInput = screen.getByLabelText("Withdrawal amount") as HTMLInputElement;
+        expect(resetInput.value).toBe("");
+      });
+      expect(screen.queryByText(/Amount is required/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId("location-search")).toHaveTextContent("tab=withdraw");
+    }, 15000);
+
+    it("keeps the withdrawal amount for correction after a failed submission", async () => {
+      const networkError = new ApiError({
+        code: "NETWORK_ERROR",
+        message: "Network request failed.",
+        userMessage: "We could not reach the server. Check your connection and try again.",
+        retryable: true,
+      });
+      mockWithdrawMutateAsync.mockRejectedValueOnce(networkError);
+
+      renderDashboard("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 1250.5, "/?tab=withdraw");
+
+      const input = await screen.findByLabelText("Withdrawal amount");
+      fireEvent.change(input, { target: { value: "50" } });
+      fireEvent.click(screen.getByRole("button", { name: "Review Transaction" }));
+      fireEvent.click(await screen.findByRole("button", { name: /Confirm withdraw/i }));
+
+      await screen.findByRole("heading", { name: "Transaction Failed" }, { timeout: 5000 });
+      expect(input).toHaveValue(50);
+    }, 15000);
   });
