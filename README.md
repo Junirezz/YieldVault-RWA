@@ -13,7 +13,7 @@ This project is structured as a monorepo containing both the Stellar Soroban sma
 - `/contracts/vault/`: Contains the Rust Soroban smart contract for handling the vault logic, fractional share minting (`yvUSDC`), scaling withdrawals, and simulated yield accrual.
 - `/contracts/mock-strategy/`: Contains test mock contracts for the Korean sovereign debt strategy and price oracle.
 - `/frontend/`: Contains the React + Vite frontend application, integrating `@stellar/freighter-api` for seamless user wallet connections and a premium UI to interact with the protocol.
-- `/docs/`: Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), [Vault Invariants](./docs/VAULT_INVARIANTS.md), [Protocol Risk Limits](./docs/PROTOCOL_RISK_LIMITS.md), [Oracle Failure Handling](./docs/ORACLE_FAILURE_HANDLING.md), [Performance Regression Thresholds](./docs/PERFORMANCE_REGRESSION.md), [Root Scripts Reference](./docs/ROOT_SCRIPTS_REFERENCE.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams, the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations, and the [Dependency Update Policy](./docs/DEPENDENCY_UPDATE_POLICY.md) for upgrade cadence, testing gates, CVE SLAs, and high-risk library requirements.
+- `/docs/`: **Start with the [Documentation Index](./docs/README.md)**, which groups every document by audience (contributors, operators, security, contracts, frontend). Contains the Product Requirements Document (PRD), Architecture Document, [Domain Glossary](./docs/GLOSSARY.md), [Vault Invariants](./docs/VAULT_INVARIANTS.md), [Protocol Risk Limits](./docs/PROTOCOL_RISK_LIMITS.md), [Oracle Failure Handling](./docs/ORACLE_FAILURE_HANDLING.md), [Performance Regression Thresholds](./docs/PERFORMANCE_REGRESSION.md), [Root Scripts Reference](./docs/ROOT_SCRIPTS_REFERENCE.md), and tracked GitHub issues. See also the [Deposit & Withdrawal Lifecycle](./docs/DEPOSIT_WITHDRAWAL_LIFECYCLE.md) for sequence diagrams, the [Deposit & Withdrawal Troubleshooting Guide](./docs/DEPOSIT_WITHDRAWAL_TROUBLESHOOTING.md) for diagnosing failed operations, and the [Dependency Update Policy](./docs/DEPENDENCY_UPDATE_POLICY.md) for upgrade cadence, testing gates, CVE SLAs, and high-risk library requirements.
 
 ## Architecture
 
@@ -223,12 +223,10 @@ npm run validate:nfr-baselines
 ```
 ## 🤝 Contributing
 
-Fork the repository and clone it to your local machine
-Create a new branch for your changes
-Make and test your updates following the project guidelines
-Commit and push your changes to your fork
-Open a Pull Request with a clear description
+Contributions are welcome! Please review our [Contributing Guide](./CONTRIBUTING.md) and [Code of Conduct](./CODE_OF_CONDUCT.md) before submitting a pull request.
 
-## License
-
-This project is licensed under the [MIT License](./LICENSE).
+1. Fork the repository and clone it to your local machine
+2. Create a new branch for your changes (`git checkout -b feat/your-feature`)
+3. Make and test your updates following the project guidelines
+4. Commit and push your changes to your fork
+5. Open a Pull Request with a clear description referencing relevant issues

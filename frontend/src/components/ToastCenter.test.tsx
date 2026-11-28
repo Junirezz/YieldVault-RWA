@@ -64,4 +64,42 @@ describe("ToastCenter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Deposit confirmed" }));
     expect(dismissToast).toHaveBeenCalledWith("toast-1");
   });
+
+  it("renders only the newest toast for a transaction hash without hiding unrelated toasts", () => {
+    const transactionHash = "a".repeat(64);
+    const { dismissToast } = setToasts([
+      {
+        ...sampleToast,
+        id: "toast-1",
+        title: "Transaction submitted",
+        status: "submitted",
+        transactionHash,
+      },
+      {
+        ...sampleToast,
+        id: "toast-2",
+        title: "Unrelated notice",
+        variant: "info",
+      },
+      {
+        ...sampleToast,
+        id: "toast-3",
+        title: "Transaction confirmed",
+        status: "success",
+        transactionHash,
+      },
+    ]);
+
+    render(<ToastCenter />);
+    expect(screen.getByRole("button", { name: "Notifications (2)" })).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /notifications/i }));
+    expect(screen.getByText("Transaction confirmed")).toBeInTheDocument();
+    expect(screen.queryByText("Transaction submitted")).not.toBeInTheDocument();
+    expect(screen.getByText("Unrelated notice")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Transaction confirmed" }));
+    expect(dismissToast).toHaveBeenCalledWith("toast-3");
+  });
 });

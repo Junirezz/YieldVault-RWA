@@ -392,7 +392,12 @@ const Portfolio: React.FC<PortfolioProps> = ({ walletAddress }) => {
             onShareClick={() => setShowShareModal(true)}
           />
 
-          <YieldBreakdownChart totalGain={totalGain} />
+          <YieldBreakdownChart
+            totalGain={totalGain}
+            isLoading={isLoading}
+            isError={Boolean(error)}
+            onRetry={() => setReloadKey((key) => key + 1)}
+          />
 
           {/* Empty state: wallet connected, loading done, no portfolio value.
               A load failure takes precedence — "get started" advice would be

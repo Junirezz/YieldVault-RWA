@@ -4,6 +4,7 @@ import type { ToastItem } from "../context/ToastContext";
 import { useToast } from "../context/ToastContext";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useTranslation } from "../i18n";
+import { dedupeToastsForDisplay } from "../lib/toastDedupe";
 
 function groupToasts(toasts: ToastItem[]): (ToastItem & { count: number })[] {
   const groups = new Map<string, { toast: ToastItem; count: number }>();
@@ -30,7 +31,8 @@ const ToastCenter: React.FC = () => {
     trapTab: false,
     lockScroll: false,
   });
-  const grouped = groupToasts(toasts);
+  const visibleToasts = dedupeToastsForDisplay(toasts);
+  const grouped = groupToasts(visibleToasts);
 
   return (
     <>
@@ -38,7 +40,7 @@ const ToastCenter: React.FC = () => {
         type="button"
         className="toast-center-toggle"
         onClick={() => setIsOpen((o) => !o)}
-        aria-label={t("toastCenter.toggleLabel", { count: toasts.length })}
+        aria-label={t("toastCenter.toggleLabel", { count: visibleToasts.length })}
         style={{
           position: "fixed",
           bottom: "20px",
@@ -58,7 +60,7 @@ const ToastCenter: React.FC = () => {
         }}
       >
         <Bell size={20} />
-        {toasts.length > 0 && (
+        {visibleToasts.length > 0 && (
           <span
             style={{
               position: "absolute",
@@ -76,7 +78,7 @@ const ToastCenter: React.FC = () => {
               justifyContent: "center",
             }}
           >
-            {toasts.length}
+            {visibleToasts.length}
           </span>
         )}
       </button>

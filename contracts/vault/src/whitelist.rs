@@ -2,7 +2,7 @@
 //!
 //! Manages approved strategy contract IDs and their registration lifecycle state.
 
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Vec};
 
 use crate::strategy_registration::{self, STATE_RETIRED};
 use crate::upgrade::get_admin;
@@ -61,6 +61,10 @@ impl SecureWhitelist {
 
     pub fn is_strategy_whitelisted(env: &Env, strategy: &Address) -> bool {
         strategy_registration::is_eligible_for_allocation(env, strategy)
+    }
+
+    pub fn list_whitelisted_strategies(env: &Env) -> Vec<Address> {
+        strategy_registration::list_eligible_strategies(env)
     }
 
     pub fn get_whitelist_status(env: &Env, strategy: &Address) -> bool {

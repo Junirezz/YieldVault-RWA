@@ -13,6 +13,7 @@
 //!   values up to `2^63` will never overflow an `i128`.
 #![no_std]
 
+pub mod extreme_range;
 pub mod fuzz_invariants;
 pub mod rounding;
 
