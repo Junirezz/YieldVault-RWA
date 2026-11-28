@@ -6,3 +6,6 @@ contact_links:
   - name: Technical Discussions & Questions
     url: https://github.com/Junirezz/YieldVault-RWA/discussions
     about: Ask questions or discuss architectural proposals with the community.
+  - name: Writing Good Issues
+    url: https://github.com/Junirezz/YieldVault-RWA/blob/main/CONTRIBUTING.md#writing-good-issues
+    about: How to write issue titles and pick labels so issues are triaged quickly.

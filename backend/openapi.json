@@ -3417,6 +3417,75 @@
           }
         }
       }
+    },
+    "/api/v1/vault/risk-limits": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Get active protocol risk limits",
+        "description": "Read-only. Returns TVL caps, per-strategy concentration limits and stress-mode thresholds, resolved per request from the active configuration.",
+        "responses": {
+          "200": {
+            "description": "Active risk limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskLimitsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/vaults/{id}/allocations": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Change a vault's strategy weights",
+        "description": "Weights must sum to 100%. The change (or the rejected invalid-sum attempt) is written to the audit log with actor, timestamp, vault id and before/after weight maps; query via GET /admin/audit-logs?action=vault.strategy_weights.",
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyWeightsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Weights updated; includes before/after maps"
+          },
+          "400": {
+            "description": "Weights invalid (e.g. do not sum to 100)"
+          },
+          "404": {
+            "description": "Vault not found"
+          },
+          "409": {
+            "description": "Concurrent rebalance conflict"
+          }
+        }
+      }
     }
   }
 }

@@ -6,6 +6,9 @@ labels: 'type: perf, scope: backend, status: needs-triage'
 assignees: 'YieldVault-RWA/backend-maintainers'
 ---
 
+> Title format: `[area] short imperative summary`. See [Writing Good Issues](../../CONTRIBUTING.md#writing-good-issues) for titles and labels.
+
+
 ## ⚡ Summary
 Provide a concise overview of the performance regression, when it was detected, and its impact on backend latency, throughput, or resource consumption.
 

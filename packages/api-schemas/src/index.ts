@@ -59,3 +59,9 @@ export {
   type TransactionDepositCreatedPayload,
   type TransactionWithdrawalCreatedPayload,
 } from "./webhookEvents";
+
+export {
+  RISK_LIMITS_SCHEMA_VERSION,
+  RiskLimitsResponseSchema,
+  type RiskLimitsResponse,
+} from "./riskLimits";
