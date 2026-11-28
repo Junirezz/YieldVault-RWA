@@ -14,6 +14,7 @@
     "jsdom": "^29.1.1",
     "lint-staged": "^17.6.0",
     "license-checker": "^25.0.1",
+    "prettier": "^3.0.0",
     "tsx": "^4.0.0",
     "vitest": "^4.1.5"
   },
@@ -21,6 +22,7 @@
     "check:pnpm-version": "node scripts/check-pnpm-version.js",
     "prepare": "husky",
     "lint:staged": "lint-staged",
+    "format": "pnpm --filter backend format && pnpm --filter frontend format && prettier --write \"docs/**/*.md\"",
     "commitlint": "commitlint",
     "build:schemas": "npm --prefix packages/api-schemas run build",
     "build": "pnpm build:schemas && pnpm --filter backend build && pnpm --filter frontend build",

@@ -56,7 +56,7 @@ jobs:
 
       # Build Rust workspace
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Build Rust workspace
         run: cargo build --release --workspace
