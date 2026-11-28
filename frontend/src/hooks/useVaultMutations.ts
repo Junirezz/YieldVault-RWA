@@ -60,8 +60,8 @@ export function useDepositMutation() {
     onError: (_error, variables, snapshot) => {
       rollbackVaultOptimisticSnapshot(queryClient, variables.walletAddress, snapshot);
     },
-    onSettled: (_data, _error, variables) => {
-      invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
+    onSettled: async (_data, _error, variables) => {
+      await invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
     },
   });
 }
@@ -96,8 +96,8 @@ export function useWithdrawMutation() {
     onError: (_error, variables, snapshot) => {
       rollbackVaultOptimisticSnapshot(queryClient, variables.walletAddress, snapshot);
     },
-    onSettled: (_data, _error, variables) => {
-      invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
+    onSettled: async (_data, _error, variables) => {
+      await invalidateVaultOptimisticQueries(queryClient, variables.walletAddress);
     },
   });
 }

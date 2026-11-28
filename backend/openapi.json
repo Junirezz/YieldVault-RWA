@@ -407,166 +407,6 @@
             }
           }
         }
-      },
-      "RiskLimitsResponse": {
-        "type": "object",
-        "description": "Active protocol risk limits and exposure caps. Mirrors contracts/vault/src/risk_limits.rs; see docs/PROTOCOL_RISK_LIMITS.md. Typed in @yieldvault/api-schemas as RiskLimitsResponseSchema.",
-        "required": [
-          "schemaVersion",
-          "source",
-          "tvlCap",
-          "concentration",
-          "deployedCapital",
-          "stressMode",
-          "generatedAt"
-        ],
-        "properties": {
-          "schemaVersion": {
-            "type": "string",
-            "enum": [
-              "v1"
-            ],
-            "description": "Response schema version"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "environment",
-              "defaults"
-            ]
-          },
-          "tvlCap": {
-            "type": "object",
-            "required": [
-              "maxVaultTvl",
-              "unlimited"
-            ],
-            "properties": {
-              "maxVaultTvl": {
-                "type": "string",
-                "pattern": "^\\d+$",
-                "description": "Base units; 0 = unlimited"
-              },
-              "unlimited": {
-                "type": "boolean"
-              }
-            }
-          },
-          "concentration": {
-            "type": "object",
-            "required": [
-              "maxBps",
-              "effectiveBps",
-              "perStrategy"
-            ],
-            "properties": {
-              "maxBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              },
-              "effectiveBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              },
-              "perStrategy": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "strategyId",
-                    "maxBps"
-                  ],
-                  "properties": {
-                    "strategyId": {
-                      "type": "string"
-                    },
-                    "maxBps": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 10000
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "deployedCapital": {
-            "type": "object",
-            "required": [
-              "maxBps",
-              "effectiveBps"
-            ],
-            "properties": {
-              "maxBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              },
-              "effectiveBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              }
-            }
-          },
-          "stressMode": {
-            "type": "object",
-            "required": [
-              "active",
-              "concentrationBps",
-              "deployedBps"
-            ],
-            "properties": {
-              "active": {
-                "type": "boolean"
-              },
-              "concentrationBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              },
-              "deployedBps": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
-              }
-            }
-          },
-          "generatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "StrategyWeightsRequest": {
-        "type": "object",
-        "required": [
-          "weights"
-        ],
-        "properties": {
-          "weights": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": [
-                "strategyId",
-                "weight"
-              ],
-              "properties": {
-                "strategyId": {
-                  "type": "string"
-                },
-                "weight": {
-                  "type": "number",
-                  "description": "Percentage of vault AUM"
-                }
-              }
-            }
-          }
-        }
       }
     }
   },
@@ -3558,6 +3398,19 @@
           "health"
         ],
         "summary": "GET /health/probes",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "config"
+        ],
+        "summary": "GET /config",
         "responses": {
           "200": {
             "description": "Successful response"

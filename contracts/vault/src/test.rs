@@ -613,6 +613,211 @@ fn test_withdraw_from_zero_balance_returns_error() {
     assert!(result.is_err());
 }
 
+// ─── 3b. withdrawable_assets view function (#1730) ───────────────────────────
+
+#[test]
+fn test_withdrawable_assets_typical_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &200);
+    usdc_sa.mint(&admin, &100);
+
+    vault.deposit(&user, &200);
+    vault.accrue_yield(&100); // 300 assets / 200 shares => 1.5 assets per share
+
+    // Quote 100 shares -> expected 150 assets
+    let quoted = vault.withdrawable_assets(&user, &100);
+    assert_eq!(quoted, 150);
+
+    // Also verify compute_withdrawable_assets alias produces identical quote
+    let quoted_alias = vault.compute_withdrawable_assets(&user, &100);
+    assert_eq!(quoted_alias, 150);
+
+    // Verify real withdrawal produces byte-for-byte identical assets to the quote
+    let received = vault.withdraw(&user, &100);
+    assert_eq!(received, quoted);
+    assert_eq!(received, 150);
+    assert_eq!(usdc.balance(&user), 150);
+    assert_eq!(vault.balance(&user), 100);
+
+    // Remaining 100 shares quote: 100 * 150 / 100 = 150 assets
+    let quoted_remaining = vault.withdrawable_assets(&user, &50);
+    assert_eq!(quoted_remaining, 75);
+    let received_remaining = vault.withdraw(&user, &50);
+    assert_eq!(received_remaining, quoted_remaining);
+}
+
+#[test]
+fn test_withdrawable_assets_is_read_only_and_preserves_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &300);
+    usdc_sa.mint(&admin, &100);
+
+    vault.deposit(&user, &300);
+    vault.accrue_yield(&100);
+
+    let balance_before = vault.balance(&user);
+    let total_shares_before = vault.total_shares();
+    let total_assets_before = vault.total_assets();
+    let user_token_before = usdc.balance(&user);
+    let vault_token_before = usdc.balance(&vault.address);
+
+    // Call view function multiple times
+    let q1 = vault.withdrawable_assets(&user, &100);
+    let q2 = vault.withdrawable_assets(&user, &100);
+    let q3 = vault.compute_withdrawable_assets(&user, &100);
+    assert_eq!(q1, q2);
+    assert_eq!(q2, q3);
+
+    // Assert zero mutations occurred
+    assert_eq!(vault.balance(&user), balance_before);
+    assert_eq!(vault.total_shares(), total_shares_before);
+    assert_eq!(vault.total_assets(), total_assets_before);
+    assert_eq!(usdc.balance(&user), user_token_before);
+    assert_eq!(usdc.balance(&vault.address), vault_token_before);
+}
+
+#[test]
+fn test_withdrawable_assets_rejects_zero_and_negative_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &100);
+    vault.deposit(&user, &100);
+
+    // Zero shares must be rejected with InvalidAmount
+    let res_zero = vault.try_withdrawable_assets(&user, &0);
+    assert_eq!(res_zero, Err(Ok(VaultError::InvalidAmount)));
+
+    let res_zero_alias = vault.try_compute_withdrawable_assets(&user, &0);
+    assert_eq!(res_zero_alias, Err(Ok(VaultError::InvalidAmount)));
+
+    // Negative shares must be rejected with InvalidAmount
+    let res_neg = vault.try_withdrawable_assets(&user, &-1);
+    assert_eq!(res_neg, Err(Ok(VaultError::InvalidAmount)));
+
+    let res_min = vault.try_withdrawable_assets(&user, &i128::MIN);
+    assert_eq!(res_min, Err(Ok(VaultError::InvalidAmount)));
+}
+
+#[test]
+fn test_withdrawable_assets_rejects_above_balance_shares() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, _) = setup_vault(&env);
+    let user = Address::generate(&env);
+    usdc_sa.mint(&user, &100);
+    vault.deposit(&user, &100);
+
+    // Slightly above balance
+    let res_above = vault.try_withdrawable_assets(&user, &101);
+    assert_eq!(res_above, Err(Ok(VaultError::InsufficientShares)));
+
+    let res_above_alias = vault.try_compute_withdrawable_assets(&user, &101);
+    assert_eq!(res_above_alias, Err(Ok(VaultError::InsufficientShares)));
+
+    // Significantly above balance / i128::MAX
+    let res_max = vault.try_withdrawable_assets(&user, &i128::MAX);
+    assert_eq!(res_max, Err(Ok(VaultError::InsufficientShares)));
+
+    // User with zero shares
+    let other_user = Address::generate(&env);
+    let res_zero_user = vault.try_withdrawable_assets(&other_user, &1);
+    assert_eq!(res_zero_user, Err(Ok(VaultError::InsufficientShares)));
+}
+
+#[test]
+fn test_withdrawable_assets_dust_values_and_rounding() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    let whale = Address::generate(&env);
+
+    // User deposits 10 shares, whale deposits 990 shares (total 1000 shares)
+    usdc_sa.mint(&user, &10);
+    usdc_sa.mint(&whale, &990);
+    vault.deposit(&user, &10);
+    vault.deposit(&whale, &990);
+
+    // Accrue yield of 500 (total_assets = 1500, total_shares = 1000)
+    // 1.5 assets per share
+    usdc_sa.mint(&admin, &500);
+    vault.accrue_yield(&500);
+
+    // Dust: quote 1 share -> 1 * 1500 / 1000 = 1 (rounds down from 1.5)
+    let quoted_dust = vault.withdrawable_assets(&user, &1);
+    assert_eq!(quoted_dust, 1);
+    // Real withdrawal must yield exact same round-down result
+    let actual_dust = vault.withdraw(&user, &1);
+    assert_eq!(actual_dust, quoted_dust);
+    assert_eq!(actual_dust, 1);
+
+    // Dust: quote 9 shares -> 9 * 1499 / 999 = 13491 / 999 = 13 (rounds down from 13.5)
+    let quoted_dust_9 = vault.withdrawable_assets(&user, &9);
+    let actual_dust_9 = vault.withdraw(&user, &9);
+    assert_eq!(actual_dust_9, quoted_dust_9);
+    assert_eq!(actual_dust_9, 13);
+
+    // Now test extreme dust rounding to zero:
+    // Create new vault scenario where 1 share value < 1 asset
+    let env2 = Env::default();
+    env2.mock_all_auths();
+    let (vault2, _, usdc_sa2, _) = setup_vault(&env2);
+    let user2 = Address::generate(&env2);
+    let whale2 = Address::generate(&env2);
+
+    usdc_sa2.mint(&user2, &10);
+    usdc_sa2.mint(&whale2, &10_000);
+    vault2.deposit(&user2, &10);
+    vault2.deposit(&whale2, &10_000);
+
+    // Simulate scenario: quote 1 share out of 10010 when total_assets is 10010
+    // 1 * 10010 / 10010 = 1
+    assert_eq!(vault2.withdrawable_assets(&user2, &1), 1);
+}
+
+#[test]
+fn test_withdrawable_assets_maximum_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    let user = Address::generate(&env);
+    let large_deposit: i128 = 10_000_000_000_000; // 10T units
+    usdc_sa.mint(&user, &large_deposit);
+    usdc_sa.mint(&admin, &5_000_000_000_000);
+
+    vault.deposit(&user, &large_deposit);
+    vault.accrue_yield(&5_000_000_000_000);
+
+    // Full balance withdrawal quote (shares == user_shares)
+    let quoted_max = vault.withdrawable_assets(&user, &large_deposit);
+    let expected_max = 15_000_000_000_000;
+    assert_eq!(quoted_max, expected_max);
+
+    // Real withdrawal matches full balance quote
+    let actual_max = vault.withdraw(&user, &large_deposit);
+    assert_eq!(actual_max, quoted_max);
+    assert_eq!(actual_max, expected_max);
+    assert_eq!(vault.balance(&user), 0);
+
+    // Once drained, even 1 share is rejected as InsufficientShares
+    let res_drained = vault.try_withdrawable_assets(&user, &1);
+    assert_eq!(res_drained, Err(Ok(VaultError::InsufficientShares)));
+}
+
 // ─── 4. accrue_yield ─────────────────────────────────────────────────────────
 
 #[test]
@@ -626,6 +831,219 @@ fn test_accrue_yield_increases_total_assets() {
     vault.accrue_yield(&50);
     assert_eq!(vault.total_assets(), 50);
     assert_eq!(vault.total_shares(), 0); // shares unchanged.
+}
+
+// ─── 4b. batched accrual (#1735) ─────────────────────────────────────────────
+
+fn accrue_all(
+    vault: &YieldVaultClient<'_>,
+    usdc_sa: &token::StellarAssetClient<'_>,
+    admin: &Address,
+    amounts: &[i128],
+) {
+    for a in amounts {
+        usdc_sa.mint(admin, a);
+        vault.accrue_yield(a);
+    }
+}
+
+#[test]
+fn test_accrual_batching_disabled_by_default_applies_immediately() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+
+    assert_eq!(vault.accrual_batch_config().min_flush_amount, 0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 20]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 30);
+}
+
+#[test]
+fn test_accrual_batching_defers_small_accruals_until_amount_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, usdc, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&100, &0);
+
+    accrue_all(&vault, &usdc_sa, &admin, &[30, 30, 30]);
+    // Still pending: 90 < 100. Tokens have already moved into the vault.
+    let pending = vault.pending_accrual().expect("pending batch");
+    assert_eq!(pending.net_yield + pending.fee, 90);
+    assert_eq!(usdc.balance(&vault.address), 90);
+
+    // The next accrual crosses the threshold and commits everything in one step.
+    accrue_all(&vault, &usdc_sa, &admin, &[30]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 120);
+}
+
+#[test]
+fn test_accrual_batching_flushes_on_age_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000_000, &60);
+
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.ledger().with_mut(|li| li.timestamp += 59);
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.ledger().with_mut(|li| li.timestamp += 1); // oldest entry is now 60s old
+    accrue_all(&vault, &usdc_sa, &admin, &[5]);
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 15);
+}
+
+#[test]
+fn test_accrual_batching_matches_unbatched_totals_and_share_price() {
+    // Same deposits and accruals, one vault batched and one not: totals, treasury
+    // and what a later depositor receives must be identical (no yield lost), and
+    // the share price must never decrease across accruals.
+    let amounts: [i128; 6] = [7, 13, 1, 250, 3, 40];
+
+    let run = |batched: bool| {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        usdc_sa.mint(&alice, &10_000);
+        usdc_sa.mint(&bob, &10_000);
+        vault.deposit(&alice, &10_000);
+        if batched {
+            vault.set_accrual_batch_config(&100_000, &0);
+        }
+
+        let mut last_price = 0i128;
+        for a in amounts.iter() {
+            accrue_all(&vault, &usdc_sa, &admin, &[*a]);
+            // Reading the price folds any pending batch in, so it already
+            // reflects every accrual so far.
+            let price = vault.total_assets() * 1_000_000 / vault.total_shares();
+            assert!(price >= last_price);
+            last_price = price;
+        }
+        vault.deposit(&bob, &5_000);
+        (
+            vault.total_assets(),
+            vault.total_shares(),
+            vault.treasury_balance(),
+            vault.balance(&bob),
+        )
+    };
+
+    assert_eq!(run(false), run(true));
+}
+
+#[test]
+fn test_accrual_batching_pending_yield_included_in_deposit_pricing() {
+    let make = |batched: bool| {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        usdc_sa.mint(&alice, &1_000);
+        usdc_sa.mint(&bob, &1_000);
+        vault.deposit(&alice, &1_000);
+        if batched {
+            vault.set_accrual_batch_config(&1_000_000, &0);
+        }
+        accrue_all(&vault, &usdc_sa, &admin, &[100, 100, 100]);
+        if batched {
+            // Yield is still pending at this point.
+            assert!(vault.pending_accrual().is_some());
+        }
+        // The deposit must see the pending yield.
+        vault.deposit(&bob, &1_000);
+        (
+            vault.balance(&bob),
+            vault.total_assets(),
+            vault.treasury_balance(),
+        )
+    };
+    assert_eq!(make(false), make(true));
+}
+
+#[test]
+fn test_flush_pending_accrual_is_permissionless_and_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 10]);
+    assert!(vault.pending_accrual().is_some());
+
+    env.set_auths(&[]); // no authorization at all
+    vault.flush_pending_accrual();
+    assert_eq!(vault.pending_accrual(), None);
+    vault.flush_pending_accrual(); // no-op
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 20);
+}
+
+#[test]
+fn test_changing_batch_config_commits_pending_first() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.set_accrual_batch_config(&1_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[10, 10]);
+    assert!(vault.pending_accrual().is_some());
+
+    vault.set_accrual_batch_config(&0, &0); // disable batching
+    assert_eq!(vault.pending_accrual(), None);
+    assert_eq!(vault.total_assets() + vault.treasury_balance(), 20);
+
+    assert_eq!(
+        vault.try_set_accrual_batch_config(&-1, &0),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_treasury_balance_includes_pending_batched_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, usdc_sa, admin) = setup_vault(&env);
+    vault.queue_fee_bps_change(&10_000); // 100% fee
+    vault.execute_fee_bps_change();
+    vault.set_accrual_batch_config(&1_000_000, &0);
+    accrue_all(&vault, &usdc_sa, &admin, &[40, 60]);
+
+    assert_eq!(vault.treasury_balance(), 100);
+}
+
+#[test]
+fn test_batched_accrual_uses_fewer_resources_than_unbatched() {
+    let measure = |batched: bool| -> u64 {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (vault, _, usdc_sa, admin) = setup_vault(&env);
+        let alice = Address::generate(&env);
+        usdc_sa.mint(&alice, &10_000);
+        vault.deposit(&alice, &10_000);
+        // Realistic setup: a non-zero protocol fee, so every unbatched accrual also
+        // pays for a treasury read/write and a fee event.
+        vault.queue_fee_bps_change(&1_000);
+        vault.execute_fee_bps_change();
+        if batched {
+            vault.set_accrual_batch_config(&1_000_000, &0);
+        }
+        usdc_sa.mint(&admin, &10_000);
+        env.cost_estimate().budget().reset_unlimited();
+        for _ in 0..20 {
+            vault.accrue_yield(&100);
+        }
+        env.cost_estimate().budget().cpu_instruction_cost()
+    };
+    let unbatched = measure(false);
+    let batched = measure(true);
+    std::println!("ACCRUAL_BENCH unbatched_cpu={unbatched} batched_cpu={batched}");
+    assert!(batched < unbatched, "batched={batched} unbatched={unbatched}");
 }
 
 #[test]
@@ -2394,6 +2812,158 @@ fn test_whitelist_toggle_multiple_strategies() {
     assert!(vault.is_strategy_whitelisted(&strategy1));
     assert!(!vault.is_strategy_whitelisted(&strategy2));
     assert!(vault.is_strategy_whitelisted(&strategy3));
+}
+
+// ─── list_whitelisted_strategies (#1738) ─────────────────────────────────────
+
+#[test]
+fn test_list_whitelisted_strategies_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+
+    assert_eq!(vault.list_whitelisted_strategies().len(), 0);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_single_entry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+
+    vault.whitelist_strategy(&strategy, &true);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list.get(0).unwrap(), strategy);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_multiple_entries_in_registration_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let s3 = Address::generate(&env);
+
+    vault.whitelist_strategy(&s2, &true);
+    vault.whitelist_strategy(&s3, &true);
+    vault.whitelist_strategy(&s1, &true);
+    // Re-adding is idempotent and must not duplicate or reorder.
+    vault.whitelist_strategy(&s3, &true);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list.get(0).unwrap(), s2);
+    assert_eq!(list.get(1).unwrap(), s3);
+    assert_eq!(list.get(2).unwrap(), s1);
+    // Deterministic: repeated reads return the identical sequence.
+    assert_eq!(vault.list_whitelisted_strategies(), list);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_add_remove_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let s1 = Address::generate(&env);
+    let s2 = Address::generate(&env);
+    let s3 = Address::generate(&env);
+
+    vault.whitelist_strategy(&s1, &true);
+    vault.whitelist_strategy(&s2, &true);
+    vault.whitelist_strategy(&s3, &true);
+
+    // Remove the middle entry; remaining order is preserved.
+    vault.whitelist_strategy(&s2, &false);
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list.get(0).unwrap(), s1);
+    assert_eq!(list.get(1).unwrap(), s3);
+
+    // Removing an already-removed strategy is a no-op.
+    vault.whitelist_strategy(&s2, &false);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 2);
+
+    // Re-adding appends at the end.
+    vault.whitelist_strategy(&s2, &true);
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 3);
+    assert_eq!(list.get(2).unwrap(), s2);
+
+    // Remove everything -> empty again.
+    vault.whitelist_strategy(&s1, &false);
+    vault.whitelist_strategy(&s2, &false);
+    vault.whitelist_strategy(&s3, &false);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 0);
+}
+
+#[test]
+fn test_list_whitelisted_strategies_excludes_retired() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let keep = Address::generate(&env);
+    let retired = Address::generate(&env);
+
+    vault.whitelist_strategy(&keep, &true);
+    vault.whitelist_strategy(&retired, &true);
+    vault.retire_strategy(&retired);
+
+    let list = vault.list_whitelisted_strategies();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list.get(0).unwrap(), keep);
+    assert!(!vault.is_strategy_whitelisted(&retired));
+}
+
+#[test]
+fn test_list_whitelisted_strategies_matches_set_strategy_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let pending = Address::generate(&env);
+    let active = Address::generate(&env);
+    let retired = Address::generate(&env);
+    let unknown = Address::generate(&env);
+
+    vault.register_strategy(&pending);
+    vault.register_strategy(&active);
+    vault.activate_strategy_registration(&active);
+    vault.register_strategy(&retired);
+    vault.retire_strategy(&retired);
+
+    let list = vault.list_whitelisted_strategies();
+    for s in [&pending, &active, &retired, &unknown] {
+        assert_eq!(list.contains(s), vault.is_strategy_whitelisted(s));
+    }
+    assert_eq!(list.len(), 2);
+
+    // Anything not listed is rejected by set_strategy: unknown strategies with
+    // StrategyNotWhitelisted, retired ones with InvalidMigrationTarget.
+    assert_eq!(
+        vault.try_set_strategy(&unknown),
+        Err(Ok(VaultError::StrategyNotWhitelisted))
+    );
+    assert_eq!(
+        vault.try_set_strategy(&retired),
+        Err(Ok(VaultError::InvalidMigrationTarget))
+    );
+}
+
+#[test]
+fn test_list_whitelisted_strategies_requires_no_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (vault, _, _, _admin) = setup_vault(&env);
+    let strategy = Address::generate(&env);
+    vault.whitelist_strategy(&strategy, &true);
+
+    // Drop all mocked auths: a pure read must still succeed.
+    let env2 = &env;
+    env2.set_auths(&[]);
+    assert_eq!(vault.list_whitelisted_strategies().len(), 1);
 }
 
 #[test]

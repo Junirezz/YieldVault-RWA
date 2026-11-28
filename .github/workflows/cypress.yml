@@ -47,7 +47,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Cypress run
-        uses: cypress-io/github-action@v6
+        uses: cypress-io/github-action@f790eee7a50d9505912f50c2095510be7de06aa7 # v6
         with:
           working-directory: frontend
           start: npm run dev

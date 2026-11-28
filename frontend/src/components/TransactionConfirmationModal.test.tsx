@@ -20,6 +20,8 @@ describe('TransactionConfirmationModal', () => {
     isUnusualAmount: false,
     isUnusualFee: false,
     isUnknownContract: false,
+    requiresTimelock: false,
+    timelockDurationHours: null,
   };
 
   const defaultProps = {
@@ -141,6 +143,70 @@ describe('TransactionConfirmationModal', () => {
       render(<TransactionConfirmationModal {...unusualProps} />);
       const feeValue = screen.getByText('0.000100 XLM');
       expect(feeValue.getAttribute('style')).toContain('var(--text-warning)');
+    });
+  });
+
+  describe('Timelock Enforcement', () => {
+    it('shows timelock warning when requiresTimelock is true', () => {
+      const timelockProps = {
+        ...defaultProps,
+        summary: {
+          ...mockSummary,
+          actionType: 'withdraw',
+          requiresTimelock: true,
+          timelockDurationHours: 24,
+        },
+      };
+      render(<TransactionConfirmationModal {...timelockProps} />);
+      expect(screen.getByText('Review Transaction Details')).toBeInTheDocument();
+      expect(screen.getAllByText(/24-hour timelock/i).length).toBeGreaterThan(0);
+      expect(screen.getByText(/will require a second step to complete/i)).toBeInTheDocument();
+    });
+
+    it('displays custom risk summary for timelocked withdrawals', () => {
+      const timelockProps = {
+        ...defaultProps,
+        summary: {
+          ...mockSummary,
+          actionType: 'withdraw',
+          requiresTimelock: true,
+          timelockDurationHours: 24,
+        },
+      };
+      render(<TransactionConfirmationModal {...timelockProps} />);
+      expect(screen.getByText(/Pending Withdrawal Notice/)).toBeInTheDocument();
+      expect(screen.getByText(/will be queued with a 24-hour timelock/i)).toBeInTheDocument();
+      expect(screen.getByText(/return to this dashboard to execute the final transfer/i)).toBeInTheDocument();
+    });
+
+    it('does not show timelock info for small withdrawals', () => {
+      const smallWithdrawProps = {
+        ...defaultProps,
+        summary: {
+          ...mockSummary,
+          actionType: 'withdraw',
+          requiresTimelock: false,
+          timelockDurationHours: null,
+        },
+      };
+      render(<TransactionConfirmationModal {...smallWithdrawProps} />);
+      expect(screen.queryByText(/timelock/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('Pending Withdrawal Notice')).not.toBeInTheDocument();
+      expect(screen.getByText(/This transaction cannot be reversed once signed/)).toBeInTheDocument();
+    });
+
+    it('uses warning style for confirm button when timelock is required', () => {
+      const timelockProps = {
+        ...defaultProps,
+        summary: {
+          ...mockSummary,
+          actionType: 'withdraw',
+          requiresTimelock: true,
+          timelockDurationHours: 24,
+        },
+      };
+      render(<TransactionConfirmationModal {...timelockProps} />);
+      expect(screen.getByRole('button', { name: /Confirm Anyway/ })).toBeInTheDocument();
     });
   });
 

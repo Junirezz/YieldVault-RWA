@@ -1,5 +1,10 @@
 # Pull Request Template
 
+## Code of Conduct
+
+By submitting this pull request, you confirm that you have read and agree to follow
+the [Code of Conduct](../../CODE_OF_CONDUCT.md).
+
 ## 📋 Description
 <!-- Provide a clear, concise summary of the goal and changes in this PR -->
 
@@ -252,7 +257,7 @@ Before marking PR as ready for review:
 - [ ] All tests passing locally: `npm test`
 - [ ] Linter passing: `npm run lint`
 - [ ] Slither passing locally OR findings documented: `slither . --config-file slither.config.json`
-- [ ] Code follows project style guide
+- [ ] Code follows project style guide and adheres to the [Code of Conduct](CODE_OF_CONDUCT.md)
 - [ ] No merge conflicts
 - [ ] Commits are clean and well-documented
 - [ ] Branch is up-to-date with main/develop

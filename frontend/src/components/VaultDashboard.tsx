@@ -357,7 +357,7 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
 
   useEffect(() => {
     if (!walletAddress) return;
-    if (!amount.trim() && dashboardUrl.state.step === "amount") return;
+    if (!amount.trim()) return;
 
     saveVaultFormDraft({
       tab: dashboardUrl.state.tab,
@@ -561,6 +561,9 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
   });
 
   const resetWizard = () => {
+    // Clear the touched/validation flags before changing the value; otherwise
+    // revalidation immediately re-surfaces "Amount is required" on the fresh form.
+    resetErrors();
     setValues({ amount: "" });
     dashboardUrl.setState({ step: "amount", amount: "" });
     clearVaultFormDraft();
@@ -568,7 +571,6 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
     setRetryCount(0);
     setActiveConflict(null);
     staleGuard.clearReviewSnapshot();
-    clearVaultFormDraft();
     if (walletAddress) {
       transactionIntent.clearIntent();
     }
@@ -704,6 +706,10 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       transactionIntent.clearIntent();
       staleGuard.refreshSnapshot();
       setRetryCount(0);
+      
+      // Explicitly trigger a vault refresh to ensure TVL and other metrics are updated
+      // after the transaction is finalized.
+      void refresh();
 
       setTransactionResult({
         success: true,
@@ -715,6 +721,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
       setTxTimelineStatus("finalized");
 
       if (actionType === "withdraw") {
+        // Confirmed success: clear the amount and validation/touched state so a
+        // completed withdrawal cannot be submitted twice by accident. Keep the
+        // tab, result view, timeline and pending state untouched.
+        resetErrors();
+        setValues({ amount: "" });
+        clearVaultFormDraft();
+
         dispatchWithdrawalReady({
           transactionHash: submittedTxHash || `tx-${Date.now()}`,
           amount: value.toFixed(2),
@@ -730,7 +743,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           actionType === "deposit"
             ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
             : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
-      });
+        // Surfaces a copyable, network-correct explorer link for the submitted
+        // transaction. Strategy deposits reach this same handler via
+        // triggerDepositIntent, so all three flows are covered.
+        txHash: submittedTxHash,
+// Repeated poll/event updates for this hash must not stack toasts.
+        transactionHash: submittedTxHash ?? undefined,
+        status: "success",      });
     } catch (err: unknown) {
       if (isTransactionConflict(err)) {
         setActiveConflict({

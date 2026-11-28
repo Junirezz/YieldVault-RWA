@@ -226,12 +226,18 @@ export const en = {
     reconnecting: "Reconnecting…",
     dismissAria: "Dismiss banner",
   },
+  networkSelector: {
+    label: "Selected network",
+    testnet: "Testnet",
+    mainnet: "Mainnet",
+  },
   networkWarning: {
     wrongNetwork: "Wrong network:",
     walletOn: "your wallet is on",
     appRequires: "but this app requires",
     switchInstructions: "Open Freighter → Settings → Network and switch to {{network}} to continue.",
     fixNow: "Show me how to fix this",
+    useWalletNetwork: "Use {{network}} instead",
     guide: {
       title: "Switch your wallet's network",
       description: "Your wallet is on {{wallet}}, but this app needs {{expected}}. Follow these steps in Freighter, then check again.",
@@ -357,6 +363,18 @@ export const en = {
     defaultSuccessDesc: "The {{label}} is ready to paste anywhere.",
     defaultErrorTitle: "Unable to copy {{label}}",
     defaultErrorDesc: "Your browser blocked clipboard access. Please copy it manually.",
+  },
+  txToast: {
+    copy: "Copy",
+    copied: "Copied",
+    copyFailed: "Copy failed",
+    copyAria: "Copy transaction hash",
+    copySuccessTitle: "Transaction hash copied",
+    copySuccessDesc: "The full hash is ready to paste anywhere.",
+    copyErrorTitle: "Unable to copy transaction hash",
+    copyErrorDesc: "Your browser blocked clipboard access. Use the explorer link to open the transaction instead.",
+    viewOnExplorer: "View on explorer",
+    explorerAria: "View transaction {{hash}} on the Stellar explorer",
   },
   hero: {
     tag: "Stellar RWA Yield",
@@ -572,6 +590,7 @@ export const en = {
     assetHeader: "Asset",
     dateHeader: "Date",
     hashHeader: "Transaction Hash",
+    viewOnExplorerAria: "View transaction {{hash}} on the Stellar explorer",
     clickToTrack: "Click to track live status",
     noTransactions: {
       title: "No transactions yet",
@@ -809,6 +828,15 @@ export const en = {
         contractState: "The vault cannot complete this request right now. Review the amount and vault status, then try again.",
         validation: "The request could not be validated. Review the amount and try again.",
         unknown: "The transaction could not be completed. Try again or start over.",
+        // Contract-specific errors
+        insufficientShares: "You don't have enough vault shares for this withdrawal. Lower the amount and try again.",
+        contractPaused: "Vault operations are currently paused by the administrator. Please try again later.",
+        exceedsUserCap: "This deposit would exceed your individual investment limit. Try a smaller amount.",
+        minDepositNotMet: "The amount is below the minimum required for this vault. Please increase your deposit.",
+        timelockActive: "Your withdrawal is currently locked. Please wait for the required 24-hour cooling period.",
+        noPendingWithdrawal: "No pending withdrawal found. Please initiate a withdrawal request first.",
+        slippageExceeded: "Market conditions changed too quickly. Please try again with a slightly different amount.",
+        withdrawalCooldown: "A deposit was recently made. Please wait for the cooldown period to end before withdrawing.",
       },
     },
     depositMessage: "{{amount}} USDC has been deposited into the vault.",
@@ -922,6 +950,11 @@ export const en = {
     quickVaultActionsAria: "Quick vault actions",
     closeQuickActionsAria: "Close quick actions",
     activityLabel: "Activity",
+  },
+  yieldBreakdownChart: {
+    loadingAnnouncement: "Loading yield breakdown data",
+    errorTitle: "Unable to load yield data",
+    errorDesc: "We could not load your yield breakdown. Please try again.",
   },
   vaultPerformanceChart: {
     title: "Vault Performance",
