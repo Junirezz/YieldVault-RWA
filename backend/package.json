@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "YieldVault Stellar RWA Backend API",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "main": "dist/index.js",
   "scripts": {

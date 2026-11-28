@@ -1,5 +1,10 @@
 # Pull Request Template
 
+## Code of Conduct
+
+By submitting this pull request, you confirm that you have read and agree to follow
+the [Code of Conduct](../../CODE_OF_CONDUCT.md).
+
 ## 📋 Description
 <!-- Provide a clear, concise summary of the goal and changes in this PR -->
 

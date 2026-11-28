@@ -4,48 +4,37 @@
 #   docker build -t yieldvault-backend .
 #
 # Stages:
-#   base    - node + pinned pnpm
-#   fetch   - manifests only -> `pnpm fetch` (layer only busts when the lockfile changes)
-#   build   - install offline, generate Prisma client, compile, `pnpm deploy --prod`
-#   runtime - node:20-alpine with only dist + production node_modules
+#   base    - Node.js runtime
+#   build   - install, generate Prisma client, and compile
+#   runtime - Node.js runtime with dist and production dependencies
 
-ARG NODE_VERSION=20
-ARG PNPM_VERSION=9.12.0
+ARG NODE_VERSION=22
 
 # ---------- base ----------
 FROM node:${NODE_VERSION}-alpine AS base
-ARG PNPM_VERSION
-ENV PNPM_HOME=/pnpm
-ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 # Prisma's query engine needs openssl on alpine
 RUN apk add --no-cache openssl
 WORKDIR /app
 
-# ---------- fetch ----------
-FROM base AS fetch
-# Only files that affect dependency resolution, so this layer is cached
-# until the lockfile / manifests change.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY backend/package.json backend/package.json
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm fetch
-
 # ---------- build ----------
-FROM fetch AS build
+FROM base AS build
+COPY packages/api-schemas/package.json packages/api-schemas/package.json
+COPY packages/api-schemas/package-lock.json packages/api-schemas/package-lock.json
+COPY backend/package.json backend/package.json
+COPY backend/package-lock.json backend/package-lock.json
+RUN npm ci --prefix packages/api-schemas \
+ && npm ci --prefix backend
+
+COPY packages/api-schemas packages/api-schemas
 COPY backend backend
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --offline --frozen-lockfile --filter backend...
+RUN npm run build --prefix packages/api-schemas \
+ && npm run prisma:generate --prefix backend \
+ && npm run build --prefix backend
 
-RUN pnpm --filter backend exec prisma generate \
- && pnpm --filter backend run build
-
-# Production-only, self-contained copy of the backend package
-# (requires "dist" to be covered by backend/package.json "files", or no "files" field)
-RUN pnpm --filter backend deploy --prod /out
-# Regenerate the Prisma client inside the deployed tree
-# (requires `prisma` to be in backend "dependencies", not only devDependencies)
-RUN cd /out && ./node_modules/.bin/prisma generate
+RUN mkdir -p /out \
+ && cp -a backend/dist /out/dist \
+ && cp -a backend/node_modules /out/node_modules \
+ && cp -a backend/prisma /out/prisma
 
 # ---------- runtime ----------
 FROM node:${NODE_VERSION}-alpine AS runtime
