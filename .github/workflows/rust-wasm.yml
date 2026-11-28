@@ -82,7 +82,7 @@ jobs:
         run: cargo test -p vault oracle --locked --quiet
 
   vault-fuzz:
-    name: Vault share-price fuzz (60s)
+    name: Vault share-price fuzz (2 x 60s)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -109,6 +109,11 @@ jobs:
         run: |
           cd contracts/vault
           cargo +nightly fuzz run share_price_math -- -max_total_time=60
+
+      - name: Run share_price_extreme_ranges fuzz target
+        run: |
+          cd contracts/vault
+          cargo +nightly fuzz run share_price_extreme_ranges -- -max_total_time=60
 
   wasm-build:
     name: Build WASM artifacts
