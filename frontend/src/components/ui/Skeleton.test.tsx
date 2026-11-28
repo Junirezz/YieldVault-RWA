@@ -42,4 +42,11 @@ describe("Skeleton Component Library", () => {
     expect(chart).toBeInTheDocument();
     expect(chart.style.height).toBe("300px");
   });
+
+  it("uses a custom accessible label for SkeletonChart", () => {
+    render(<SkeletonChart ariaLabel="Loading portfolio chart" />);
+    expect(
+      screen.getByRole("status", { name: /loading portfolio chart/i }),
+    ).toBeInTheDocument();
+  });
 });

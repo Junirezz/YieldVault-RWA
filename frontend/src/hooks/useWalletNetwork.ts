@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { networkConfig } from "../config/network";
+import { getNetworkConfig } from "../config/network";
+import { useSelectedNetwork } from "./useSelectedNetwork";
 
 const POLL_MS = 10_000;
 
@@ -23,10 +24,11 @@ export interface WalletNetworkState {
 
 /**
  * Polls Freighter's getNetworkDetails and compares the wallet's network
- * passphrase against the app's configured networkPassphrase.
+ * passphrase against the passphrase of the user's selected network.
  */
 export function useWalletNetwork(walletAddress: string | null): WalletNetworkState {
-  const expectedNetwork = networkConfig.isTestnet ? "Testnet" : "Mainnet";
+  const { selectedNetwork, expectedNetwork } = useSelectedNetwork();
+  const expectedPassphrase = getNetworkConfig(selectedNetwork).networkPassphrase;
   const [walletNetwork, setWalletNetwork] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const activeRef = useRef(true);
@@ -37,12 +39,21 @@ export function useWalletNetwork(walletAddress: string | null): WalletNetworkSta
       if (typeof getNetworkDetails !== "function") return;
       const details = await getNetworkDetails();
       if (!activeRef.current || !details?.networkPassphrase) return;
-      const isMainnet = details.networkPassphrase.toLowerCase().includes("public");
+      const passphrase: string = details.networkPassphrase;
+      if (passphrase === expectedPassphrase) {
+        setWalletNetwork(expectedNetwork);
+        return;
+      }
+      const isMainnet =
+        passphrase.toLowerCase().includes("public") ||
+        passphrase === "Public Global Stellar Network ; September 2015";
       setWalletNetwork(isMainnet ? "Mainnet" : "Testnet");
     } catch {
       // leave previous value; don't flash a false mismatch on transient errors
     }
-  }, []);
+    // Re-read when the selected network changes so the mismatch state is
+    // recomputed against the new selection without waiting for the next poll.
+  }, [expectedNetwork, expectedPassphrase]);
 
   const checkNow = useCallback(async () => {
     if (!walletAddress) return;

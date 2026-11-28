@@ -6,12 +6,14 @@ export interface SkeletonChartProps {
   height?: string | number;
   className?: string;
   bars?: number;
+  ariaLabel?: string;
 }
 
 export const SkeletonChart: React.FC<SkeletonChartProps> = ({
   height = "280px",
   className = "",
   bars = 7,
+  ariaLabel = "Loading chart data",
 }) => {
   const formattedHeight = typeof height === "number" ? `${height}px` : height;
   const heights = ["40%", "70%", "55%", "85%", "65%", "90%", "75%"];
@@ -23,7 +25,7 @@ export const SkeletonChart: React.FC<SkeletonChartProps> = ({
       role="status"
       aria-busy="true"
       aria-live="polite"
-      aria-label="Loading chart data"
+      aria-label={ariaLabel}
       data-testid="skeleton-chart"
     >
       <div style={{ marginBottom: "1rem" }}>
