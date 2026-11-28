@@ -226,12 +226,18 @@ export const en = {
     reconnecting: "Reconnecting…",
     dismissAria: "Dismiss banner",
   },
+  networkSelector: {
+    label: "Selected network",
+    testnet: "Testnet",
+    mainnet: "Mainnet",
+  },
   networkWarning: {
     wrongNetwork: "Wrong network:",
     walletOn: "your wallet is on",
     appRequires: "but this app requires",
     switchInstructions: "Open Freighter → Settings → Network and switch to {{network}} to continue.",
     fixNow: "Show me how to fix this",
+    useWalletNetwork: "Use {{network}} instead",
     guide: {
       title: "Switch your wallet's network",
       description: "Your wallet is on {{wallet}}, but this app needs {{expected}}. Follow these steps in Freighter, then check again.",
@@ -584,6 +590,7 @@ export const en = {
     assetHeader: "Asset",
     dateHeader: "Date",
     hashHeader: "Transaction Hash",
+    viewOnExplorerAria: "View transaction {{hash}} on the Stellar explorer",
     clickToTrack: "Click to track live status",
     noTransactions: {
       title: "No transactions yet",
@@ -943,6 +950,11 @@ export const en = {
     quickVaultActionsAria: "Quick vault actions",
     closeQuickActionsAria: "Close quick actions",
     activityLabel: "Activity",
+  },
+  yieldBreakdownChart: {
+    loadingAnnouncement: "Loading yield breakdown data",
+    errorTitle: "Unable to load yield data",
+    errorDesc: "We could not load your yield breakdown. Please try again.",
   },
   vaultPerformanceChart: {
     title: "Vault Performance",

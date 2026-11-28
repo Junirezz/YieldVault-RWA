@@ -214,12 +214,18 @@ export const es = {
     reconnecting: "Reconectando…",
     dismissAria: "Descartar banner",
   },
+  networkSelector: {
+    label: "Red seleccionada",
+    testnet: "Testnet",
+    mainnet: "Mainnet",
+  },
   networkWarning: {
     wrongNetwork: "Red incorrecta:",
     walletOn: "tu billetera está en",
     appRequires: "pero esta app requiere",
     switchInstructions: "Abre Freighter → Configuración → Red y cambia a {{network}} para continuar.",
     fixNow: "Muéstrame cómo solucionarlo",
+    useWalletNetwork: "Usar {{network}} en su lugar",
     guide: {
       title: "Cambia la red de tu billetera",
       description: "Tu billetera está en {{wallet}}, pero esta app necesita {{expected}}. Sigue estos pasos en Freighter y luego vuelve a verificar.",
@@ -558,6 +564,7 @@ export const es = {
     assetHeader: "Activo",
     dateHeader: "Fecha",
     hashHeader: "Hash de transacción",
+    viewOnExplorerAria: "Ver la transacción {{hash}} en el explorador de Stellar",
     clickToTrack: "Haz clic para rastrear el estado en vivo",
     noTransactions: {
       title: "Aún no hay transacciones",
@@ -908,6 +915,11 @@ export const es = {
     quickVaultActionsAria: "Acciones rápidas de la bóveda",
     closeQuickActionsAria: "Cerrar acciones rápidas",
     activityLabel: "Actividad",
+  },
+  yieldBreakdownChart: {
+    loadingAnnouncement: "Cargando datos del desglose de rendimiento",
+    errorTitle: "No se pudo cargar el rendimiento",
+    errorDesc: "No pudimos cargar el desglose de rendimiento. Inténtalo de nuevo.",
   },
   vaultPerformanceChart: {
     title: "Rendimiento de la bóveda",

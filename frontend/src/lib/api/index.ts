@@ -41,6 +41,8 @@ export {
   PortfolioQuerySchema,
   WalletAddressSchema,
   TransactionQuerySchema,
+  PUBLIC_FEATURE_FLAG_KEYS,
+  PublicConfigSchema,
   type DepositRequest,
   type WithdrawalRequest,
   type VaultHistoryQuery,
@@ -48,4 +50,6 @@ export {
   type WalletAddressParam,
   type TransactionQuery,
   type TransactionQueryInput,
+  type PublicFeatureFlagKey,
+  type PublicConfig,
 } from "./schemas";

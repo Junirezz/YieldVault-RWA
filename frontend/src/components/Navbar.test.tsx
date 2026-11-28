@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -5,6 +6,7 @@ import { PreferencesProvider } from '../context/PreferencesContext';
 import Navbar from './Navbar';
 import { ThemeProvider } from '../context/ThemeContext';
 import { ToastProvider } from '../context/ToastContext';
+import { WithdrawalNotificationProvider } from '../context/WithdrawalNotificationContext';
 import { MemoryRouter } from 'react-router-dom';
 
 describe('Navbar', () => {
@@ -14,6 +16,24 @@ describe('Navbar', () => {
         defaultOptions: { queries: { retry: false } },
     });
 
+    function renderNavbar(ui: ReactElement) {
+        return render(
+            <MemoryRouter>
+                <QueryClientProvider client={queryClient}>
+                    <PreferencesProvider>
+                        <ToastProvider>
+                            <ThemeProvider>
+                                <WithdrawalNotificationProvider>
+                                    {ui}
+                                </WithdrawalNotificationProvider>
+                            </ThemeProvider>
+                        </ToastProvider>
+                    </PreferencesProvider>
+                </QueryClientProvider>
+            </MemoryRouter>
+        );
+    }
+
     beforeEach(() => {
         localStorage.setItem(
             'yieldvault-preferences:guest',
@@ -22,22 +42,12 @@ describe('Navbar', () => {
     });
 
     it('renders the navbar with navigation links', () => {
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={null}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={null}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+            />,
         );
 
         expect(screen.getByText(/YieldVault/)).toBeInTheDocument();
@@ -48,22 +58,12 @@ describe('Navbar', () => {
     });
 
     it('renders the wallet connect button', () => {
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={null}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={null}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+            />,
         );
 
         expect(screen.getByText(/Connect Freighter/i)).toBeInTheDocument();
@@ -72,22 +72,12 @@ describe('Navbar', () => {
     it('shows the truncated wallet address when connected', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
         // Default preference masks identifiers while keeping edge characters.
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={fullAddress}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={fullAddress}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+            />,
         );
 
         // Default preferences mask sensitive values (GABC...9012).
@@ -96,44 +86,24 @@ describe('Navbar', () => {
 
     it('shows a network badge when wallet is connected', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={fullAddress}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={fullAddress}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+            />,
         );
 
         expect(screen.getAllByText(/testnet|mainnet/i)[0]).toBeInTheDocument();
     });
 
     it('does not show the Admin link by default (guest role)', () => {
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={null}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={null}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+            />,
         );
 
         expect(screen.queryByText('Admin')).not.toBeInTheDocument();
@@ -141,23 +111,13 @@ describe('Navbar', () => {
 
     it('shows the Admin link when role is admin', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={fullAddress}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                                role="admin"
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={fullAddress}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+                role="admin"
+            />,
         );
 
         expect(screen.getAllByText('Admin')[0]).toBeInTheDocument();
@@ -165,23 +125,13 @@ describe('Navbar', () => {
 
     it('does not show the Admin link for a connected investor wallet', () => {
         const fullAddress = 'GABC1234567890123456789012345678901234567890123456789012';
-        render(
-            <MemoryRouter>
-                <QueryClientProvider client={queryClient}>
-                    <PreferencesProvider>
-                        <ToastProvider>
-                        <ThemeProvider>
-                            <Navbar
-                                walletAddress={fullAddress}
-                                onConnect={mockOnConnect}
-                                onDisconnect={mockOnDisconnect}
-                                role="investor"
-                            />
-                        </ThemeProvider>
-                    </ToastProvider>
-                </PreferencesProvider>
-            </QueryClientProvider>
-            </MemoryRouter>
+        renderNavbar(
+            <Navbar
+                walletAddress={fullAddress}
+                onConnect={mockOnConnect}
+                onDisconnect={mockOnDisconnect}
+                role="investor"
+            />,
         );
 
         expect(screen.queryByText('Admin')).not.toBeInTheDocument();
