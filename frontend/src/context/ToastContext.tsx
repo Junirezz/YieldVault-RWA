@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
 import { getToastDedupeKey } from "../lib/toastDedupe";
+import ToastTransactionRow, {
+  type ToastNotifier,
+} from "../components/ToastTransactionRow";
 
 export type ToastVariant = "success" | "error" | "warning" | "info";
 
@@ -11,6 +14,12 @@ export interface ToastOptions {
   variant?: ToastVariant;
   /** Unique key for deduplication. If not provided, deduplication uses title+description+variant */
   dedupeKey?: string;
+  /**
+   * Stellar transaction hash to render as a copyable explorer link beneath the
+   * description. Rendered only when the hash parses as a valid 64-character
+   * hash; ignored otherwise.
+   */
+  txHash?: string;
   /**
    * Transaction hash for notifications produced by polling or event updates.
    * All updates for one hash share a single toast.
@@ -44,10 +53,32 @@ const DEFAULT_DURATION = 5000;
 const DEDUPE_WINDOW_MS = 3000;
 const MAX_QUEUE = 5;
 
-function pushSonner(toast: ToastItem) {
+/**
+ * Builds the description sonner renders. Without `txHash` this is the plain
+ * string; with one, the text and the copyable hash row are grouped in a single
+ * inline element so the markup is valid inside either a <div> or a <p>.
+ */
+function buildDescription(
+  toast: ToastItem,
+  notify: ToastNotifier,
+): React.ReactNode {
+  if (!toast.txHash) {
+    return toast.description;
+  }
+  return (
+    <span className="yv-toast-tx-group">
+      {toast.description ? (
+        <span className="yv-toast-tx-description">{toast.description}</span>
+      ) : null}
+      <ToastTransactionRow txHash={toast.txHash} notify={notify} />
+    </span>
+  );
+}
+
+function pushSonner(toast: ToastItem, notify: ToastNotifier) {
   const payload = {
     id: toast.id,
-    description: toast.description,
+    description: buildDescription(toast, notify),
     duration: toast.duration,
     closeButton: true,
   };
@@ -114,6 +145,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     duration = DEFAULT_DURATION,
     ...options
   }: ToastOptions) => {
+    const notify: ToastNotifier = {
+      success: (next) => showToast({ ...next, variant: "success" }),
+      error: (next) => showToast({ ...next, variant: "error" }),
+    };
     const dedupeKey = getToastDedupeKey({ ...options, variant });
     const now = Date.now();
 
@@ -148,7 +183,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
           setToasts((currentToasts) =>
             currentToasts.map((item) => (item.id === existingId ? updated : item)),
           );
-          pushSonner(updated);
+          pushSonner(updated, notify);
         }
       }
       return existingId;
@@ -183,7 +218,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     recentToasts.current.set(dedupeKey, id);
     activeToasts.current.set(id, nextToast);
-    pushSonner(nextToast);
+    pushSonner(nextToast, notify);
 
     const timeoutId = window.setTimeout(() => {
       dismissToast(id);

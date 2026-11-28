@@ -743,10 +743,13 @@ const VaultDashboard: React.FC<VaultDashboardProps> = ({
           actionType === "deposit"
             ? t("vaultDashboard.depositMessage").replace("{{amount}}", value.toFixed(2))
             : t("vaultDashboard.withdrawMessage").replace("{{amount}}", value.toFixed(2)),
-        // Repeated poll/event updates for this hash must not stack toasts.
+        // Surfaces a copyable, network-correct explorer link for the submitted
+        // transaction. Strategy deposits reach this same handler via
+        // triggerDepositIntent, so all three flows are covered.
+        txHash: submittedTxHash,
+// Repeated poll/event updates for this hash must not stack toasts.
         transactionHash: submittedTxHash ?? undefined,
-        status: "success",
-      });
+        status: "success",      });
     } catch (err: unknown) {
       if (isTransactionConflict(err)) {
         setActiveConflict({

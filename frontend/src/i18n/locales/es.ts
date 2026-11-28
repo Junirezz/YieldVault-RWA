@@ -338,6 +338,18 @@ export const es = {
     defaultErrorTitle: "No se pudo copiar {{label}}",
     defaultErrorDesc: "Tu navegador bloqueó el acceso al portapapeles. Por favor, cópialo manualmente.",
   },
+  txToast: {
+    copy: "Copiar",
+    copied: "Copiado",
+    copyFailed: "Error al copiar",
+    copyAria: "Copiar el hash de la transacción",
+    copySuccessTitle: "Hash de la transacción copiado",
+    copySuccessDesc: "El hash completo está listo para pegarlo en cualquier lugar.",
+    copyErrorTitle: "No se pudo copiar el hash de la transacción",
+    copyErrorDesc: "Tu navegador bloqueó el acceso al portapapeles. Usa el enlace del explorador para abrir la transacción.",
+    viewOnExplorer: "Ver en el explorador",
+    explorerAria: "Ver la transacción {{hash}} en el explorador de Stellar",
+  },
   hero: {
     tag: "Rendimiento RWA en Stellar",
     heading: "Rendimientos institucionales,",

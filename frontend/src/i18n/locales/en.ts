@@ -364,6 +364,18 @@ export const en = {
     defaultErrorTitle: "Unable to copy {{label}}",
     defaultErrorDesc: "Your browser blocked clipboard access. Please copy it manually.",
   },
+  txToast: {
+    copy: "Copy",
+    copied: "Copied",
+    copyFailed: "Copy failed",
+    copyAria: "Copy transaction hash",
+    copySuccessTitle: "Transaction hash copied",
+    copySuccessDesc: "The full hash is ready to paste anywhere.",
+    copyErrorTitle: "Unable to copy transaction hash",
+    copyErrorDesc: "Your browser blocked clipboard access. Use the explorer link to open the transaction instead.",
+    viewOnExplorer: "View on explorer",
+    explorerAria: "View transaction {{hash}} on the Stellar explorer",
+  },
   hero: {
     tag: "Stellar RWA Yield",
     heading: "Institutional Yields,",
