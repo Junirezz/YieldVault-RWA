@@ -151,21 +151,41 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       id: "hash",
       header: t("txHistory.hashHeader"),
       sortable: false,
-      cell: (row) => (
-        <a
-          href={getStellarExplorerUrl(
-            row.transactionHash,
-            networkConfig.isTestnet ? "testnet" : "mainnet",
-          )}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
-          title={row.transactionHash}
-        >
-          {truncateHash(row.transactionHash)}
-        </a>
-      ),
+      cell: (row) => {
+        const explorerUrl = getStellarExplorerUrl(
+          row.transactionHash,
+          networkConfig.isTestnet ? "testnet" : "mainnet",
+        );
+        const truncated = truncateHash(row.transactionHash);
+
+        // Without a valid hash there is nothing to open, so render plain text
+        // instead of a link whose href is the dead "#".
+        if (explorerUrl === "#") {
+          return (
+            <span data-tx-hash={row.transactionHash} title={row.transactionHash}>
+              {truncated}
+            </span>
+          );
+        }
+
+        return (
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            style={{ color: "var(--accent-cyan)", textDecoration: "none" }}
+            title={row.transactionHash}
+            aria-label={t("txHistory.viewOnExplorerAria").replace(
+              "{{hash}}",
+              row.transactionHash,
+            )}
+            data-tx-hash={row.transactionHash}
+          >
+            {truncated}
+          </a>
+        );
+      },
     },
   ], [t]);
 

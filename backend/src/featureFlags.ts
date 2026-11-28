@@ -21,6 +21,7 @@
 
 import fs from 'fs';
 import type { Request, Response, NextFunction } from 'express';
+import { PUBLIC_FEATURE_FLAG_KEYS, type PublicFeatureFlagKey } from '@yieldvault/api-schemas';
 
 interface FlagDefinition {
   enabled: boolean;
@@ -29,6 +30,22 @@ interface FlagDefinition {
 }
 
 type FlagMap = Record<string, FlagDefinition>;
+
+/**
+ * Evaluates a flag definition for an optional wallet address.
+ * Shared by `isEnabled` and `getPublicFlags` so the anonymous view they expose
+ * cannot diverge.
+ */
+function evaluate(def: FlagDefinition | undefined, walletAddress?: string): boolean {
+  if (!def || !def.enabled) return false;
+
+  if (def.allowlist && def.allowlist.length > 0) {
+    if (!walletAddress) return false;
+    return def.allowlist.includes(walletAddress);
+  }
+
+  return true;
+}
 
 function loadFlags(): FlagMap {
   const filePath = process.env.FEATURE_FLAGS_PATH;
@@ -63,16 +80,30 @@ export class FeatureFlagService {
    * @param walletAddress - Optional wallet address for per-wallet targeting
    */
   isEnabled(flag: string, walletAddress?: string): boolean {
-    const flags = loadFlags();
-    const def = flags[flag];
-    if (!def || !def.enabled) return false;
+    return evaluate(loadFlags()[flag], walletAddress);
+  }
 
-    if (def.allowlist && def.allowlist.length > 0) {
-      if (!walletAddress) return false;
-      return def.allowlist.includes(walletAddress);
+  /**
+   * Returns the public, non-secret snapshot of allow-listed feature flags
+   * (Issue #1722).
+   *
+   * Only names in `PUBLIC_FEATURE_FLAG_KEYS` are eligible, and a key is
+   * included only when the flag is actually configured — so consumers can tell
+   * "not configured" (key absent) apart from "explicitly disabled" (`false`).
+   * Values reflect the anonymous (no-wallet) evaluation; per-wallet allowlists
+   * are never disclosed.
+   */
+  getPublicFlags(): Partial<Record<PublicFeatureFlagKey, boolean>> {
+    const flags = loadFlags();
+    const snapshot: Partial<Record<PublicFeatureFlagKey, boolean>> = {};
+
+    for (const key of PUBLIC_FEATURE_FLAG_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(flags, key)) {
+        snapshot[key] = evaluate(flags[key]);
+      }
     }
 
-    return true;
+    return snapshot;
   }
 
   /**

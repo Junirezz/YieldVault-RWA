@@ -305,6 +305,74 @@ export const rebalanceTotal = new Counter({
   registers: [register],
 });
 
+// --- Event Poller Metrics (Issue #1726) ---
+
+/**
+ * Fixed label value identifying the Soroban event poller. The only label is a
+ * constant, so series count stays flat regardless of how many vaults or
+ * contracts the poller is watching: never add a vault/contract id here.
+ */
+export const EVENT_POLLER_LABEL = 'event';
+
+export const eventPollerLagLedgers = new Gauge({
+  name: 'event_poller_lag_ledgers',
+  help: 'Ledgers between the latest ledger observed on the Soroban RPC and the last ledger the event poller has processed',
+  labelNames: ['poller'],
+  registers: [register],
+});
+
+export const eventPollerLastProcessedLedger = new Gauge({
+  name: 'event_poller_last_processed_ledger',
+  help: 'Sequence number of the last ledger the event poller has processed (persisted cursor)',
+  labelNames: ['poller'],
+  registers: [register],
+});
+
+export const eventPollerLastSuccessfulPollTimestamp = new Gauge({
+  name: 'event_poller_last_successful_poll_timestamp_seconds',
+  help: 'Unix timestamp of the last successful event poll',
+  labelNames: ['poller'],
+  registers: [register],
+});
+
+/**
+ * Lag in ledgers: latest observed ledger minus last processed ledger, floored
+ * at 0 (the cursor can briefly be ahead of a lagging RPC node).
+ */
+export function computeEventPollerLag(latestLedger: number, processedLedger: number): number {
+  return Math.max(0, latestLedger - processedLedger);
+}
+
+/**
+ * Publishes whatever is known about poller progress. Pass `null` for a value
+ * that has not been observed yet; its gauge is then left untouched (absent
+ * after a restart) instead of reporting a misleading 0.
+ */
+export function recordEventPollerLedgers(
+  latestLedger: number | null,
+  processedLedger: number | null,
+): void {
+  const labels = { poller: EVENT_POLLER_LABEL };
+  if (processedLedger !== null) {
+    eventPollerLastProcessedLedger.set(labels, processedLedger);
+  }
+  if (latestLedger !== null && processedLedger !== null) {
+    eventPollerLagLedgers.set(labels, computeEventPollerLag(latestLedger, processedLedger));
+  }
+}
+
+export function recordEventPollerSuccess(nowMs: number = Date.now()): void {
+  eventPollerLastSuccessfulPollTimestamp.set({ poller: EVENT_POLLER_LABEL }, nowMs / 1000);
+}
+
+/** Drops the poller's series so a stopped poller does not export stale values. */
+export function resetEventPollerMetrics(): void {
+  const labels = { poller: EVENT_POLLER_LABEL };
+  eventPollerLagLedgers.remove(labels);
+  eventPollerLastProcessedLedger.remove(labels);
+  eventPollerLastSuccessfulPollTimestamp.remove(labels);
+}
+
 // --- Reconciliation Drift Metrics ---
 
 export const reconciliationDriftTotal = new Counter({

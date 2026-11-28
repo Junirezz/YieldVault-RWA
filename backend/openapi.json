@@ -3404,6 +3404,19 @@
           }
         }
       }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "config"
+        ],
+        "summary": "GET /config",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
     }
   }
 }

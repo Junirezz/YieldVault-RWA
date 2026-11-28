@@ -10,12 +10,7 @@ node_modules/
 /backend/prisma/*.db-journal
 
 # Environment Variables - NEVER COMMIT THESE
-.env
-.env.local
 .env.*.local
-.env.development
-.env.staging
-.env.production
 *.env
 !.env.example
 
@@ -23,7 +18,6 @@ node_modules/
 .idea
 # Ignore personal editor state, but track the shared recommendations/settings
 # so every contributor and Codespace gets the same setup.
-.vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 *.swp
@@ -52,3 +46,4 @@ secrets/
 # Local SQLite dev database (generated)
 *.db
 *.db-journal
+config.bat

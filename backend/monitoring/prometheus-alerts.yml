@@ -111,6 +111,39 @@ groups:
           description: "Outbox events are older than 60 seconds or more than 100 events are awaiting relay."
           runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#webhooks-and-event-outbox"
 
+      - alert: YieldVaultEventPollerLagHigh
+        expr: event_poller_lag_ledgers{poller="event"} > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault event poller is behind the chain"
+          description: "The event poller is {{ $value }} ledgers behind the latest observed ledger (about 5 seconds per ledger) and has been for 10 minutes."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#event-poller"
+
+      - alert: YieldVaultEventPollerLagCritical
+        expr: event_poller_lag_ledgers{poller="event"} > 1000
+        for: 15m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault event poller is severely behind the chain"
+          description: "The event poller is {{ $value }} ledgers behind (over ~80 minutes of chain time) and has been for 15 minutes."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#event-poller"
+
+      - alert: YieldVaultEventPollerStalled
+        expr: time() - event_poller_last_successful_poll_timestamp_seconds{poller="event"} > 300
+        for: 5m
+        labels:
+          severity: critical
+          service: yieldvault-backend
+        annotations:
+          summary: "YieldVault event poller has not completed a successful poll"
+          description: "No successful event poll for over 5 minutes, so lag and last-processed-ledger values may be frozen."
+          runbook_url: "https://github.com/Junirezz/YieldVault-RWA/blob/main/backend/docs/PROMETHEUS_ALERTS_RUNBOOK.md#event-poller"
+
       - alert: YieldVaultEmailQueueLagHigh
         expr: email_queue_oldest_pending_age_seconds > 300 or email_queue_pending_count > 100
         for: 5m

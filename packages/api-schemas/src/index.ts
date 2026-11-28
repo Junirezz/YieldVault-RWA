@@ -30,6 +30,13 @@ export {
 } from "./responses";
 
 export {
+  PUBLIC_FEATURE_FLAG_KEYS,
+  PublicConfigSchema,
+  type PublicFeatureFlagKey,
+  type PublicConfig,
+} from "./publicConfig";
+
+export {
   VaultDepositBodySchema,
   VaultWithdrawalBodySchema,
   SignedVaultDepositBodySchema,

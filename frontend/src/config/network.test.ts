@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
+  localStorage.clear();
 });
 
 describe("networkConfig", () => {
@@ -67,5 +72,31 @@ describe("networkConfig", () => {
     expect(getHorizonUrlForRpcUrl("https://rpc.example.test")).toBe(
       horizonBaseUrls.testnet,
     );
+  });
+
+  it("reflects the persisted selection across RPC, Horizon and explorer URLs", async () => {
+    const { networkConfig, horizonBaseUrls, stellarExplorerBaseUrls } =
+      await import("./network");
+    const { setSelectedNetwork } = await import("./selectedNetwork");
+
+    setSelectedNetwork("testnet");
+    expect(networkConfig.isTestnet).toBe(true);
+    expect(networkConfig.rpcUrl).toBe("https://soroban-testnet.stellar.org");
+    expect(networkConfig.horizonUrl).toBe(horizonBaseUrls.testnet);
+    expect(networkConfig.explorerUrl).toBe(stellarExplorerBaseUrls.testnet);
+
+    setSelectedNetwork("mainnet");
+    expect(networkConfig.isTestnet).toBe(false);
+    expect(networkConfig.rpcUrl).toBe("https://soroban-mainnet.stellar.org");
+    expect(networkConfig.horizonUrl).toBe(horizonBaseUrls.mainnet);
+    expect(networkConfig.explorerUrl).toBe(stellarExplorerBaseUrls.mainnet);
+    expect(networkConfig.networkPassphrase).toBe(
+      "Public Global Stellar Network ; September 2015",
+    );
+
+    // A persisted choice overrides the build default on a fresh module read.
+    vi.resetModules();
+    const { networkConfig: reloaded } = await import("./network");
+    expect(reloaded.rpcUrl).toBe("https://soroban-mainnet.stellar.org");
   });
 });
