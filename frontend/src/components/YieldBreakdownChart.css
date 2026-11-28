@@ -1,0 +1,13 @@
+/* Keep the loading placeholder inside the same fixed-height plot area as the
+   rendered chart so switching states does not shift the surrounding layout. */
+.yield-chart-skeleton {
+  padding: 0;
+}
+
+.yield-chart-skeleton > div:first-child {
+  display: none;
+}
+
+.yield-chart-skeleton .skeleton-chart-bars {
+  height: 100%;
+}

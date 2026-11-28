@@ -132,7 +132,19 @@ vi.mock("../hooks/useVaultHealth", () => ({
 }));
 
 vi.mock("../components/YieldBreakdownChart", () => ({
-  default: () => <div data-testid="yield-chart" />,
+  default: ({
+    isLoading,
+    isError,
+  }: {
+    isLoading?: boolean;
+    isError?: boolean;
+  }) => (
+    <div
+      data-testid="yield-chart"
+      data-loading={String(Boolean(isLoading))}
+      data-error={String(Boolean(isError))}
+    />
+  ),
 }));
 
 vi.mock("../components/AccountStatementExport", () => ({
@@ -407,6 +419,7 @@ describe("Portfolio — empty state", () => {
     expect(
       await screen.findByText(/positions unavailable/i),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("yield-chart")).toHaveAttribute("data-error", "true");
     const retry = screen.getByRole("button", { name: /try again/i });
     // Failure guidance must not read as "you have no positions yet".
     expect(screen.queryByRole("region", { name: /getting started guide/i })).not.toBeInTheDocument();

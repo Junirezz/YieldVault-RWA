@@ -19,9 +19,11 @@ import { ChartModeToggle } from "./ChartModeToggle";
 import ChartDataTable from "./ChartDataTable";
 import ChartKeyboardPoints from "./ChartKeyboardPoints";
 import { usePreferencesContext } from "../context/PreferencesContext";
+import { useTranslation } from "../i18n";
 import { formatCurrency, formatDate } from "../lib/formatters";
 import { formatChartCurrency, createChartCurrencyTickFormatter } from "../lib/chartFormatters";
 import { sampleChartSeries } from "../lib/chartSeries";
+import "./YieldBreakdownChart.css";
 
 const MAX_RENDER_POINTS = 120;
 
@@ -41,6 +43,8 @@ interface YieldBreakdownChartProps {
   /** Total unrealized gain used to generate mock daily yield data. */
   totalGain: number;
   isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 type YieldPeriod = "7D" | "30D" | "ALL";
@@ -129,8 +133,11 @@ function computePointCoords(
 const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({
   totalGain,
   isLoading,
+  isError,
+  onRetry,
 }) => {
   const { preferences, chartModes, setChartMode } = usePreferencesContext();
+  const { t } = useTranslation();
   const [period, setPeriod] = useState<YieldPeriod>("30D");
   const chartMode = chartModes.yieldBreakdown;
   const locale = preferences.locale;
@@ -201,6 +208,7 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({
       className="glass-panel"
       style={{ padding: "24px", background: "var(--bg-muted)" }}
       aria-labelledby="yield-chart-heading"
+      aria-busy={isLoading}
     >
       {/* Header row */}
       <div
@@ -282,9 +290,25 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({
       </div>
 
       {/* Chart */}
-      <div style={{ height: `${CHART_HEIGHT}px`, position: "relative" }}>
+      <div
+        data-testid="yield-chart-area"
+        style={{ height: `${CHART_HEIGHT}px`, position: "relative" }}
+      >
         {isLoading ? (
-          <SkeletonChart height={CHART_HEIGHT} />
+          <SkeletonChart
+            height={CHART_HEIGHT}
+            className="yield-chart-skeleton"
+            ariaLabel={t("yieldBreakdownChart.loadingAnnouncement")}
+          />
+        ) : isError ? (
+          <ChartWidgetPlaceholder
+            variant="error"
+            title={t("yieldBreakdownChart.errorTitle")}
+            description={t("yieldBreakdownChart.errorDesc")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetry}
+            height={CHART_HEIGHT}
+          />
         ) : isEmpty ? (
           <ChartWidgetPlaceholder
             variant="empty"
@@ -477,7 +501,7 @@ const YieldBreakdownChart: React.FC<YieldBreakdownChartProps> = ({
       </div>
 
       {/* Non-visual data table alternative */}
-      {!isEmpty && !isLoading && (
+      {!isEmpty && !isLoading && !isError && (
         <ChartDataTable
           caption="Daily yield earnings data"
           columns={["Date", `Yield (${currency})`]}
