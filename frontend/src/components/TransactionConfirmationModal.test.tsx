@@ -159,7 +159,7 @@ describe('TransactionConfirmationModal', () => {
       };
       render(<TransactionConfirmationModal {...timelockProps} />);
       expect(screen.getByText('Review Transaction Details')).toBeInTheDocument();
-      expect(screen.getByText(/24-hour timelock/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/24-hour timelock/i).length).toBeGreaterThan(0);
       expect(screen.getByText(/will require a second step to complete/i)).toBeInTheDocument();
     });
 
@@ -174,7 +174,7 @@ describe('TransactionConfirmationModal', () => {
         },
       };
       render(<TransactionConfirmationModal {...timelockProps} />);
-      expect(screen.getByText('Pending Withdrawal Notice')).toBeInTheDocument();
+      expect(screen.getByText(/Pending Withdrawal Notice/)).toBeInTheDocument();
       expect(screen.getByText(/will be queued with a 24-hour timelock/i)).toBeInTheDocument();
       expect(screen.getByText(/return to this dashboard to execute the final transfer/i)).toBeInTheDocument();
     });

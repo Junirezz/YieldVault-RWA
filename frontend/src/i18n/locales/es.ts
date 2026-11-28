@@ -214,12 +214,18 @@ export const es = {
     reconnecting: "Reconectando…",
     dismissAria: "Descartar banner",
   },
+  networkSelector: {
+    label: "Red seleccionada",
+    testnet: "Testnet",
+    mainnet: "Mainnet",
+  },
   networkWarning: {
     wrongNetwork: "Red incorrecta:",
     walletOn: "tu billetera está en",
     appRequires: "pero esta app requiere",
     switchInstructions: "Abre Freighter → Configuración → Red y cambia a {{network}} para continuar.",
     fixNow: "Muéstrame cómo solucionarlo",
+    useWalletNetwork: "Usar {{network}} en su lugar",
     guide: {
       title: "Cambia la red de tu billetera",
       description: "Tu billetera está en {{wallet}}, pero esta app necesita {{expected}}. Sigue estos pasos en Freighter y luego vuelve a verificar.",

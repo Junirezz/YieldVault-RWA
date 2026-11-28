@@ -7,6 +7,7 @@ import ThemeToggle from "./ThemeToggle";
 import LanguageSwitcher from "./LanguageSwitcher";
 import TvlTicker from "./TvlTicker";
 import HealthStatusIndicator from "./HealthStatusIndicator";
+import NetworkSelector from "./NetworkSelector";
 import { Layers } from "./icons";
 import { useTranslation } from "../i18n";
 import { useWalletNetwork } from "../hooks/useWalletNetwork";
@@ -183,6 +184,7 @@ const Navbar: FC<NavbarProps> = ({
           <HealthStatusIndicator />
 
           <div className="flex items-center gap-sm nav-desktop-links">
+            <NetworkSelector />
             {walletAddress && (
               <span
                 aria-label="Network badge"
@@ -285,6 +287,7 @@ const Navbar: FC<NavbarProps> = ({
 
         <div className="flex items-center justify-between" style={{ marginTop: "24px" }}>
           <NotificationBell />
+          <NetworkSelector />
           <ThemeToggle />
           <LanguageSwitcher compact />
           {walletAddress && <span>{networkLabel}</span>}

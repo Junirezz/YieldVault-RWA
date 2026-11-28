@@ -226,12 +226,18 @@ export const en = {
     reconnecting: "Reconnecting…",
     dismissAria: "Dismiss banner",
   },
+  networkSelector: {
+    label: "Selected network",
+    testnet: "Testnet",
+    mainnet: "Mainnet",
+  },
   networkWarning: {
     wrongNetwork: "Wrong network:",
     walletOn: "your wallet is on",
     appRequires: "but this app requires",
     switchInstructions: "Open Freighter → Settings → Network and switch to {{network}} to continue.",
     fixNow: "Show me how to fix this",
+    useWalletNetwork: "Use {{network}} instead",
     guide: {
       title: "Switch your wallet's network",
       description: "Your wallet is on {{wallet}}, but this app needs {{expected}}. Follow these steps in Freighter, then check again.",
